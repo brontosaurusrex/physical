@@ -4,47 +4,44 @@ package main
 
 import (
 	"math"
-	"math/rand"
 	"strconv"
 	"syscall/js"
-	"time"
 )
 
 const (
 	canvasWidth    = 1800.0
 	canvasHeight   = 900.0
-	gravity        = 300.0
-	restitution    = 0.85
-	frictionCoeff  = 0.1
-	paddleWidth    = 220.0
+	gravity        = 200.0
+	restitution    = 0.92
+	frictionCoeff  = 0.5
+	paddleWidth    = 120.0
 	paddleHeight   = 30.0
-	ballRadius     = 8.0
-	brickRows      = 10
-	brickCols      = 18
+	ballRadius     = 10.0
+	brickRows      = 7
+	brickCols      = 15
 	brickWidth     = 60.0
 	brickHeight    = 20.0
-	brickPadding   = 20.0
-	brickOffsetTop = 100.0
+	brickPadding   = 35.0
+	brickOffsetTop = 80.0
 
-	paddleBoost = 1000.0
-	brickBoost  = 100.0
+	paddleBoost = 300.0
+	brickBoost  = 30.0
 	maxSpeed    = 900.0
 
 	paddleRadius = 12.0
 	brickRadius  = 6.0
 
-	unbreakableChance = 0.15 // 5% chance
+	maxTrail = 0 // number of trail positions
 )
 
 // ---- Color palette ----
 var palette = []string{
-	"#1d3557", // background (0)
-	"#f1faee", // paddle (1)
-	"#a8dadc", // normal bricks (2)
-	"#e63946", // ball (3)
-	"#f1faee", // text (4)
-	"#e63946", // spin marker (5)
-	"#f4a261", // unbreakable bricks (6)
+	"#2b2d42", // background (0)
+	"#8d99ae", // paddle (1)
+	"#edf2f4", // bricks (2)
+	"#ef233c", // ball (3)
+	"#d9aa29", // text (4)
+	"#ef233c", // spin marker line (5)
 }
 
 // ---- Global state ----
@@ -84,6 +81,8 @@ var (
 	gameOver bool
 	win      bool
 
+	trail []pos // trail positions
+
 	lastTime float64
 
 	loopFunc   js.Func
@@ -93,10 +92,13 @@ var (
 	mouseLeave js.Func
 )
 
+type pos struct {
+	x, y float64
+}
+
 type brick struct {
-	x, y, w, h  float64
-	alive       bool
-	unbreakable bool // new field
+	x, y, w, h float64
+	alive      bool
 }
 
 // ---- Helpers ----
@@ -150,23 +152,11 @@ func initBricks() {
 	totalWidth := float64(brickCols)*(brickWidth+brickPadding) - brickPadding
 	offsetLeft := (canvasWidth - totalWidth) / 2.0
 
-	// Seed random for unbreakable bricks
-	rand.Seed(time.Now().UnixNano())
-
 	for row := 0; row < brickRows; row++ {
 		for col := 0; col < brickCols; col++ {
 			x := offsetLeft + float64(col)*(brickWidth+brickPadding)
 			y := brickOffsetTop + float64(row)*(brickHeight+brickPadding)
-			// Randomly mark as unbreakable
-			unbreakable := rand.Float64() < unbreakableChance
-			bricks = append(bricks, brick{
-				x:           x,
-				y:           y,
-				w:           brickWidth,
-				h:           brickHeight,
-				alive:       true,
-				unbreakable: unbreakable,
-			})
+			bricks = append(bricks, brick{x: x, y: y, w: brickWidth, h: brickHeight, alive: true})
 		}
 	}
 }
@@ -182,6 +172,7 @@ func resetGame() {
 	lives = 12
 	gameOver = false
 	win = false
+	trail = nil // clear trail
 	initBricks()
 	log("Game reset")
 }
@@ -214,12 +205,14 @@ func update(dt float64) {
 		if lives <= 0 {
 			gameOver = true
 			win = false
+			trail = nil
 		} else {
 			ball.x, ball.y = 1000, 600
 			ball.vx, ball.vy = 180, -350
 			ball.omega, ball.angle = 0, 0
 			paddle.x = (canvasWidth - paddleWidth) / 2
 			paddle.vx = 0
+			trail = nil // clear trail on respawn
 		}
 		return
 	}
@@ -275,7 +268,6 @@ func update(dt float64) {
 		}
 		if ball.x+ball.r > b.x && ball.x-ball.r < b.x+b.w &&
 			ball.y+ball.r > b.y && ball.y-ball.r < b.y+b.h {
-			// Compute overlap and normal (same as before)
 			overlapX := 0.0
 			overlapY := 0.0
 			if ball.x < b.x+b.w/2 {
@@ -304,7 +296,6 @@ func update(dt float64) {
 				}
 				nx = 0
 			}
-			// Push ball out
 			if nx != 0 {
 				if nx == -1 {
 					ball.x = b.x - ball.r
@@ -319,15 +310,7 @@ func update(dt float64) {
 					ball.y = b.y + b.h + ball.r
 				}
 			}
-			// Resolve collision (always)
 			resolveCollision(nx, ny, 0, 0)
-
-			// If unbreakable, just bounce, don't destroy or score
-			if b.unbreakable {
-				continue // skip destruction and score
-			}
-
-			// Normal brick: destroy, score, boost
 			if brickBoost != 0 {
 				ball.vy -= brickBoost
 				if math.Abs(ball.vy) > maxSpeed {
@@ -342,10 +325,10 @@ func update(dt float64) {
 		}
 	}
 
-	// ---- Check for win (all normal bricks destroyed) ----
+	// ---- Check for win ----
 	allDead := true
 	for _, b := range bricks {
-		if b.alive && !b.unbreakable { // only normal bricks matter for win
+		if b.alive {
 			allDead = false
 			break
 		}
@@ -353,6 +336,15 @@ func update(dt float64) {
 	if allDead {
 		gameOver = true
 		win = true
+		trail = nil // clear trail on win
+	}
+
+	// ---- Update trail (after physics, before draw) ----
+	if !gameOver {
+		trail = append(trail, pos{ball.x, ball.y})
+		if len(trail) > maxTrail {
+			trail = trail[1:]
+		}
 	}
 }
 
@@ -367,36 +359,32 @@ func draw() {
 		if !b.alive {
 			continue
 		}
-		// Choose colour based on unbreakable status
-		var fillColor string
-		if b.unbreakable {
-			fillColor = palette[6] // unbreakable color
-		} else {
-			fillColor = palette[2] // normal brick color
-		}
-		ctx.Set("fillStyle", fillColor)
+		ctx.Set("fillStyle", palette[2])
 		ctx.Call("beginPath")
 		ctx.Call("roundRect", b.x, b.y, b.w, b.h, brickRadius)
 		ctx.Call("fill")
-
-		// Stroke
-		if b.unbreakable {
-			ctx.Set("strokeStyle", "#e76f51") // dark orange border
-			ctx.Set("lineWidth", 2)
-			ctx.Set("setLineDash", []interface{}{4, 4}) // dashed border
-		} else {
-			ctx.Set("strokeStyle", "#27ae60")
-			ctx.Set("lineWidth", 1)
-			ctx.Set("setLineDash", []interface{}{}) // solid
-		}
+		ctx.Set("strokeStyle", "#27ae60")
+		ctx.Set("lineWidth", 1)
 		ctx.Call("beginPath")
 		ctx.Call("roundRect", b.x, b.y, b.w, b.h, brickRadius)
 		ctx.Call("stroke")
-		// Reset dash
-		ctx.Set("setLineDash", []interface{}{})
 	}
 
-	// Ball
+	// ---- Draw trail ----
+	if len(trail) > 1 {
+		for i, p := range trail {
+			// Alpha from 0.1 to 0.6
+			alpha := 0.1 + 0.01*float64(i)/float64(len(trail))
+			ctx.Set("globalAlpha", alpha)
+			ctx.Set("fillStyle", palette[3])
+			ctx.Call("beginPath")
+			ctx.Call("arc", p.x, p.y, ball.r*0.2, 0, 2*math.Pi)
+			ctx.Call("fill")
+		}
+		ctx.Set("globalAlpha", 1.0)
+	}
+
+	// ---- Ball ----
 	ctx.Call("save")
 	ctx.Call("translate", ball.x, ball.y)
 	ctx.Call("rotate", ball.angle)
@@ -436,7 +424,8 @@ func draw() {
 		if win {
 			msg = "YOU WIN!"
 		}
-		width := float64(len(msg)) * 30
+		// Center the text
+		width := float64(len(msg)) * 30 // rough estimate
 		ctx.Call("fillText", msg, (canvasWidth-width)/2, canvasHeight/2)
 	}
 }
