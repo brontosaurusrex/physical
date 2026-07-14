@@ -11,10 +11,10 @@ import (
 const (
 	canvasWidth    = 1800.0
 	canvasHeight   = 900.0
-	gravity        = 200.0
+	gravity        = 100.0
 	restitution    = 0.92
 	frictionCoeff  = 0.5
-	paddleWidth    = 120.0
+	paddleWidth    = 220.0
 	paddleHeight   = 30.0
 	ballRadius     = 10.0
 	brickRows      = 7
@@ -22,7 +22,7 @@ const (
 	brickWidth     = 60.0
 	brickHeight    = 20.0
 	brickPadding   = 35.0
-	brickOffsetTop = 80.0
+	brickOffsetTop = 150.0
 
 	paddleBoost = 300.0
 	brickBoost  = 30.0
@@ -31,7 +31,7 @@ const (
 	paddleRadius = 12.0
 	brickRadius  = 6.0
 
-	maxTrail = 0 // number of trail positions
+	maxTrail = 30 // number of trail positions
 )
 
 // ---- Color palette ----
@@ -374,11 +374,11 @@ func draw() {
 	if len(trail) > 1 {
 		for i, p := range trail {
 			// Alpha from 0.1 to 0.6
-			alpha := 0.1 + 0.01*float64(i)/float64(len(trail))
+			alpha := 0.1 + 0.5*float64(i)/float64(len(trail))
 			ctx.Set("globalAlpha", alpha)
 			ctx.Set("fillStyle", palette[3])
 			ctx.Call("beginPath")
-			ctx.Call("arc", p.x, p.y, ball.r*0.2, 0, 2*math.Pi)
+			ctx.Call("arc", p.x, p.y, ball.r*0.7, 0, 2*math.Pi)
 			ctx.Call("fill")
 		}
 		ctx.Set("globalAlpha", 1.0)

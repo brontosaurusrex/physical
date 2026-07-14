@@ -11,18 +11,18 @@ import (
 const (
 	canvasWidth    = 1800.0
 	canvasHeight   = 900.0
-	gravity        = 200.0
+	gravity        = 300.0
 	restitution    = 0.92
-	frictionCoeff  = 0.5
-	paddleWidth    = 120.0
+	frictionCoeff  = 0.3
+	paddleWidth    = 220.0
 	paddleHeight   = 30.0
-	ballRadius     = 10.0
-	brickRows      = 7
-	brickCols      = 15
+	ballRadius     = 20.0
+	brickRows      = 6
+	brickCols      = 20
 	brickWidth     = 60.0
 	brickHeight    = 20.0
-	brickPadding   = 35.0
-	brickOffsetTop = 80.0
+	brickPadding   = 15.0
+	brickOffsetTop = 150.0
 
 	paddleBoost = 300.0
 	brickBoost  = 30.0
@@ -30,18 +30,16 @@ const (
 
 	paddleRadius = 12.0
 	brickRadius  = 6.0
-
-	maxTrail = 0 // number of trail positions
 )
 
 // ---- Color palette ----
 var palette = []string{
-	"#2b2d42", // background (0)
-	"#8d99ae", // paddle (1)
-	"#edf2f4", // bricks (2)
-	"#ef233c", // ball (3)
-	"#d9aa29", // text (4)
-	"#ef233c", // spin marker line (5)
+	"#1d3557", // background (0)
+	"#f1faee", // paddle (1)
+	"#a8dadc", // bricks (2)
+	"#e63946", // ball (3)
+	"#f1faee", // text (4)
+	"#e63946", // spin marker line (5)
 }
 
 // ---- Global state ----
@@ -79,9 +77,7 @@ var (
 	score    int
 	lives    int
 	gameOver bool
-	win      bool
-
-	trail []pos // trail positions
+	win      bool // true if all bricks cleared
 
 	lastTime float64
 
@@ -91,10 +87,6 @@ var (
 	mouseMove  js.Func
 	mouseLeave js.Func
 )
-
-type pos struct {
-	x, y float64
-}
 
 type brick struct {
 	x, y, w, h float64
@@ -172,7 +164,6 @@ func resetGame() {
 	lives = 12
 	gameOver = false
 	win = false
-	trail = nil // clear trail
 	initBricks()
 	log("Game reset")
 }
@@ -205,14 +196,12 @@ func update(dt float64) {
 		if lives <= 0 {
 			gameOver = true
 			win = false
-			trail = nil
 		} else {
 			ball.x, ball.y = 1000, 600
 			ball.vx, ball.vy = 180, -350
 			ball.omega, ball.angle = 0, 0
 			paddle.x = (canvasWidth - paddleWidth) / 2
 			paddle.vx = 0
-			trail = nil // clear trail on respawn
 		}
 		return
 	}
@@ -336,15 +325,6 @@ func update(dt float64) {
 	if allDead {
 		gameOver = true
 		win = true
-		trail = nil // clear trail on win
-	}
-
-	// ---- Update trail (after physics, before draw) ----
-	if !gameOver {
-		trail = append(trail, pos{ball.x, ball.y})
-		if len(trail) > maxTrail {
-			trail = trail[1:]
-		}
 	}
 }
 
@@ -370,21 +350,7 @@ func draw() {
 		ctx.Call("stroke")
 	}
 
-	// ---- Draw trail ----
-	if len(trail) > 1 {
-		for i, p := range trail {
-			// Alpha from 0.1 to 0.6
-			alpha := 0.1 + 0.01*float64(i)/float64(len(trail))
-			ctx.Set("globalAlpha", alpha)
-			ctx.Set("fillStyle", palette[3])
-			ctx.Call("beginPath")
-			ctx.Call("arc", p.x, p.y, ball.r*0.2, 0, 2*math.Pi)
-			ctx.Call("fill")
-		}
-		ctx.Set("globalAlpha", 1.0)
-	}
-
-	// ---- Ball ----
+	// Ball
 	ctx.Call("save")
 	ctx.Call("translate", ball.x, ball.y)
 	ctx.Call("rotate", ball.angle)
