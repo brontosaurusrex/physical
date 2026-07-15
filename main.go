@@ -779,7 +779,8 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 func loadLevels() {
 	levelIndex := 1
 	for {
-		url := "levels/level" + strconv.Itoa(levelIndex) + ".txt"
+		url := "levels/level" + strconv.Itoa(levelIndex) + ".txt?nocache=" +
+			strconv.Itoa(rand.Int())
 		xhr := js.Global().Get("XMLHttpRequest").New()
 		xhr.Call("open", "GET", url, false)
 		xhr.Call("send")
@@ -792,6 +793,11 @@ func loadLevels() {
 			break
 		}
 		text := xhr.Get("responseText").String()
+
+		// debug
+		log("Loaded " + url + ":")
+		log(text)
+
 		lines := strings.Split(text, "\n")
 		var configLines []string
 		var layoutLines []string
@@ -823,6 +829,11 @@ func loadLevels() {
 		}
 		levels = append(levels, levelData{layout: layoutLines, config: configMap})
 		levelIndex++
+
+		// debug
+		for key, value := range configMap {
+			log("Config: " + key + "=" + value)
+		}
 	}
 	if len(levels) == 0 {
 		log("No level files found; using default layout")
@@ -851,6 +862,16 @@ func startLevel(index int) {
 	// Apply level-specific config
 	applyConfig(levels[index].config)
 
+	// debug
+	log(fmt.Sprintf(
+		"Ball start: x=%.1f y=%.1f vx=%.1f vy=%.1f radius=%.1f",
+		startBallX,
+		startBallY,
+		startBallVx,
+		startBallVy,
+		ballRadius,
+	))
+
 	ball.x, ball.y = startBallX, startBallY
 	ball.vx, ball.vy = startBallVx, startBallVy
 	ball.omega, ball.angle = 0, 0
@@ -871,6 +892,7 @@ func startLevel(index int) {
 	buildBricksFromLevel(levels[index])
 	currentLevelIndex = index
 	log("Level " + strconv.Itoa(index+1) + " started")
+
 }
 
 // ---- Jump to a specific level (cheat) ----
