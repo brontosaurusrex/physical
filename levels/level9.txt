@@ -1,0 +1,25 @@
+gravity=180
+brickWidth=52
+brickHeight=26
+brickPadding=14
+brickOffsetTop=70
+ballX=900
+ballY=720
+ballVx=-260
+ballVy=-380
+ballRadius=10
+powerUpDuration=12
+---
+           UU           
+         U####U         
+       U###MM###U       
+     U###M####M###U     
+   U###M########M###U   
+ U###M############M###U 
+U###M######MM######M###U
+ U###M############M###U 
+   U###M########M###U   
+     U###M####M###U     
+       U###MM###U       
+         U####U         
+           UU           

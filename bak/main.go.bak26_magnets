@@ -37,8 +37,8 @@ const (
 	defaultPowerUpDuration   = 10.0
 	defaultBlackHoleStrength = 800.0
 	defaultBlackHoleRange    = 200.0
-	defaultMagnetStrength    = 600.0
-	defaultMagnetRange       = 300.0
+	defaultMagnetStrength    = 1600.0
+	defaultMagnetRange       = 600.0
 	defaultLives             = 7
 
 	defaultStartBallX  = 1000.0
@@ -189,8 +189,7 @@ var (
 	blackHoleDirection float64
 	blackHoleSpeed     float64
 
-	magnetCheat       bool
-	levelMagnetActive bool
+	magnetCheat bool
 
 	powerUpText      string
 	powerUpTextTimer float64
@@ -414,10 +413,6 @@ func applyConfig(config map[string]string) {
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				powerUpDuration = f
-			}
-		case "magnet":
-			if b, err := strconv.ParseBool(val); err == nil {
-				levelMagnetActive = b
 			}
 		case "magnetStrength":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
@@ -891,61 +886,6 @@ func loadLevels() {
 	}
 }
 
-// ---- Remember current level in browser storage ----
-const savedLevelKey = "breakout.currentLevel"
-
-func saveCurrentLevel() {
-	defer func() {
-		if r := recover(); r != nil {
-			js.Global().Get("console").Call("warn", "Could not save current level:", fmt.Sprint(r))
-		}
-	}()
-
-	storage := js.Global().Get("localStorage")
-	if storage.IsUndefined() || storage.IsNull() {
-		return
-	}
-	storage.Call("setItem", savedLevelKey, strconv.Itoa(currentLevelIndex))
-}
-
-func loadSavedLevel() int {
-	if len(levels) == 0 {
-		return 0
-	}
-
-	savedIndex := 0
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				js.Global().Get("console").Call("warn", "Could not load saved level:", fmt.Sprint(r))
-			}
-		}()
-
-		storage := js.Global().Get("localStorage")
-		if storage.IsUndefined() || storage.IsNull() {
-			return
-		}
-
-		value := storage.Call("getItem", savedLevelKey)
-		if value.IsUndefined() || value.IsNull() {
-			return
-		}
-
-		index, err := strconv.Atoi(value.String())
-		if err == nil {
-			savedIndex = index
-		}
-	}()
-
-	if savedIndex < 0 {
-		return 0
-	}
-	if savedIndex >= len(levels) {
-		return len(levels) - 1
-	}
-	return savedIndex
-}
-
 // ---- Start a level ----
 func startLevel(index int) {
 	if index >= len(levels) {
@@ -956,11 +896,9 @@ func startLevel(index int) {
 	paused = false
 	leftPressed = false
 	rightPressed = false
-	// Reset all globals and level-only state before applying config.
+	// Reset all globals to defaults
 	resetGlobals()
-	levelMagnetActive = false
-
-	// Apply level-specific config. A level can use magnet=true.
+	// Apply level-specific config
 	applyConfig(levels[index].config)
 
 	ball.x, ball.y = startBallX, startBallY
@@ -983,14 +921,9 @@ func startLevel(index int) {
 	currentGravity = baseGravity
 	powerUpText = ""
 	powerUpTextTimer = 0
-	if levelMagnetActive {
-		powerUpText = "Magnets!"
-		powerUpTextTimer = powerUpDuration
-	}
 
 	buildBricksFromLevel(levels[index])
 	currentLevelIndex = index
-	saveCurrentLevel()
 	log("Level " + strconv.Itoa(index+1) + " started")
 }
 
@@ -1016,7 +949,7 @@ func resetGame() {
 	paused = false
 	leftPressed = false
 	rightPressed = false
-	startLevel(loadSavedLevel())
+	startLevel(0)
 }
 
 // ---- Retry the level after losing all lives ----
@@ -1033,7 +966,7 @@ func retryCurrentLevel() {
 
 // ---- Magnetic breakable bricks ----
 func applyBrickMagnetism(b *Ball, dt float64) {
-	if activePowerUp != POWER_MAGNET && !magnetCheat && !levelMagnetActive {
+	if activePowerUp != POWER_MAGNET && !magnetCheat {
 		return
 	}
 
