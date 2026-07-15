@@ -36,10 +36,6 @@ const (
 	defaultMagicChance       = 0.05
 	defaultPowerUpDuration   = 10.0
 	defaultBlackHoleStrength = 800.0
-	defaultBlackHoleRange    = 200.0
-	defaultMagnetStrength    = 1600.0
-	defaultMagnetRange       = 600.0
-	defaultLives             = 7
 
 	defaultStartBallX  = 1000.0
 	defaultStartBallY  = 600.0
@@ -52,10 +48,8 @@ const (
 	defaultEnableReverseGravity = true
 	defaultEnableDualBalls      = true
 	defaultEnableBlackHole      = true
-	defaultEnableMagnet         = true
 
-	enableSounds  = false
-	showBlackHole = false // Set true to draw the moving black hole.
+	enableSounds = false
 )
 
 // ---- These are variables, reset each level ----
@@ -87,9 +81,6 @@ var (
 	powerUpDuration   = defaultPowerUpDuration
 
 	blackHoleStrength = defaultBlackHoleStrength
-	blackHoleRange    = defaultBlackHoleRange
-	magnetStrength    = defaultMagnetStrength
-	magnetRange       = defaultMagnetRange
 
 	startBallX  = defaultStartBallX
 	startBallY  = defaultStartBallY
@@ -102,7 +93,6 @@ var (
 	enableReverseGravity = defaultEnableReverseGravity
 	enableDualBalls      = defaultEnableDualBalls
 	enableBlackHole      = defaultEnableBlackHole
-	enableMagnet         = defaultEnableMagnet
 
 	paused       bool
 	leftPressed  bool
@@ -131,7 +121,6 @@ const (
 	POWER_REVERSE_GRAVITY
 	POWER_DUAL_BALLS
 	POWER_BLACKHOLE
-	POWER_MAGNET
 )
 
 // ---- Ball struct ----
@@ -182,14 +171,8 @@ var (
 	powerUpTimer   float64
 	currentGravity float64
 
-	blackHoleActive    bool
-	blackHoleTimer     float64
-	blackHoleX         float64
-	blackHoleY         float64
-	blackHoleDirection float64
-	blackHoleSpeed     float64
-
-	magnetCheat bool
+	blackHoleActive bool
+	blackHoleTimer  float64
 
 	powerUpText      string
 	powerUpTextTimer float64
@@ -387,7 +370,6 @@ func resetGlobals() {
 	enableReverseGravity = defaultEnableReverseGravity
 	enableDualBalls = defaultEnableDualBalls
 	enableBlackHole = defaultEnableBlackHole
-	enableMagnet = defaultEnableMagnet
 }
 
 // ---- Apply config overrides from map ----
@@ -413,14 +395,6 @@ func applyConfig(config map[string]string) {
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				powerUpDuration = f
-			}
-		case "magnetStrength":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				magnetStrength = f
-			}
-		case "magnetRange":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				magnetRange = f
 			}
 		case "brickOffsetTop":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
@@ -489,10 +463,6 @@ func applyConfig(config map[string]string) {
 		case "enableBlackHole":
 			if b, err := strconv.ParseBool(val); err == nil {
 				enableBlackHole = b
-			}
-		case "enableMagnet":
-			if b, err := strconv.ParseBool(val); err == nil {
-				enableMagnet = b
 			}
 		default:
 			// ignore unknown
@@ -734,9 +704,6 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 	if enableBlackHole {
 		available = append(available, POWER_BLACKHOLE)
 	}
-	if enableMagnet {
-		available = append(available, POWER_MAGNET)
-	}
 
 	if len(available) == 0 {
 		return
@@ -798,17 +765,6 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 		blackHoleActive = true
 		blackHoleTimer = powerUpDuration
 		currentGravity = 0
-
-		// Move back and forth within a limited range around screen center.
-		blackHoleX = canvasWidth / 2
-		blackHoleY = canvasHeight / 2
-		blackHoleSpeed = (4 * blackHoleRange) / math.Max(powerUpDuration, 0.001)
-		if rand.Intn(2) == 0 {
-			blackHoleDirection = 1
-		} else {
-			blackHoleDirection = -1
-		}
-
 		powerUpText = "Black Hole!"
 		powerUpTextTimer = powerUpDuration
 		playPowerup()
@@ -816,12 +772,6 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 			activePowerUp = POWER_NONE
 			powerUpTimer = 0
 		}
-	case POWER_MAGNET:
-		activePowerUp = POWER_MAGNET
-		powerUpTimer = powerUpDuration
-		powerUpText = "Magnets!"
-		powerUpTextTimer = powerUpDuration
-		playPowerup()
 	}
 }
 
@@ -829,7 +779,8 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 func loadLevels() {
 	levelIndex := 1
 	for {
-		url := "levels/level" + strconv.Itoa(levelIndex) + ".txt"
+		url := "levels/level" + strconv.Itoa(levelIndex) + ".txt?nocache=" +
+			strconv.Itoa(rand.Int())
 		xhr := js.Global().Get("XMLHttpRequest").New()
 		xhr.Call("open", "GET", url, false)
 		xhr.Call("send")
@@ -842,6 +793,11 @@ func loadLevels() {
 			break
 		}
 		text := xhr.Get("responseText").String()
+
+		// debug
+		log("Loaded " + url + ":")
+		log(text)
+
 		lines := strings.Split(text, "\n")
 		var configLines []string
 		var layoutLines []string
@@ -873,6 +829,11 @@ func loadLevels() {
 		}
 		levels = append(levels, levelData{layout: layoutLines, config: configMap})
 		levelIndex++
+
+		// debug
+		for key, value := range configMap {
+			log("Config: " + key + "=" + value)
+		}
 	}
 	if len(levels) == 0 {
 		log("No level files found; using default layout")
@@ -901,6 +862,16 @@ func startLevel(index int) {
 	// Apply level-specific config
 	applyConfig(levels[index].config)
 
+	// debug
+	log(fmt.Sprintf(
+		"Ball start: x=%.1f y=%.1f vx=%.1f vy=%.1f radius=%.1f",
+		startBallX,
+		startBallY,
+		startBallVx,
+		startBallVy,
+		ballRadius,
+	))
+
 	ball.x, ball.y = startBallX, startBallY
 	ball.vx, ball.vy = startBallVx, startBallVy
 	ball.omega, ball.angle = 0, 0
@@ -914,10 +885,6 @@ func startLevel(index int) {
 	powerUpTimer = 0
 	blackHoleActive = false
 	blackHoleTimer = 0
-	blackHoleX = canvasWidth / 2
-	blackHoleY = canvasHeight / 2
-	blackHoleDirection = 0
-	blackHoleSpeed = 0
 	currentGravity = baseGravity
 	powerUpText = ""
 	powerUpTextTimer = 0
@@ -925,6 +892,7 @@ func startLevel(index int) {
 	buildBricksFromLevel(levels[index])
 	currentLevelIndex = index
 	log("Level " + strconv.Itoa(index+1) + " started")
+
 }
 
 // ---- Jump to a specific level (cheat) ----
@@ -942,7 +910,7 @@ func jumpToLevel(index int) {
 
 // ---- Reset game ----
 func resetGame() {
-	lives = defaultLives
+	lives = 7
 	score = 0
 	gameOver = false
 	win = false
@@ -954,7 +922,7 @@ func resetGame() {
 
 // ---- Retry the level after losing all lives ----
 func retryCurrentLevel() {
-	lives = defaultLives
+	lives = 12
 	gameOver = false
 	win = false
 	paused = false
@@ -964,56 +932,13 @@ func retryCurrentLevel() {
 	startLevel(currentLevelIndex)
 }
 
-// ---- Magnetic breakable bricks ----
-func applyBrickMagnetism(b *Ball, dt float64) {
-	if activePowerUp != POWER_MAGNET && !magnetCheat {
-		return
-	}
-
-	var nearest *brick
-	nearestDistance := magnetRange
-
-	for i := range bricks {
-		br := &bricks[i]
-		if !br.alive || br.unbreakable {
-			continue
-		}
-
-		centerX := br.x + br.w/2
-		centerY := br.y + br.h/2
-		dx := centerX - b.x
-		dy := centerY - b.y
-		distance := math.Sqrt(dx*dx + dy*dy)
-
-		if distance > 1 && distance < nearestDistance {
-			nearest = br
-			nearestDistance = distance
-		}
-	}
-
-	if nearest == nil {
-		return
-	}
-
-	centerX := nearest.x + nearest.w/2
-	centerY := nearest.y + nearest.h/2
-	dx := centerX - b.x
-	dy := centerY - b.y
-
-	falloff := 1.0 - nearestDistance/magnetRange
-	acceleration := magnetStrength * falloff
-	b.vx += (dx / nearestDistance) * acceleration * dt
-	b.vy += (dy / nearestDistance) * acceleration * dt
-}
-
 // ---- Update a single ball ----
 func updateBall(b *Ball, dt float64, isPrimary bool) {
 	b.vy += currentGravity * dt
-	applyBrickMagnetism(b, dt)
 
 	if blackHoleActive {
-		dx := blackHoleX - b.x
-		dy := blackHoleY - b.y
+		dx := canvasWidth/2 - b.x
+		dy := canvasHeight/2 - b.y
 		dist := math.Sqrt(dx*dx + dy*dy)
 		if dist > 1.0 {
 			accX := (dx / dist) * blackHoleStrength
@@ -1229,25 +1154,9 @@ func update(dt float64) {
 	}
 
 	if blackHoleActive {
-		blackHoleX += blackHoleDirection * blackHoleSpeed * dt
-
-		leftLimit := canvasWidth/2 - blackHoleRange
-		rightLimit := canvasWidth/2 + blackHoleRange
-
-		if blackHoleX <= leftLimit {
-			blackHoleX = leftLimit
-			blackHoleDirection = 1
-		}
-		if blackHoleX >= rightLimit {
-			blackHoleX = rightLimit
-			blackHoleDirection = -1
-		}
-
 		blackHoleTimer -= dt
 		if blackHoleTimer <= 0 {
 			blackHoleActive = false
-			blackHoleDirection = 0
-			blackHoleSpeed = 0
 			if activePowerUp != POWER_LOW_GRAVITY && activePowerUp != POWER_REVERSE_GRAVITY {
 				currentGravity = baseGravity
 			}
@@ -1386,22 +1295,6 @@ func draw() {
 		ctx.Set("setLineDash", []interface{}{})
 	}
 
-	if blackHoleActive && showBlackHole {
-		ctx.Set("fillStyle", "#000000")
-		ctx.Set("strokeStyle", "#9d4edd")
-		ctx.Set("lineWidth", 5)
-		ctx.Call("beginPath")
-		ctx.Call("arc", blackHoleX, blackHoleY, 28, 0, 2*math.Pi)
-		ctx.Call("fill")
-		ctx.Call("stroke")
-
-		ctx.Set("strokeStyle", "#c77dff")
-		ctx.Set("lineWidth", 2)
-		ctx.Call("beginPath")
-		ctx.Call("arc", blackHoleX, blackHoleY, 42, 0, 2*math.Pi)
-		ctx.Call("stroke")
-	}
-
 	drawBall(ball.x, ball.y, ball.angle, palette[3], palette[5])
 	if secondBallActive {
 		drawBall(secondBall.x, secondBall.y, secondBall.angle, palette[7], palette[8])
@@ -1531,18 +1424,6 @@ func setupInput() {
 		// Initialize audio only on key press (not mouse move)
 		if !audioInitialized {
 			initAudio()
-		}
-
-		// Hidden magnetism cheat. It persists across levels until toggled again.
-		if (key == "m" || key == "M") && !e.Get("repeat").Bool() {
-			magnetCheat = !magnetCheat
-			if magnetCheat {
-				powerUpText = "Magnets!"
-			} else {
-				powerUpText = "Magnets off"
-			}
-			powerUpTextTimer = 2.0
-			return nil
 		}
 
 		// Pause/resume. Ignore key-repeat so holding the key toggles only once.
