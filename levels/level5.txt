@@ -1,0 +1,26 @@
+enablePassThrough=false
+enableBlackHole=true
+brickWidth=15
+brickHeight=30
+brickPadding=10
+---
+M//     M//           M// M//                 
+M//     M//           M// M//                 
+M//     M//   M//     M// M//   M//           
+M////// M// M/   M//  M// M// M//  M//        
+M//     M//M///// M// M// M//M//    M//       
+M//     M//M/         M// M// M//  M//        
+M//     M//  M////   M///M///   M//           
+                                              
+M//        M//                  M//     M//M//
+M//        M//                  M//     M//M//
+M//   M/   M//   M//    M/ M/// M//     M//M//
+M//  M//   M// M//  M//  M//    M// M// M//M/ 
+M// M/ M// M//M//    M// M//    M//M/   M//M/ 
+M/ M/    M//// M//  M//  M//    M//M/   M//   
+MUU        MUU   MUU    MUUU   MUUU MUU MUUMUU
+
+
+
+
+

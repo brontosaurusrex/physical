@@ -1,0 +1,22 @@
+enablePassThrough=true
+enableBlackHole=true
+brickPadding=15.0
+frictionCoeff=0.4
+ballRadius=30.0
+---
+M######## ########M
+M########M########M
+M######## ########M
+M######## ########M
+M######## ########M
+UUUUMUUUU UUUUMUUUU
+
+
+
+
+
+
+
+
+
+

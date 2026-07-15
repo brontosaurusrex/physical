@@ -1,0 +1,17 @@
+enablePassThrough=true
+enableBlackHole=true
+---
+M####M M####M
+###### ######
+#####M ######
+###### M#####
+###### ######
+M####M M####M
+
+
+
+
+
+
+
+

@@ -93,10 +93,6 @@ var (
 	enableReverseGravity = defaultEnableReverseGravity
 	enableDualBalls      = defaultEnableDualBalls
 	enableBlackHole      = defaultEnableBlackHole
-
-	paused       bool
-	leftPressed  bool
-	rightPressed bool
 )
 
 // ---- Color palette ----
@@ -112,7 +108,7 @@ var palette = []string{
 	"#e63946", // second ball spin marker (8)
 }
 
-// ---- Powerup types ----
+// ---- PowerΓÇæup types ----
 const (
 	POWER_NONE = iota
 	POWER_LOW_GRAVITY
@@ -163,10 +159,9 @@ var (
 	keyDown    js.Func
 	keyUp      js.Func
 	mouseMove  js.Func
-	mouseDown  js.Func
 	mouseLeave js.Func
 
-	// ---- Power╬ô├ç├ªup states ----
+	// ---- PowerΓÇæup states ----
 	activePowerUp  int
 	powerUpTimer   float64
 	currentGravity float64
@@ -678,7 +673,7 @@ func nukeBricks(hitBrick *brick) {
 	}
 }
 
-// ---- Activate power╬ô├ç├ªup ----
+// ---- Activate powerΓÇæup ----
 func activatePowerUpWithBrick(hitBrick *brick) {
 	if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
 		currentGravity = baseGravity
@@ -843,9 +838,6 @@ func startLevel(index int) {
 		win = true
 		return
 	}
-	paused = false
-	leftPressed = false
-	rightPressed = false
 	// Reset all globals to defaults
 	resetGlobals()
 	// Apply level-specific config
@@ -888,26 +880,11 @@ func jumpToLevel(index int) {
 
 // ---- Reset game ----
 func resetGame() {
-	lives = 7
+	lives = 12
 	score = 0
 	gameOver = false
 	win = false
-	paused = false
-	leftPressed = false
-	rightPressed = false
 	startLevel(0)
-}
-
-// ---- Retry the level after losing all lives ----
-func retryCurrentLevel() {
-	lives = 12
-	gameOver = false
-	win = false
-	paused = false
-	leftPressed = false
-	rightPressed = false
-	paddle.vx = 0
-	startLevel(currentLevelIndex)
 }
 
 // ---- Update a single ball ----
@@ -947,7 +924,7 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 		resolveCollisionBall(b, 0, 1, 0, 0)
 	}
 	if b.y+b.r > canvasHeight {
-		// Ball lost ╬ô├ç├┤ handled by caller
+		// Ball lost ΓÇô handled by caller
 		return
 	}
 
@@ -1092,29 +1069,11 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 
 // ---- Update (main loop) ----
 func update(dt float64) {
-	if gameOver || paused {
+	if gameOver {
 		return
 	}
 
-	const keyboardPaddleSpeed = 700.0
-
-	if leftPressed && !rightPressed {
-		paddle.vx = -keyboardPaddleSpeed
-	} else if rightPressed && !leftPressed {
-		paddle.vx = keyboardPaddleSpeed
-	} else {
-		paddle.vx = 0
-	}
-
-	paddle.x += paddle.vx * dt
-	if paddle.x < 0 {
-		paddle.x = 0
-	}
-	if paddle.x+paddle.w > canvasWidth {
-		paddle.x = canvasWidth - paddle.w
-	}
-
-	// Power╬ô├ç├ªup timers
+	// PowerΓÇæup timers
 	if activePowerUp != POWER_NONE {
 		powerUpTimer -= dt
 		if powerUpTimer <= 0 {
@@ -1221,6 +1180,18 @@ func update(dt float64) {
 			startLevel(nextLevel)
 		}
 	}
+
+	if allBreakableDead {
+		nextLevel := currentLevelIndex + 1
+		if nextLevel >= len(levels) {
+			gameOver = true
+			win = true
+			playWin()
+		} else {
+			playLevelComplete()
+			startLevel(nextLevel)
+		}
+	}
 }
 
 // ---- Reset balls on life lost ----
@@ -1295,38 +1266,15 @@ func draw() {
 		ctx.Call("fillText", powerUpText, 10, 120)
 	}
 
-	if paused && !gameOver {
-		ctx.Set("fillStyle", palette[4])
-		ctx.Set("font", "60px sans-serif")
-		msg := "PAUSED"
-		width := ctx.Call("measureText", msg).Get("width").Float()
-		ctx.Call("fillText", msg, (canvasWidth-width)/2, canvasHeight/2)
-
-		ctx.Set("font", "24px sans-serif")
-		subtitle := "Press Space or Escape to continue"
-		subtitleWidth := ctx.Call("measureText", subtitle).Get("width").Float()
-		ctx.Call("fillText", subtitle, (canvasWidth-subtitleWidth)/2, canvasHeight/2+50)
-	}
-
 	if gameOver {
 		ctx.Set("fillStyle", palette[4])
-		ctx.Set("textAlign", "center")
 		ctx.Set("font", "60px sans-serif")
-
 		msg := "GAME OVER"
 		if win {
 			msg = "YOU WIN!"
 		}
-		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2)
-
-		ctx.Set("font", "24px sans-serif")
-		if win {
-			ctx.Call("fillText", "Press N to start again", canvasWidth/2, canvasHeight/2+50)
-		} else {
-			ctx.Call("fillText", "Press Space, Enter, or left-click to retry", canvasWidth/2, canvasHeight/2+50)
-		}
-
-		ctx.Set("textAlign", "start")
+		width := float64(len(msg)) * 30
+		ctx.Call("fillText", msg, (canvasWidth-width)/2, canvasHeight/2)
 	}
 }
 
@@ -1390,27 +1338,9 @@ func setupInput() {
 		e.Call("preventDefault")
 		key := e.Get("key").String()
 
-		// Retry the same level after losing all lives. This must come
-		// before pause handling so Space retries instead of toggling pause.
-		if gameOver && !win {
-			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
-				retryCurrentLevel()
-			}
-			return nil
-		}
-
 		// Initialize audio only on key press (not mouse move)
 		if !audioInitialized {
 			initAudio()
-		}
-
-		// Pause/resume. Ignore key-repeat so holding the key toggles only once.
-		if (key == " " || key == "Escape") && !e.Get("repeat").Bool() {
-			paused = !paused
-			leftPressed = false
-			rightPressed = false
-			paddle.vx = 0
-			return nil
 		}
 
 		// Cheat keys: N = next level, P = previous level
@@ -1445,9 +1375,9 @@ func setupInput() {
 
 		// Paddle controls
 		if key == "ArrowLeft" {
-			leftPressed = true
+			paddle.vx = -450
 		} else if key == "ArrowRight" {
-			rightPressed = true
+			paddle.vx = 450
 		}
 		return nil
 	})
@@ -1467,10 +1397,8 @@ func setupInput() {
 		e := args[0]
 		e.Call("preventDefault")
 		key := e.Get("key").String()
-		if key == "ArrowLeft" {
-			leftPressed = false
-		} else if key == "ArrowRight" {
-			rightPressed = false
+		if key == "ArrowLeft" || key == "ArrowRight" {
+			paddle.vx = 0
 		}
 		return nil
 	})
@@ -1479,11 +1407,6 @@ func setupInput() {
 	// Mouse (no audio init here)
 	var lastX float64
 	mouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if paused || len(args) == 0 {
-			return nil
-		}
-		leftPressed = false
-		rightPressed = false
 		e := args[0]
 		rect := canvas.Call("getBoundingClientRect")
 		x := e.Get("clientX").Float() - rect.Get("left").Float()
@@ -1501,28 +1424,6 @@ func setupInput() {
 		return nil
 	})
 	js.Global().Get("document").Call("addEventListener", "mousemove", mouseMove)
-
-	// Retry the current level with the left mouse button after game over.
-	mouseDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
-		defer func() {
-			if r := recover(); r != nil {
-				js.Global().Get("console").Call("error", "Panic in mousedown handler:", fmt.Sprint(r))
-				ret = nil
-			}
-		}()
-
-		if len(args) == 0 {
-			return nil
-		}
-
-		e := args[0]
-		if e.Get("button").Int() == 0 && gameOver && !win {
-			e.Call("preventDefault")
-			retryCurrentLevel()
-		}
-		return nil
-	})
-	canvas.Call("addEventListener", "mousedown", mouseDown)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		paddle.vx = 0

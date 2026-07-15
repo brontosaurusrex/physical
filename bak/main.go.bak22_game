@@ -163,7 +163,6 @@ var (
 	keyDown    js.Func
 	keyUp      js.Func
 	mouseMove  js.Func
-	mouseDown  js.Func
 	mouseLeave js.Func
 
 	// ---- Power╬ô├ç├ªup states ----
@@ -898,18 +897,6 @@ func resetGame() {
 	startLevel(0)
 }
 
-// ---- Retry the level after losing all lives ----
-func retryCurrentLevel() {
-	lives = 12
-	gameOver = false
-	win = false
-	paused = false
-	leftPressed = false
-	rightPressed = false
-	paddle.vx = 0
-	startLevel(currentLevelIndex)
-}
-
 // ---- Update a single ball ----
 func updateBall(b *Ball, dt float64, isPrimary bool) {
 	b.vy += currentGravity * dt
@@ -1310,23 +1297,13 @@ func draw() {
 
 	if gameOver {
 		ctx.Set("fillStyle", palette[4])
-		ctx.Set("textAlign", "center")
 		ctx.Set("font", "60px sans-serif")
-
 		msg := "GAME OVER"
 		if win {
 			msg = "YOU WIN!"
 		}
-		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2)
-
-		ctx.Set("font", "24px sans-serif")
-		if win {
-			ctx.Call("fillText", "Press N to start again", canvasWidth/2, canvasHeight/2+50)
-		} else {
-			ctx.Call("fillText", "Press Space, Enter, or left-click to retry", canvasWidth/2, canvasHeight/2+50)
-		}
-
-		ctx.Set("textAlign", "start")
+		width := float64(len(msg)) * 30
+		ctx.Call("fillText", msg, (canvasWidth-width)/2, canvasHeight/2)
 	}
 }
 
@@ -1389,15 +1366,6 @@ func setupInput() {
 		e := args[0]
 		e.Call("preventDefault")
 		key := e.Get("key").String()
-
-		// Retry the same level after losing all lives. This must come
-		// before pause handling so Space retries instead of toggling pause.
-		if gameOver && !win {
-			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
-				retryCurrentLevel()
-			}
-			return nil
-		}
 
 		// Initialize audio only on key press (not mouse move)
 		if !audioInitialized {
@@ -1501,28 +1469,6 @@ func setupInput() {
 		return nil
 	})
 	js.Global().Get("document").Call("addEventListener", "mousemove", mouseMove)
-
-	// Retry the current level with the left mouse button after game over.
-	mouseDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
-		defer func() {
-			if r := recover(); r != nil {
-				js.Global().Get("console").Call("error", "Panic in mousedown handler:", fmt.Sprint(r))
-				ret = nil
-			}
-		}()
-
-		if len(args) == 0 {
-			return nil
-		}
-
-		e := args[0]
-		if e.Get("button").Int() == 0 && gameOver && !win {
-			e.Call("preventDefault")
-			retryCurrentLevel()
-		}
-		return nil
-	})
-	canvas.Call("addEventListener", "mousedown", mouseDown)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		paddle.vx = 0

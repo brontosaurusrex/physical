@@ -1,0 +1,546 @@
+//go:build js && wasm
+
+package main
+
+import (
+	"math"
+	"math/rand"
+	"strconv"
+	"syscall/js"
+	"time"
+)
+
+const (
+	canvasWidth    = 1800.0
+	canvasHeight   = 900.0
+	gravity        = 300.0 // 300
+	restitution    = 0.85
+	frictionCoeff  = 0.1
+	paddleWidth    = 220.0
+	paddleHeight   = 30.0
+	ballRadius     = 8.0
+	brickRows      = 10
+	brickCols      = 18
+	brickWidth     = 60.0
+	brickHeight    = 20.0
+	brickPadding   = 20.0
+	brickOffsetTop = 100.0
+
+	paddleBoost = 1000.0
+	brickBoost  = 100.0
+	maxSpeed    = 900.0
+
+	paddleRadius = 12.0
+	brickRadius  = 6.0
+
+	unbreakableChance = 0.15 // 5% chance
+)
+
+// ---- Color palette ----
+var palette = []string{
+	"#1d3557", // background (0)
+	"#f1faee", // paddle (1)
+	"#a8dadc", // normal bricks (2)
+	"#e63946", // ball (3)
+	"#f1faee", // text (4)
+	"#e63946", // spin marker (5)
+	"#f4a261", // unbreakable bricks (6)
+}
+
+// ---- Global state ----
+var (
+	doc    = js.Global().Get("document")
+	canvas js.Value
+	ctx    js.Value
+
+	ball = struct {
+		x, y, r      float64
+		vx, vy       float64
+		omega, angle float64
+	}{
+		x:     1000,
+		y:     600,
+		r:     ballRadius,
+		vx:    180,
+		vy:    -350,
+		omega: 0,
+		angle: 0,
+	}
+
+	paddle = struct {
+		x, y, w, h float64
+		vx         float64
+	}{
+		x:  (canvasWidth - paddleWidth) / 2,
+		y:  canvasHeight - 40,
+		w:  paddleWidth,
+		h:  paddleHeight,
+		vx: 0,
+	}
+
+	bricks   []brick
+	score    int
+	lives    int
+	gameOver bool
+	win      bool
+
+	lastTime float64
+
+	loopFunc   js.Func
+	keyDown    js.Func
+	keyUp      js.Func
+	mouseMove  js.Func
+	mouseLeave js.Func
+)
+
+type brick struct {
+	x, y, w, h  float64
+	alive       bool
+	unbreakable bool // new field
+}
+
+// ---- Helpers ----
+func log(msg string) {
+	js.Global().Get("console").Call("log", msg)
+}
+
+func sign(x float64) float64 {
+	if x > 0 {
+		return 1
+	}
+	if x < 0 {
+		return -1
+	}
+	return 0
+}
+
+// ---- Physics ----
+func resolveCollision(nx, ny, surfVx, surfVy float64) {
+	cx := ball.x + nx*ball.r
+	cy := ball.y + ny*ball.r
+	contactVx := ball.vx - ball.omega*(cy-ball.y)
+	contactVy := ball.vy + ball.omega*(cx-ball.x)
+	relVx := contactVx - surfVx
+	relVy := contactVy - surfVy
+	vn := relVx*nx + relVy*ny
+	vt := relVx*(-ny) + relVy*nx
+	if vn >= 0 {
+		return
+	}
+	vnNew := -restitution * vn
+	deltaVn := vnNew - vn
+	maxFriction := frictionCoeff * math.Abs(deltaVn)
+	var deltaVt float64
+	if math.Abs(vt) < 0.001 {
+		deltaVt = -vt
+	} else {
+		friction := math.Min(math.Abs(vt), maxFriction)
+		deltaVt = -sign(vt) * friction
+	}
+	tx := -ny
+	ty := nx
+	ball.vx += deltaVn*nx + deltaVt*tx
+	ball.vy += deltaVn*ny + deltaVt*ty
+	ball.omega -= 2 * deltaVt / ball.r
+}
+
+// ---- Bricks ----
+func initBricks() {
+	bricks = nil
+	totalWidth := float64(brickCols)*(brickWidth+brickPadding) - brickPadding
+	offsetLeft := (canvasWidth - totalWidth) / 2.0
+
+	// Seed random for unbreakable bricks
+	rand.Seed(time.Now().UnixNano())
+
+	for row := 0; row < brickRows; row++ {
+		for col := 0; col < brickCols; col++ {
+			x := offsetLeft + float64(col)*(brickWidth+brickPadding)
+			y := brickOffsetTop + float64(row)*(brickHeight+brickPadding)
+			// Randomly mark as unbreakable
+			unbreakable := rand.Float64() < unbreakableChance
+			bricks = append(bricks, brick{
+				x:           x,
+				y:           y,
+				w:           brickWidth,
+				h:           brickHeight,
+				alive:       true,
+				unbreakable: unbreakable,
+			})
+		}
+	}
+}
+
+// ---- Game reset ----
+func resetGame() {
+	ball.x, ball.y = 1000, 600
+	ball.vx, ball.vy = 180, -350
+	ball.omega, ball.angle = 0, 0
+	paddle.x = (canvasWidth - paddleWidth) / 2
+	paddle.vx = 0
+	score = 0
+	lives = 12
+	gameOver = false
+	win = false
+	initBricks()
+	log("Game reset")
+}
+
+// ---- Update ----
+func update(dt float64) {
+	if gameOver {
+		return
+	}
+	ball.vy += gravity * dt
+	ball.x += ball.vx * dt
+	ball.y += ball.vy * dt
+	ball.angle += ball.omega * dt
+
+	// Walls
+	if ball.x-ball.r < 0 {
+		ball.x = ball.r
+		resolveCollision(1, 0, 0, 0)
+	}
+	if ball.x+ball.r > canvasWidth {
+		ball.x = canvasWidth - ball.r
+		resolveCollision(-1, 0, 0, 0)
+	}
+	if ball.y-ball.r < 0 {
+		ball.y = ball.r
+		resolveCollision(0, 1, 0, 0)
+	}
+	if ball.y+ball.r > canvasHeight {
+		lives--
+		if lives <= 0 {
+			gameOver = true
+			win = false
+		} else {
+			ball.x, ball.y = 1000, 600
+			ball.vx, ball.vy = 180, -350
+			ball.omega, ball.angle = 0, 0
+			paddle.x = (canvasWidth - paddleWidth) / 2
+			paddle.vx = 0
+		}
+		return
+	}
+
+	// Paddle
+	pLeft, pRight := paddle.x, paddle.x+paddle.w
+	pTop, pBottom := paddle.y, paddle.y+paddle.h
+	if ball.vy > 0 &&
+		ball.x+ball.r > pLeft && ball.x-ball.r < pRight &&
+		ball.y+ball.r > pTop && ball.y+ball.r < pBottom {
+		ball.y = pTop - ball.r
+
+		hitPos := (ball.x - pLeft) / paddle.w
+		if hitPos < 0 {
+			hitPos = 0
+		}
+		if hitPos > 1 {
+			hitPos = 1
+		}
+
+		angle := (hitPos - 0.5) * 2.0 * (60.0 * math.Pi / 180.0)
+		speed := math.Sqrt(ball.vx*ball.vx + ball.vy*ball.vy)
+		if speed < 100 {
+			speed = 100
+		}
+
+		newVx := speed * math.Sin(angle)
+		newVy := -speed * math.Cos(angle)
+
+		ball.vx = newVx
+		ball.vy = newVy
+
+		ball.vy -= paddleBoost
+
+		if math.Abs(ball.vy) > maxSpeed {
+			ball.vy = math.Copysign(maxSpeed, ball.vy)
+		}
+		if math.Abs(ball.vx) > maxSpeed {
+			ball.vx = math.Copysign(maxSpeed, ball.vx)
+		}
+
+		ball.omega += paddle.vx * 0.1 * (hitPos - 0.5)
+		if math.Abs(ball.omega) > 30 {
+			ball.omega = math.Copysign(30, ball.omega)
+		}
+	}
+
+	// Bricks
+	for i := range bricks {
+		b := &bricks[i]
+		if !b.alive {
+			continue
+		}
+		if ball.x+ball.r > b.x && ball.x-ball.r < b.x+b.w &&
+			ball.y+ball.r > b.y && ball.y-ball.r < b.y+b.h {
+			// Compute overlap and normal (same as before)
+			overlapX := 0.0
+			overlapY := 0.0
+			if ball.x < b.x+b.w/2 {
+				overlapX = (ball.x + ball.r) - b.x
+			} else {
+				overlapX = b.x + b.w - (ball.x - ball.r)
+			}
+			if ball.y < b.y+b.h/2 {
+				overlapY = (ball.y + ball.r) - b.y
+			} else {
+				overlapY = b.y + b.h - (ball.y - ball.r)
+			}
+			var nx, ny float64
+			if overlapX < overlapY {
+				if ball.x < b.x+b.w/2 {
+					nx = -1
+				} else {
+					nx = 1
+				}
+				ny = 0
+			} else {
+				if ball.y < b.y+b.h/2 {
+					ny = -1
+				} else {
+					ny = 1
+				}
+				nx = 0
+			}
+			// Push ball out
+			if nx != 0 {
+				if nx == -1 {
+					ball.x = b.x - ball.r
+				} else if nx == 1 {
+					ball.x = b.x + b.w + ball.r
+				}
+			}
+			if ny != 0 {
+				if ny == -1 {
+					ball.y = b.y - ball.r
+				} else if ny == 1 {
+					ball.y = b.y + b.h + ball.r
+				}
+			}
+			// Resolve collision (always)
+			resolveCollision(nx, ny, 0, 0)
+
+			// If unbreakable, just bounce, don't destroy or score
+			if b.unbreakable {
+				continue // skip destruction and score
+			}
+
+			// Normal brick: destroy, score, boost
+			if brickBoost != 0 {
+				ball.vy -= brickBoost
+				if math.Abs(ball.vy) > maxSpeed {
+					ball.vy = math.Copysign(maxSpeed, ball.vy)
+				}
+				if math.Abs(ball.vx) > maxSpeed {
+					ball.vx = math.Copysign(maxSpeed, ball.vx)
+				}
+			}
+			b.alive = false
+			score++
+		}
+	}
+
+	// ---- Check for win (all normal bricks destroyed) ----
+	allDead := true
+	for _, b := range bricks {
+		if b.alive && !b.unbreakable { // only normal bricks matter for win
+			allDead = false
+			break
+		}
+	}
+	if allDead {
+		gameOver = true
+		win = true
+	}
+}
+
+// ---- Draw ----
+func draw() {
+	// Background
+	ctx.Set("fillStyle", palette[0])
+	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
+
+	// Bricks
+	for _, b := range bricks {
+		if !b.alive {
+			continue
+		}
+		// Choose colour based on unbreakable status
+		var fillColor string
+		if b.unbreakable {
+			fillColor = palette[6] // unbreakable color
+		} else {
+			fillColor = palette[2] // normal brick color
+		}
+		ctx.Set("fillStyle", fillColor)
+		ctx.Call("beginPath")
+		ctx.Call("roundRect", b.x, b.y, b.w, b.h, brickRadius)
+		ctx.Call("fill")
+
+		// Stroke
+		if b.unbreakable {
+			ctx.Set("strokeStyle", "#e76f51") // dark orange border
+			ctx.Set("lineWidth", 2)
+			ctx.Set("setLineDash", []interface{}{4, 4}) // dashed border
+		} else {
+			ctx.Set("strokeStyle", "#27ae60")
+			ctx.Set("lineWidth", 1)
+			ctx.Set("setLineDash", []interface{}{}) // solid
+		}
+		ctx.Call("beginPath")
+		ctx.Call("roundRect", b.x, b.y, b.w, b.h, brickRadius)
+		ctx.Call("stroke")
+		// Reset dash
+		ctx.Set("setLineDash", []interface{}{})
+	}
+
+	// Ball
+	ctx.Call("save")
+	ctx.Call("translate", ball.x, ball.y)
+	ctx.Call("rotate", ball.angle)
+	ctx.Set("fillStyle", palette[3])
+	ctx.Call("beginPath")
+	ctx.Call("arc", 0, 0, ball.r, 0, 2*math.Pi)
+	ctx.Call("fill")
+	ctx.Set("strokeStyle", palette[5])
+	ctx.Set("lineWidth", 2)
+	ctx.Call("beginPath")
+	ctx.Call("moveTo", 0, -ball.r)
+	ctx.Call("lineTo", 0, ball.r)
+	ctx.Call("stroke")
+	ctx.Set("fillStyle", palette[5])
+	ctx.Call("beginPath")
+	ctx.Call("arc", 0, 0, 2, 0, 2*math.Pi)
+	ctx.Call("fill")
+	ctx.Call("restore")
+
+	// Paddle
+	ctx.Set("fillStyle", palette[1])
+	ctx.Call("beginPath")
+	ctx.Call("roundRect", paddle.x, paddle.y, paddle.w, paddle.h, paddleRadius)
+	ctx.Call("fill")
+
+	// Score / Lives
+	ctx.Set("fillStyle", palette[4])
+	ctx.Set("font", "20px sans-serif")
+	ctx.Call("fillText", "Score: "+strconv.Itoa(score), 10, 30)
+	ctx.Call("fillText", "Lives: "+strconv.Itoa(lives), 10, 60)
+
+	// Game over / Win message
+	if gameOver {
+		ctx.Set("fillStyle", palette[4])
+		ctx.Set("font", "60px sans-serif")
+		msg := "GAME OVER"
+		if win {
+			msg = "YOU WIN!"
+		}
+		width := float64(len(msg)) * 30
+		ctx.Call("fillText", msg, (canvasWidth-width)/2, canvasHeight/2)
+	}
+}
+
+// ---- Game loop ----
+func gameLoop(this js.Value, args []js.Value) interface{} {
+	defer func() {
+		if r := recover(); r != nil {
+			js.Global().Get("console").Call("error", "Panic in gameLoop:", r)
+		}
+	}()
+	now := js.Global().Get("performance").Call("now").Float()
+	if lastTime == 0 {
+		lastTime = now
+	}
+	dt := (now - lastTime) / 1000.0
+	if dt > 0.05 {
+		dt = 0.05
+	}
+	lastTime = now
+	update(dt)
+	draw()
+	js.Global().Call("requestAnimationFrame", loopFunc)
+	return nil
+}
+
+// ---- Input ----
+func setupInput() {
+	keyDown = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		e := args[0]
+		key := e.Get("key").String()
+		if key == "ArrowLeft" {
+			paddle.vx = -450
+		} else if key == "ArrowRight" {
+			paddle.vx = 450
+		}
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "keydown", keyDown)
+
+	keyUp = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		e := args[0]
+		key := e.Get("key").String()
+		if key == "ArrowLeft" || key == "ArrowRight" {
+			paddle.vx = 0
+		}
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "keyup", keyUp)
+
+	var lastX float64
+	mouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		e := args[0]
+		rect := canvas.Call("getBoundingClientRect")
+		x := e.Get("clientX").Float() - rect.Get("left").Float()
+		if x < 0 {
+			x = 0
+		}
+		if x > canvasWidth-paddle.w {
+			x = canvasWidth - paddle.w
+		}
+		if lastX != 0 {
+			paddle.vx = (x - paddle.x) * 12
+		}
+		paddle.x = x
+		lastX = x
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "mousemove", mouseMove)
+
+	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		paddle.vx = 0
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "mouseleave", mouseLeave)
+}
+
+// ---- main ----
+func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			js.Global().Get("console").Call("error", "Panic in main:", r)
+		}
+	}()
+
+	log("main: starting")
+	canvas = doc.Call("getElementById", "gameCanvas")
+	if canvas.IsNull() {
+		log("canvas not found!")
+		return
+	}
+	ctx = canvas.Call("getContext", "2d")
+	if ctx.IsNull() {
+		log("context not found!")
+		return
+	}
+	log("canvas and context obtained")
+
+	setupInput()
+	resetGame()
+
+	loopFunc = js.FuncOf(gameLoop)
+	js.Global().Call("requestAnimationFrame", loopFunc)
+	log("main: requestAnimationFrame called")
+
+	select {}
+}
