@@ -1,0 +1,1705 @@
+//go:build js && wasm
+
+package main
+
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	"strconv"
+	"strings"
+	"syscall/js"
+)
+
+// ---- Default values (constants) ----
+const (
+	defaultCanvasWidth       = 1800.0
+	defaultCanvasHeight      = 900.0
+	defaultGravity           = 300.0
+	defaultRestitution       = 0.85
+	defaultFrictionCoeff     = 0.1
+	defaultPaddleWidth       = 220.0
+	defaultPaddleHeight      = 30.0
+	defaultBallRadius        = 8.0
+	defaultBrickRows         = 10
+	defaultBrickCols         = 18
+	defaultBrickWidth        = 60.0
+	defaultBrickHeight       = 20.0
+	defaultBrickPadding      = 20.0
+	defaultBrickOffsetTop    = -1.0
+	defaultPaddleBoost       = 1000.0
+	defaultBrickBoost        = 100.0
+	defaultMaxSpeed          = 900.0
+	defaultPaddleRadius      = 12.0
+	defaultBrickRadius       = 6.0
+	defaultUnbreakableChance = 0.15
+	defaultMagicChance       = 0.05
+	defaultPowerUpDuration   = 10.0
+	defaultBlackHoleStrength = 800.0
+	defaultBlackHoleRange    = 200.0
+	defaultMagnetStrength    = 1600.0
+	defaultMagnetRange       = 600.0
+	defaultLives             = 7
+
+	defaultStartBallX  = 1000.0
+	defaultStartBallY  = 600.0
+	defaultStartBallVx = 180.0
+	defaultStartBallVy = -350.0
+
+	defaultEnableLowGravity     = true
+	defaultEnablePassThrough    = true
+	defaultEnableNuke           = true
+	defaultEnableReverseGravity = true
+	defaultEnableDualBalls      = true
+	defaultEnableBlackHole      = true
+	defaultEnableMagnet         = true
+
+	enableSounds  = false
+	showBlackHole = false // Set true to draw the moving black hole.
+)
+
+// ---- These are variables, reset each level ----
+var (
+	canvasWidth    = defaultCanvasWidth
+	canvasHeight   = defaultCanvasHeight
+	baseGravity    = defaultGravity
+	restitution    = defaultRestitution
+	frictionCoeff  = defaultFrictionCoeff
+	paddleWidth    = defaultPaddleWidth
+	paddleHeight   = defaultPaddleHeight
+	ballRadius     = defaultBallRadius
+	brickRows      = defaultBrickRows
+	brickCols      = defaultBrickCols
+	brickWidth     = defaultBrickWidth
+	brickHeight    = defaultBrickHeight
+	brickPadding   = defaultBrickPadding
+	brickOffsetTop = defaultBrickOffsetTop
+
+	paddleBoost = defaultPaddleBoost
+	brickBoost  = defaultBrickBoost
+	maxSpeed    = defaultMaxSpeed
+
+	paddleRadius = defaultPaddleRadius
+	brickRadius  = defaultBrickRadius
+
+	unbreakableChance = defaultUnbreakableChance
+	magicChance       = defaultMagicChance
+	powerUpDuration   = defaultPowerUpDuration
+
+	blackHoleStrength = defaultBlackHoleStrength
+	blackHoleRange    = defaultBlackHoleRange
+	magnetStrength    = defaultMagnetStrength
+	magnetRange       = defaultMagnetRange
+
+	startBallX  = defaultStartBallX
+	startBallY  = defaultStartBallY
+	startBallVx = defaultStartBallVx
+	startBallVy = defaultStartBallVy
+
+	enableLowGravity     = defaultEnableLowGravity
+	enablePassThrough    = defaultEnablePassThrough
+	enableNuke           = defaultEnableNuke
+	enableReverseGravity = defaultEnableReverseGravity
+	enableDualBalls      = defaultEnableDualBalls
+	enableBlackHole      = defaultEnableBlackHole
+	enableMagnet         = defaultEnableMagnet
+
+	paused       bool
+	leftPressed  bool
+	rightPressed bool
+)
+
+// ---- Color palette ----
+var palette = []string{
+	"#1d3557", // background (0)
+	"#f1faee", // paddle (1) & magic bricks
+	"#a8dadc", // normal bricks (2)
+	"#e63946", // ball (3)
+	"#f1faee", // text (4)
+	"#e63946", // spin marker (5)
+	"#f4a261", // unbreakable bricks (6)
+	"#e63946", // second ball (7)
+	"#e63946", // second ball spin marker (8)
+}
+
+// ---- Powerup types ----
+const (
+	POWER_NONE = iota
+	POWER_LOW_GRAVITY
+	POWER_PASS
+	POWER_NUKE
+	POWER_REVERSE_GRAVITY
+	POWER_DUAL_BALLS
+	POWER_BLACKHOLE
+	POWER_MAGNET
+)
+
+// ---- Ball struct ----
+type Ball struct {
+	x, y, r      float64
+	vx, vy       float64
+	omega, angle float64
+}
+
+// ---- Global state ----
+var (
+	doc    = js.Global().Get("document")
+	canvas js.Value
+	ctx    js.Value
+
+	ball             Ball
+	secondBall       Ball
+	secondBallActive bool
+
+	paddle = struct {
+		x, y, w, h float64
+		vx         float64
+	}{
+		x:  0,
+		y:  0,
+		w:  defaultPaddleWidth,
+		h:  defaultPaddleHeight,
+		vx: 0,
+	}
+
+	bricks   []brick
+	score    int
+	lives    int
+	gameOver bool
+	win      bool
+
+	lastTime float64
+
+	loopFunc   js.Func
+	keyDown    js.Func
+	keyUp      js.Func
+	mouseMove  js.Func
+	mouseDown  js.Func
+	mouseLeave js.Func
+
+	// ---- Power╬ô├ç├ªup states ----
+	activePowerUp  int
+	powerUpTimer   float64
+	currentGravity float64
+
+	blackHoleActive    bool
+	blackHoleTimer     float64
+	blackHoleX         float64
+	blackHoleY         float64
+	blackHoleDirection float64
+	blackHoleSpeed     float64
+
+	magnetCheat bool
+
+	powerUpText      string
+	powerUpTextTimer float64
+
+	gridOffsetLeft float64
+
+	// ---- Level system ----
+	currentLevelIndex int
+	levels            []levelData
+
+	// ---- Audio ----
+	audioCtx         js.Value
+	audioInitialized bool
+)
+
+type brick struct {
+	x, y, w, h  float64
+	alive       bool
+	unbreakable bool
+	magic       bool
+}
+
+// ---- Level data ----
+type levelData struct {
+	layout []string
+	config map[string]string
+}
+
+// ---- Helpers ----
+func log(msg string) {
+	js.Global().Get("console").Call("log", msg)
+}
+
+func sign(x float64) float64 {
+	if x > 0 {
+		return 1
+	}
+	if x < 0 {
+		return -1
+	}
+	return 0
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// ---- Audio (non-blocking, scheduled via Web Audio) ----
+func initAudio() {
+	if audioInitialized || !enableSounds {
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			audioInitialized = false
+			audioCtx = js.Undefined()
+			js.Global().Get("console").Call("error", "Audio init panic:", fmt.Sprint(r))
+		}
+	}()
+
+	window := js.Global().Get("window")
+	ctor := window.Get("AudioContext")
+	if ctor.IsUndefined() || ctor.IsNull() {
+		ctor = window.Get("webkitAudioContext")
+	}
+	if ctor.IsUndefined() || ctor.IsNull() {
+		log("Web Audio API is not supported by this browser")
+		return
+	}
+
+	ctx := ctor.New()
+	if ctx.IsUndefined() || ctx.IsNull() {
+		log("Failed to create AudioContext")
+		return
+	}
+
+	audioCtx = ctx
+	audioInitialized = true
+
+	// AudioContext.resume() returns a Promise. It does not need to be awaited
+	// here because this function is called directly from a user keypress.
+	if state := audioCtx.Get("state"); state.Type() == js.TypeString && state.String() == "suspended" {
+		audioCtx.Call("resume")
+	}
+
+	log("Audio initialized")
+}
+
+func scheduleBeep(freq float64, duration float64, volume float64, delay float64) {
+	if !audioInitialized || !enableSounds || audioCtx.IsNull() || audioCtx.IsUndefined() {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			// Ignore audio errors silently
+		}
+	}()
+	startTime := audioCtx.Get("currentTime").Float() + delay
+	osc := audioCtx.Call("createOscillator")
+	gain := audioCtx.Call("createGain")
+	osc.Set("type", "sine")
+	osc.Set("frequency", freq)
+	gain.Set("gain", volume)
+	osc.Call("connect", gain)
+	gain.Call("connect", audioCtx.Get("destination"))
+	osc.Call("start", startTime)
+	gain.Get("gain").Call("exponentialRampToValueAtTime", 0.001, startTime+duration)
+	osc.Call("stop", startTime+duration+0.05)
+}
+
+func playBeep(freq float64, duration float64, volume float64) {
+	scheduleBeep(freq, duration, volume, 0)
+}
+
+func playPaddleHit() {
+	playBeep(600, 0.08, 0.2)
+}
+
+func playBrickBreak() {
+	playBeep(800, 0.1, 0.2)
+}
+
+func playUnbreakable() {
+	playBeep(200, 0.15, 0.15)
+}
+
+func playMagic() {
+	scheduleBeep(1000, 0.06, 0.15, 0)
+	scheduleBeep(1400, 0.08, 0.15, 0.1)
+}
+
+func playPowerup() {
+	scheduleBeep(500, 0.08, 0.15, 0)
+	scheduleBeep(700, 0.08, 0.15, 0.1)
+	scheduleBeep(900, 0.12, 0.2, 0.2)
+}
+
+func playGameOver() {
+	scheduleBeep(600, 0.2, 0.2, 0)
+	scheduleBeep(400, 0.3, 0.2, 0.25)
+}
+
+func playWin() {
+	scheduleBeep(500, 0.12, 0.2, 0)
+	scheduleBeep(700, 0.12, 0.2, 0.15)
+	scheduleBeep(900, 0.2, 0.25, 0.3)
+}
+
+func playLevelComplete() {
+	scheduleBeep(600, 0.08, 0.2, 0)
+	scheduleBeep(800, 0.12, 0.2, 0.12)
+}
+
+func playBallLost() {
+	scheduleBeep(400, 0.2, 0.15, 0)
+	scheduleBeep(300, 0.25, 0.15, 0.2)
+}
+
+// ---- Reset globals to defaults ----
+func resetGlobals() {
+	canvasWidth = defaultCanvasWidth
+	canvasHeight = defaultCanvasHeight
+	baseGravity = defaultGravity
+	restitution = defaultRestitution
+	frictionCoeff = defaultFrictionCoeff
+	paddleWidth = defaultPaddleWidth
+	paddleHeight = defaultPaddleHeight
+	ballRadius = defaultBallRadius
+	brickRows = defaultBrickRows
+	brickCols = defaultBrickCols
+	brickWidth = defaultBrickWidth
+	brickHeight = defaultBrickHeight
+	brickPadding = defaultBrickPadding
+	brickOffsetTop = defaultBrickOffsetTop
+	paddleBoost = defaultPaddleBoost
+	brickBoost = defaultBrickBoost
+	maxSpeed = defaultMaxSpeed
+	paddleRadius = defaultPaddleRadius
+	brickRadius = defaultBrickRadius
+	unbreakableChance = defaultUnbreakableChance
+	magicChance = defaultMagicChance
+	powerUpDuration = defaultPowerUpDuration
+	blackHoleStrength = defaultBlackHoleStrength
+	startBallX = defaultStartBallX
+	startBallY = defaultStartBallY
+	startBallVx = defaultStartBallVx
+	startBallVy = defaultStartBallVy
+	enableLowGravity = defaultEnableLowGravity
+	enablePassThrough = defaultEnablePassThrough
+	enableNuke = defaultEnableNuke
+	enableReverseGravity = defaultEnableReverseGravity
+	enableDualBalls = defaultEnableDualBalls
+	enableBlackHole = defaultEnableBlackHole
+	enableMagnet = defaultEnableMagnet
+}
+
+// ---- Apply config overrides from map ----
+func applyConfig(config map[string]string) {
+	for key, val := range config {
+		switch key {
+		case "gravity":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				baseGravity = f
+			}
+		case "paddleBoost":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				paddleBoost = f
+			}
+		case "brickBoost":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				brickBoost = f
+			}
+		case "maxSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				maxSpeed = f
+			}
+		case "powerUpDuration":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				powerUpDuration = f
+			}
+		case "magnetStrength":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				magnetStrength = f
+			}
+		case "magnetRange":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				magnetRange = f
+			}
+		case "brickOffsetTop":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				brickOffsetTop = f
+			}
+		case "brickWidth", "defaultBrickWidth":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				brickWidth = f
+			}
+		case "brickHeight", "defaultBrickHeight":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				brickHeight = f
+			}
+		case "brickPadding", "defaultBrickPadding":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				brickPadding = f
+			}
+		case "brickRows":
+			if i, err := strconv.Atoi(val); err == nil {
+				brickRows = i
+			}
+		case "brickCols":
+			if i, err := strconv.Atoi(val); err == nil {
+				brickCols = i
+			}
+		case "ballX":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				startBallX = f
+			}
+		case "ballY":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				startBallY = f
+			}
+		case "ballVx":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				startBallVx = f
+			}
+		case "ballVy":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				startBallVy = f
+			}
+		case "ballRadius":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				ballRadius = f
+			}
+		case "enableLowGravity":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableLowGravity = b
+			}
+		case "enablePassThrough":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enablePassThrough = b
+			}
+		case "enableNuke":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableNuke = b
+			}
+		case "enableReverseGravity":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableReverseGravity = b
+			}
+		case "enableDualBalls":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableDualBalls = b
+			}
+		case "enableBlackHole":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableBlackHole = b
+			}
+		case "enableMagnet":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableMagnet = b
+			}
+		default:
+			// ignore unknown
+		}
+	}
+}
+
+// ---- Physics ----
+func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
+	cx := b.x + nx*b.r
+	cy := b.y + ny*b.r
+	contactVx := b.vx - b.omega*(cy-b.y)
+	contactVy := b.vy + b.omega*(cx-b.x)
+	relVx := contactVx - surfVx
+	relVy := contactVy - surfVy
+	vn := relVx*nx + relVy*ny
+	vt := relVx*(-ny) + relVy*nx
+	if vn >= 0 {
+		return
+	}
+	vnNew := -restitution * vn
+	deltaVn := vnNew - vn
+	maxFriction := frictionCoeff * math.Abs(deltaVn)
+	var deltaVt float64
+	if math.Abs(vt) < 0.001 {
+		deltaVt = -vt
+	} else {
+		friction := math.Min(math.Abs(vt), maxFriction)
+		deltaVt = -sign(vt) * friction
+	}
+	tx := -ny
+	ty := nx
+	b.vx += deltaVn*nx + deltaVt*tx
+	b.vy += deltaVn*ny + deltaVt*ty
+	b.omega -= 2 * deltaVt / b.r
+}
+
+// ---- Build bricks from level layout (with auto-scaling) ----
+func buildBricksFromLevel(lvl levelData) {
+	bricks = nil
+	if len(lvl.layout) == 0 {
+		initBricksDefault()
+		return
+	}
+
+	rows := len(lvl.layout)
+	cols := 0
+	for _, line := range lvl.layout {
+		trimmed := strings.TrimRight(line, " ")
+		if len(trimmed) > cols {
+			cols = len(trimmed)
+		}
+	}
+
+	totalWidth := float64(cols)*(brickWidth+brickPadding) - brickPadding
+	totalHeight := float64(rows)*(brickHeight+brickPadding) - brickPadding
+
+	margin := 20.0
+	maxWidth := canvasWidth - 2*margin
+	maxHeight := canvasHeight - 2*margin
+
+	scaleX := maxWidth / totalWidth
+	scaleY := maxHeight / totalHeight
+	scale := math.Min(scaleX, scaleY)
+	if scale > 1.0 {
+		scale = 1.0
+	}
+
+	scaledWidth := brickWidth * scale
+	scaledHeight := brickHeight * scale
+	scaledPadding := brickPadding * scale
+
+	scaledTotalWidth := float64(cols)*(scaledWidth+scaledPadding) - scaledPadding
+	gridOffsetLeft = (canvasWidth - scaledTotalWidth) / 2.0
+
+	var offsetTop float64
+	if brickOffsetTop >= 0 {
+		offsetTop = brickOffsetTop
+		if offsetTop < margin {
+			offsetTop = margin
+		}
+		scaledTotalHeight := float64(rows)*(scaledHeight+scaledPadding) - scaledPadding
+		if offsetTop+scaledTotalHeight > canvasHeight-margin {
+			offsetTop = canvasHeight - margin - scaledTotalHeight
+		}
+	} else {
+		scaledTotalHeight := float64(rows)*(scaledHeight+scaledPadding) - scaledPadding
+		offsetTop = (canvasHeight - scaledTotalHeight) / 2.0
+	}
+
+	for row := 0; row < rows; row++ {
+		line := lvl.layout[row]
+		trimmedLine := strings.TrimRight(line, " ")
+		for col := 0; col < cols; col++ {
+			var ch byte = ' '
+			if col < len(trimmedLine) {
+				ch = trimmedLine[col]
+			}
+			if ch == ' ' {
+				continue
+			}
+			x := gridOffsetLeft + float64(col)*(scaledWidth+scaledPadding)
+			y := offsetTop + float64(row)*(scaledHeight+scaledPadding)
+
+			var unbreakable bool
+			var magic bool
+			switch ch {
+			case 'U':
+				unbreakable = true
+			case 'M':
+				magic = true
+			case '#':
+				// normal
+			default:
+				// treat as normal
+			}
+			bricks = append(bricks, brick{
+				x:           x,
+				y:           y,
+				w:           scaledWidth,
+				h:           scaledHeight,
+				alive:       true,
+				unbreakable: unbreakable,
+				magic:       magic,
+			})
+		}
+	}
+}
+
+// ---- Fallback default bricks (also scaled) ----
+func initBricksDefault() {
+	bricks = nil
+
+	totalWidth := float64(brickCols)*(brickWidth+brickPadding) - brickPadding
+	totalHeight := float64(brickRows)*(brickHeight+brickPadding) - brickPadding
+
+	margin := 20.0
+	maxWidth := canvasWidth - 2*margin
+	maxHeight := canvasHeight - 2*margin
+
+	scaleX := maxWidth / totalWidth
+	scaleY := maxHeight / totalHeight
+	scale := math.Min(scaleX, scaleY)
+	if scale > 1.0 {
+		scale = 1.0
+	}
+
+	scaledWidth := brickWidth * scale
+	scaledHeight := brickHeight * scale
+	scaledPadding := brickPadding * scale
+
+	scaledTotalWidth := float64(brickCols)*(scaledWidth+scaledPadding) - scaledPadding
+	gridOffsetLeft = (canvasWidth - scaledTotalWidth) / 2.0
+
+	var offsetTop float64
+	if brickOffsetTop >= 0 {
+		offsetTop = brickOffsetTop
+		if offsetTop < margin {
+			offsetTop = margin
+		}
+		scaledTotalHeight := float64(brickRows)*(scaledHeight+scaledPadding) - scaledPadding
+		if offsetTop+scaledTotalHeight > canvasHeight-margin {
+			offsetTop = canvasHeight - margin - scaledTotalHeight
+		}
+	} else {
+		scaledTotalHeight := float64(brickRows)*(scaledHeight+scaledPadding) - scaledPadding
+		offsetTop = (canvasHeight - scaledTotalHeight) / 2.0
+	}
+
+	rand.Seed(1)
+
+	for row := 0; row < brickRows; row++ {
+		for col := 0; col < brickCols; col++ {
+			x := gridOffsetLeft + float64(col)*(scaledWidth+scaledPadding)
+			y := offsetTop + float64(row)*(scaledHeight+scaledPadding)
+			unbreakable := rand.Float64() < unbreakableChance
+			magic := !unbreakable && rand.Float64() < magicChance
+			bricks = append(bricks, brick{
+				x:           x,
+				y:           y,
+				w:           scaledWidth,
+				h:           scaledHeight,
+				alive:       true,
+				unbreakable: unbreakable,
+				magic:       magic,
+			})
+		}
+	}
+}
+
+// ---- Nuke ----
+func nukeBricks(hitBrick *brick) {
+	if len(bricks) == 0 {
+		return
+	}
+	firstBrick := &bricks[0]
+	offsetTop := firstBrick.y
+
+	hitRow := int((hitBrick.y - offsetTop) / (brickHeight + brickPadding))
+	hitCol := int((hitBrick.x - gridOffsetLeft) / (brickWidth + brickPadding))
+
+	for i := range bricks {
+		b := &bricks[i]
+		if !b.alive {
+			continue
+		}
+		row := int((b.y - offsetTop) / (brickHeight + brickPadding))
+		col := int((b.x - gridOffsetLeft) / (brickWidth + brickPadding))
+		if (row == hitRow && abs(col-hitCol) <= 2) || (col == hitCol && abs(row-hitRow) <= 2) {
+			b.alive = false
+			score++
+		}
+	}
+}
+
+// ---- Activate power╬ô├ç├ªup ----
+func activatePowerUpWithBrick(hitBrick *brick) {
+	if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
+		currentGravity = baseGravity
+	}
+	// Black Hole persists independently.
+
+	var available []int
+	if enableLowGravity {
+		available = append(available, POWER_LOW_GRAVITY)
+	}
+	if enablePassThrough {
+		available = append(available, POWER_PASS)
+	}
+	if enableNuke {
+		available = append(available, POWER_NUKE)
+	}
+	if enableReverseGravity {
+		available = append(available, POWER_REVERSE_GRAVITY)
+	}
+	if enableDualBalls {
+		available = append(available, POWER_DUAL_BALLS)
+	}
+	if enableBlackHole {
+		available = append(available, POWER_BLACKHOLE)
+	}
+	if enableMagnet {
+		available = append(available, POWER_MAGNET)
+	}
+
+	if len(available) == 0 {
+		return
+	}
+
+	p := available[rand.Intn(len(available))]
+
+	if blackHoleActive && (p == POWER_LOW_GRAVITY || p == POWER_REVERSE_GRAVITY) {
+		return
+	}
+
+	switch p {
+	case POWER_LOW_GRAVITY:
+		activePowerUp = POWER_LOW_GRAVITY
+		powerUpTimer = powerUpDuration
+		currentGravity = baseGravity / 3
+		powerUpText = "Low Gravity!"
+		powerUpTextTimer = powerUpDuration
+		playPowerup()
+	case POWER_PASS:
+		activePowerUp = POWER_PASS
+		powerUpTimer = powerUpDuration
+		powerUpText = "Pass Through!"
+		powerUpTextTimer = powerUpDuration
+		playPowerup()
+	case POWER_NUKE:
+		nukeBricks(hitBrick)
+		powerUpText = "Nuke!"
+		powerUpTextTimer = 2.0
+		playPowerup()
+	case POWER_REVERSE_GRAVITY:
+		activePowerUp = POWER_REVERSE_GRAVITY
+		powerUpTimer = powerUpDuration
+		currentGravity = -baseGravity
+		powerUpText = "Reverse Gravity!"
+		powerUpTextTimer = powerUpDuration
+		playPowerup()
+	case POWER_DUAL_BALLS:
+		if !secondBallActive {
+			secondBallActive = true
+			secondBall.x = ball.x
+			secondBall.y = ball.y
+			secondBall.vx = -ball.vx
+			secondBall.vy = ball.vy
+			secondBall.omega = -ball.omega
+			secondBall.angle = ball.angle
+			secondBall.r = ball.r
+			powerUpText = "Dual Balls!"
+			powerUpTextTimer = 2.0
+			playPowerup()
+		} else {
+			ball.vx *= 1.1
+			ball.vy *= 1.1
+			powerUpText = "Speed Boost!"
+			powerUpTextTimer = 2.0
+			playPowerup()
+		}
+	case POWER_BLACKHOLE:
+		blackHoleActive = true
+		blackHoleTimer = powerUpDuration
+		currentGravity = 0
+
+		// Move back and forth within a limited range around screen center.
+		blackHoleX = canvasWidth / 2
+		blackHoleY = canvasHeight / 2
+		blackHoleSpeed = (4 * blackHoleRange) / math.Max(powerUpDuration, 0.001)
+		if rand.Intn(2) == 0 {
+			blackHoleDirection = 1
+		} else {
+			blackHoleDirection = -1
+		}
+
+		powerUpText = "Black Hole!"
+		powerUpTextTimer = powerUpDuration
+		playPowerup()
+		if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
+			activePowerUp = POWER_NONE
+			powerUpTimer = 0
+		}
+	case POWER_MAGNET:
+		activePowerUp = POWER_MAGNET
+		powerUpTimer = powerUpDuration
+		powerUpText = "Magnets!"
+		powerUpTextTimer = powerUpDuration
+		playPowerup()
+	}
+}
+
+// ---- Load levels ----
+func loadLevels() {
+	levelIndex := 1
+	for {
+		url := "levels/level" + strconv.Itoa(levelIndex) + ".txt"
+		xhr := js.Global().Get("XMLHttpRequest").New()
+		xhr.Call("open", "GET", url, false)
+		xhr.Call("send")
+		status := xhr.Get("status").Int()
+		if status == 404 {
+			break
+		}
+		if status != 200 {
+			log("Error loading level " + strconv.Itoa(levelIndex) + ": status " + strconv.Itoa(status))
+			break
+		}
+		text := xhr.Get("responseText").String()
+		lines := strings.Split(text, "\n")
+		var configLines []string
+		var layoutLines []string
+		inLayout := false
+		for _, rawLine := range lines {
+			line := strings.TrimSpace(rawLine)
+			if line == "---" {
+				inLayout = true
+				continue
+			}
+			if !inLayout {
+				if line != "" && !strings.HasPrefix(line, "#") {
+					configLines = append(configLines, line)
+				}
+			} else {
+				layoutLine := strings.TrimRight(rawLine, "\r\n ")
+				layoutLines = append(layoutLines, layoutLine)
+			}
+		}
+		configMap := make(map[string]string)
+		for _, cfg := range configLines {
+			parts := strings.SplitN(cfg, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			configMap[key] = val
+		}
+		levels = append(levels, levelData{layout: layoutLines, config: configMap})
+		levelIndex++
+	}
+	if len(levels) == 0 {
+		log("No level files found; using default layout")
+		defaultLayout := []string{
+			"##################",
+			"#  #  #  #  #  #",
+			"#  #  #  #  #  #",
+			"##################",
+		}
+		levels = append(levels, levelData{layout: defaultLayout, config: make(map[string]string)})
+	}
+}
+
+// ---- Start a level ----
+func startLevel(index int) {
+	if index >= len(levels) {
+		gameOver = true
+		win = true
+		return
+	}
+	paused = false
+	leftPressed = false
+	rightPressed = false
+	// Reset all globals to defaults
+	resetGlobals()
+	// Apply level-specific config
+	applyConfig(levels[index].config)
+
+	ball.x, ball.y = startBallX, startBallY
+	ball.vx, ball.vy = startBallVx, startBallVy
+	ball.omega, ball.angle = 0, 0
+	ball.r = ballRadius
+	secondBallActive = false
+	paddle.x = (canvasWidth - paddleWidth) / 2
+	paddle.y = canvasHeight - 40
+	paddle.vx = 0
+
+	activePowerUp = POWER_NONE
+	powerUpTimer = 0
+	blackHoleActive = false
+	blackHoleTimer = 0
+	blackHoleX = canvasWidth / 2
+	blackHoleY = canvasHeight / 2
+	blackHoleDirection = 0
+	blackHoleSpeed = 0
+	currentGravity = baseGravity
+	powerUpText = ""
+	powerUpTextTimer = 0
+
+	buildBricksFromLevel(levels[index])
+	currentLevelIndex = index
+	log("Level " + strconv.Itoa(index+1) + " started")
+}
+
+// ---- Jump to a specific level (cheat) ----
+func jumpToLevel(index int) {
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(levels) {
+		index = len(levels) - 1
+	}
+	gameOver = false
+	win = false
+	startLevel(index)
+}
+
+// ---- Reset game ----
+func resetGame() {
+	lives = defaultLives
+	score = 0
+	gameOver = false
+	win = false
+	paused = false
+	leftPressed = false
+	rightPressed = false
+	startLevel(0)
+}
+
+// ---- Retry the level after losing all lives ----
+func retryCurrentLevel() {
+	lives = defaultLives
+	gameOver = false
+	win = false
+	paused = false
+	leftPressed = false
+	rightPressed = false
+	paddle.vx = 0
+	startLevel(currentLevelIndex)
+}
+
+// ---- Magnetic breakable bricks ----
+func applyBrickMagnetism(b *Ball, dt float64) {
+	if activePowerUp != POWER_MAGNET && !magnetCheat {
+		return
+	}
+
+	var nearest *brick
+	nearestDistance := magnetRange
+
+	for i := range bricks {
+		br := &bricks[i]
+		if !br.alive || br.unbreakable {
+			continue
+		}
+
+		centerX := br.x + br.w/2
+		centerY := br.y + br.h/2
+		dx := centerX - b.x
+		dy := centerY - b.y
+		distance := math.Sqrt(dx*dx + dy*dy)
+
+		if distance > 1 && distance < nearestDistance {
+			nearest = br
+			nearestDistance = distance
+		}
+	}
+
+	if nearest == nil {
+		return
+	}
+
+	centerX := nearest.x + nearest.w/2
+	centerY := nearest.y + nearest.h/2
+	dx := centerX - b.x
+	dy := centerY - b.y
+
+	falloff := 1.0 - nearestDistance/magnetRange
+	acceleration := magnetStrength * falloff
+	b.vx += (dx / nearestDistance) * acceleration * dt
+	b.vy += (dy / nearestDistance) * acceleration * dt
+}
+
+// ---- Update a single ball ----
+func updateBall(b *Ball, dt float64, isPrimary bool) {
+	b.vy += currentGravity * dt
+	applyBrickMagnetism(b, dt)
+
+	if blackHoleActive {
+		dx := blackHoleX - b.x
+		dy := blackHoleY - b.y
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist > 1.0 {
+			accX := (dx / dist) * blackHoleStrength
+			accY := (dy / dist) * blackHoleStrength
+			b.vx += accX * dt
+			b.vy += accY * dt
+		} else {
+			b.vx += (rand.Float64() - 0.5) * 10.0
+			b.vy += (rand.Float64() - 0.5) * 10.0
+		}
+	}
+
+	b.x += b.vx * dt
+	b.y += b.vy * dt
+	b.angle += b.omega * dt
+
+	// Walls
+	if b.x-b.r < 0 {
+		b.x = b.r
+		resolveCollisionBall(b, 1, 0, 0, 0)
+	}
+	if b.x+b.r > canvasWidth {
+		b.x = canvasWidth - b.r
+		resolveCollisionBall(b, -1, 0, 0, 0)
+	}
+	if b.y-b.r < 0 {
+		b.y = b.r
+		resolveCollisionBall(b, 0, 1, 0, 0)
+	}
+	if b.y+b.r > canvasHeight {
+		// Ball lost ╬ô├ç├┤ handled by caller
+		return
+	}
+
+	// Paddle
+	pLeft, pRight := paddle.x, paddle.x+paddle.w
+	pTop, pBottom := paddle.y, paddle.y+paddle.h
+	if b.vy > 0 &&
+		b.x+b.r > pLeft && b.x-b.r < pRight &&
+		b.y+b.r > pTop && b.y+b.r < pBottom {
+		b.y = pTop - b.r
+
+		hitPos := (b.x - pLeft) / paddle.w
+		if hitPos < 0 {
+			hitPos = 0
+		}
+		if hitPos > 1 {
+			hitPos = 1
+		}
+
+		angle := (hitPos - 0.5) * 2.0 * (60.0 * math.Pi / 180.0)
+		speed := math.Sqrt(b.vx*b.vx + b.vy*b.vy)
+		if speed < 100 {
+			speed = 100
+		}
+
+		newVx := speed * math.Sin(angle)
+		newVy := -speed * math.Cos(angle)
+
+		b.vx = newVx
+		b.vy = newVy
+
+		b.vy -= paddleBoost
+
+		if math.Abs(b.vy) > maxSpeed {
+			b.vy = math.Copysign(maxSpeed, b.vy)
+		}
+		if math.Abs(b.vx) > maxSpeed {
+			b.vx = math.Copysign(maxSpeed, b.vx)
+		}
+
+		b.omega += paddle.vx * 0.1 * (hitPos - 0.5)
+		if math.Abs(b.omega) > 30 {
+			b.omega = math.Copysign(30, b.omega)
+		}
+		playPaddleHit()
+	}
+
+	// ---- Bricks ----
+	for i := range bricks {
+		brickPtr := &bricks[i]
+		if !brickPtr.alive {
+			continue
+		}
+		if b.x+b.r > brickPtr.x && b.x-b.r < brickPtr.x+brickPtr.w &&
+			b.y+b.r > brickPtr.y && b.y-b.r < brickPtr.y+brickPtr.h {
+
+			if activePowerUp == POWER_PASS {
+				if !brickPtr.unbreakable {
+					brickPtr.alive = false
+					score++
+					playBrickBreak()
+				}
+				continue
+			}
+
+			// Normal collision
+			overlapX := 0.0
+			overlapY := 0.0
+			if b.x < brickPtr.x+brickPtr.w/2 {
+				overlapX = (b.x + b.r) - brickPtr.x
+			} else {
+				overlapX = brickPtr.x + brickPtr.w - (b.x - b.r)
+			}
+			if b.y < brickPtr.y+brickPtr.h/2 {
+				overlapY = (b.y + b.r) - brickPtr.y
+			} else {
+				overlapY = brickPtr.y + brickPtr.h - (b.y - b.r)
+			}
+			var nx, ny float64
+			if overlapX < overlapY {
+				if b.x < brickPtr.x+brickPtr.w/2 {
+					nx = -1
+				} else {
+					nx = 1
+				}
+				ny = 0
+			} else {
+				if b.y < brickPtr.y+brickPtr.h/2 {
+					ny = -1
+				} else {
+					ny = 1
+				}
+				nx = 0
+			}
+			if nx != 0 {
+				if nx == -1 {
+					b.x = brickPtr.x - b.r
+				} else if nx == 1 {
+					b.x = brickPtr.x + brickPtr.w + b.r
+				}
+			}
+			if ny != 0 {
+				if ny == -1 {
+					b.y = brickPtr.y - b.r
+				} else if ny == 1 {
+					b.y = brickPtr.y + brickPtr.h + b.r
+				}
+			}
+			resolveCollisionBall(b, nx, ny, 0, 0)
+
+			if brickPtr.unbreakable {
+				playUnbreakable()
+				continue
+			}
+
+			if brickPtr.magic {
+				if isPrimary {
+					activatePowerUpWithBrick(brickPtr)
+				}
+				brickPtr.alive = false
+				score++
+				playMagic()
+				continue
+			}
+
+			// Normal brick
+			if brickBoost != 0 {
+				b.vy -= brickBoost
+				if math.Abs(b.vy) > maxSpeed {
+					b.vy = math.Copysign(maxSpeed, b.vy)
+				}
+				if math.Abs(b.vx) > maxSpeed {
+					b.vx = math.Copysign(maxSpeed, b.vx)
+				}
+			}
+			brickPtr.alive = false
+			score++
+			playBrickBreak()
+		}
+	}
+}
+
+// ---- Update (main loop) ----
+func update(dt float64) {
+	if gameOver || paused {
+		return
+	}
+
+	const keyboardPaddleSpeed = 700.0
+
+	if leftPressed && !rightPressed {
+		paddle.vx = -keyboardPaddleSpeed
+	} else if rightPressed && !leftPressed {
+		paddle.vx = keyboardPaddleSpeed
+	} else {
+		paddle.vx = 0
+	}
+
+	paddle.x += paddle.vx * dt
+	if paddle.x < 0 {
+		paddle.x = 0
+	}
+	if paddle.x+paddle.w > canvasWidth {
+		paddle.x = canvasWidth - paddle.w
+	}
+
+	// Power╬ô├ç├ªup timers
+	if activePowerUp != POWER_NONE {
+		powerUpTimer -= dt
+		if powerUpTimer <= 0 {
+			if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
+				if !blackHoleActive {
+					currentGravity = baseGravity
+				}
+			}
+			activePowerUp = POWER_NONE
+			if !blackHoleActive {
+				powerUpText = ""
+				powerUpTextTimer = 0
+			}
+		}
+	}
+
+	if blackHoleActive {
+		blackHoleX += blackHoleDirection * blackHoleSpeed * dt
+
+		leftLimit := canvasWidth/2 - blackHoleRange
+		rightLimit := canvasWidth/2 + blackHoleRange
+
+		if blackHoleX <= leftLimit {
+			blackHoleX = leftLimit
+			blackHoleDirection = 1
+		}
+		if blackHoleX >= rightLimit {
+			blackHoleX = rightLimit
+			blackHoleDirection = -1
+		}
+
+		blackHoleTimer -= dt
+		if blackHoleTimer <= 0 {
+			blackHoleActive = false
+			blackHoleDirection = 0
+			blackHoleSpeed = 0
+			if activePowerUp != POWER_LOW_GRAVITY && activePowerUp != POWER_REVERSE_GRAVITY {
+				currentGravity = baseGravity
+			}
+			if activePowerUp == POWER_NONE {
+				powerUpText = ""
+				powerUpTextTimer = 0
+			}
+		}
+	}
+
+	if powerUpTextTimer > 0 {
+		powerUpTextTimer -= dt
+		if powerUpTextTimer <= 0 && !blackHoleActive && activePowerUp == POWER_NONE {
+			powerUpText = ""
+		}
+	}
+
+	// Primary ball
+	updateBall(&ball, dt, true)
+
+	primaryLost := ball.y+ball.r > canvasHeight
+	secondLost := secondBallActive &&
+		secondBall.y+secondBall.r > canvasHeight
+
+	if secondBallActive {
+		updateBall(&secondBall, dt, false)
+
+		if primaryLost && !secondLost {
+			// Keep playing with the second ball.
+			ball = secondBall
+			secondBallActive = false
+			playBallLost()
+		} else if secondLost && !primaryLost {
+			// Primary ball is still alive.
+			secondBallActive = false
+			playBallLost()
+		} else if primaryLost && secondLost {
+			// Both balls were lost.
+			secondBallActive = false
+			lives--
+			playBallLost()
+
+			if lives <= 0 {
+				gameOver = true
+				win = false
+				playGameOver()
+			} else {
+				resetBalls()
+			}
+		}
+	} else if primaryLost {
+		// Only one ball was active.
+		lives--
+		playBallLost()
+
+		if lives <= 0 {
+			gameOver = true
+			win = false
+			playGameOver()
+		} else {
+			resetBalls()
+		}
+	}
+	// Check win (all bricks destroyed except unbreakable)
+	// Complete the level when no breakable bricks remain.
+	allBreakableDead := true
+
+	for _, b := range bricks {
+		if b.alive && !b.unbreakable {
+			allBreakableDead = false
+			break
+		}
+	}
+
+	if allBreakableDead {
+		nextLevel := currentLevelIndex + 1
+
+		if nextLevel >= len(levels) {
+			gameOver = true
+			win = true
+			playWin()
+		} else {
+			playLevelComplete()
+			startLevel(nextLevel)
+		}
+	}
+}
+
+// ---- Reset balls on life lost ----
+func resetBalls() {
+	ball.x, ball.y = startBallX, startBallY
+	ball.vx, ball.vy = startBallVx, startBallVy
+	ball.omega, ball.angle = 0, 0
+	secondBallActive = false
+	paddle.x = (canvasWidth - paddleWidth) / 2
+	paddle.vx = 0
+}
+
+// ---- Draw ----
+func draw() {
+	ctx.Set("fillStyle", palette[0])
+	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
+
+	for _, b := range bricks {
+		if !b.alive {
+			continue
+		}
+		var fillColor string
+		if b.magic {
+			fillColor = palette[1]
+		} else if b.unbreakable {
+			fillColor = palette[6]
+		} else {
+			fillColor = palette[2]
+		}
+		ctx.Set("fillStyle", fillColor)
+		ctx.Call("beginPath")
+		ctx.Call("roundRect", b.x, b.y, b.w, b.h, brickRadius)
+		ctx.Call("fill")
+
+		if b.magic {
+			ctx.Set("strokeStyle", "#ffd700")
+			ctx.Set("lineWidth", 2)
+		} else if b.unbreakable {
+			ctx.Set("strokeStyle", "#e76f51")
+			ctx.Set("lineWidth", 2)
+			ctx.Set("setLineDash", []interface{}{4, 4})
+		} else {
+			ctx.Set("strokeStyle", "#27ae60")
+			ctx.Set("lineWidth", 1)
+			ctx.Set("setLineDash", []interface{}{})
+		}
+		ctx.Call("beginPath")
+		ctx.Call("roundRect", b.x, b.y, b.w, b.h, brickRadius)
+		ctx.Call("stroke")
+		ctx.Set("setLineDash", []interface{}{})
+	}
+
+	if blackHoleActive && showBlackHole {
+		ctx.Set("fillStyle", "#000000")
+		ctx.Set("strokeStyle", "#9d4edd")
+		ctx.Set("lineWidth", 5)
+		ctx.Call("beginPath")
+		ctx.Call("arc", blackHoleX, blackHoleY, 28, 0, 2*math.Pi)
+		ctx.Call("fill")
+		ctx.Call("stroke")
+
+		ctx.Set("strokeStyle", "#c77dff")
+		ctx.Set("lineWidth", 2)
+		ctx.Call("beginPath")
+		ctx.Call("arc", blackHoleX, blackHoleY, 42, 0, 2*math.Pi)
+		ctx.Call("stroke")
+	}
+
+	drawBall(ball.x, ball.y, ball.angle, palette[3], palette[5])
+	if secondBallActive {
+		drawBall(secondBall.x, secondBall.y, secondBall.angle, palette[7], palette[8])
+	}
+
+	ctx.Set("fillStyle", palette[1])
+	ctx.Call("beginPath")
+	ctx.Call("roundRect", paddle.x, paddle.y, paddle.w, paddle.h, paddleRadius)
+	ctx.Call("fill")
+
+	ctx.Set("fillStyle", palette[4])
+	ctx.Set("font", "20px sans-serif")
+	ctx.Call("fillText", "Score: "+strconv.Itoa(score), 10, 30)
+	ctx.Call("fillText", "Lives: "+strconv.Itoa(lives), 10, 60)
+	ctx.Call("fillText", "Level: "+strconv.Itoa(currentLevelIndex+1)+"/"+strconv.Itoa(len(levels)), 10, 90)
+
+	if powerUpText != "" && powerUpTextTimer > 0 {
+		ctx.Set("fillStyle", palette[4])
+		ctx.Set("font", "20px sans-serif")
+		ctx.Call("fillText", powerUpText, 10, 120)
+	}
+
+	if paused && !gameOver {
+		ctx.Set("fillStyle", palette[4])
+		ctx.Set("font", "60px sans-serif")
+		msg := "PAUSED"
+		width := ctx.Call("measureText", msg).Get("width").Float()
+		ctx.Call("fillText", msg, (canvasWidth-width)/2, canvasHeight/2)
+
+		ctx.Set("font", "24px sans-serif")
+		subtitle := "Press Space or Escape to continue"
+		subtitleWidth := ctx.Call("measureText", subtitle).Get("width").Float()
+		ctx.Call("fillText", subtitle, (canvasWidth-subtitleWidth)/2, canvasHeight/2+50)
+	}
+
+	if gameOver {
+		ctx.Set("fillStyle", palette[4])
+		ctx.Set("textAlign", "center")
+		ctx.Set("font", "60px sans-serif")
+
+		msg := "GAME OVER"
+		if win {
+			msg = "YOU WIN!"
+		}
+		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2)
+
+		ctx.Set("font", "24px sans-serif")
+		if win {
+			ctx.Call("fillText", "Press N to start again", canvasWidth/2, canvasHeight/2+50)
+		} else {
+			ctx.Call("fillText", "Press Space, Enter, or left-click to retry", canvasWidth/2, canvasHeight/2+50)
+		}
+
+		ctx.Set("textAlign", "start")
+	}
+}
+
+func drawBall(x, y, angle float64, fillColor, strokeColor string) {
+	ctx.Call("save")
+	ctx.Call("translate", x, y)
+	ctx.Call("rotate", angle)
+	ctx.Set("fillStyle", fillColor)
+	ctx.Call("beginPath")
+	ctx.Call("arc", 0, 0, ballRadius, 0, 2*math.Pi)
+	ctx.Call("fill")
+	ctx.Set("strokeStyle", strokeColor)
+	ctx.Set("lineWidth", 2)
+	ctx.Call("beginPath")
+	ctx.Call("moveTo", 0, -ballRadius)
+	ctx.Call("lineTo", 0, ballRadius)
+	ctx.Call("stroke")
+	ctx.Set("fillStyle", strokeColor)
+	ctx.Call("beginPath")
+	ctx.Call("arc", 0, 0, 2, 0, 2*math.Pi)
+	ctx.Call("fill")
+	ctx.Call("restore")
+}
+
+// ---- Game loop ----
+func gameLoop(this js.Value, args []js.Value) interface{} {
+	defer func() {
+		if r := recover(); r != nil {
+			js.Global().Get("console").Call("error", "Panic in gameLoop:", r)
+		}
+	}()
+	now := js.Global().Get("performance").Call("now").Float()
+	if lastTime == 0 {
+		lastTime = now
+	}
+	dt := (now - lastTime) / 1000.0
+	if dt > 0.05 {
+		dt = 0.05
+	}
+	lastTime = now
+	update(dt)
+	draw()
+	js.Global().Call("requestAnimationFrame", loopFunc)
+	return nil
+}
+
+// ---- Input ----
+func setupInput() {
+	keyDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
+		defer func() {
+			if r := recover(); r != nil {
+				js.Global().Get("console").Call("error", "Panic in keydown handler:", fmt.Sprint(r))
+				ret = nil
+			}
+		}()
+
+		if len(args) == 0 {
+			return nil
+		}
+		e := args[0]
+		e.Call("preventDefault")
+		key := e.Get("key").String()
+
+		// Retry the same level after losing all lives. This must come
+		// before pause handling so Space retries instead of toggling pause.
+		if gameOver && !win {
+			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
+				retryCurrentLevel()
+			}
+			return nil
+		}
+
+		// Initialize audio only on key press (not mouse move)
+		if !audioInitialized {
+			initAudio()
+		}
+
+		// Hidden magnetism cheat. It persists across levels until toggled again.
+		if (key == "m" || key == "M") && !e.Get("repeat").Bool() {
+			magnetCheat = !magnetCheat
+			if magnetCheat {
+				powerUpText = "Magnets!"
+			} else {
+				powerUpText = "Magnets off"
+			}
+			powerUpTextTimer = 2.0
+			return nil
+		}
+
+		// Pause/resume. Ignore key-repeat so holding the key toggles only once.
+		if (key == " " || key == "Escape") && !e.Get("repeat").Bool() {
+			paused = !paused
+			leftPressed = false
+			rightPressed = false
+			paddle.vx = 0
+			return nil
+		}
+
+		// Cheat keys: N = next level, P = previous level
+		if key == "n" || key == "N" {
+			if !gameOver && currentLevelIndex < len(levels)-1 {
+				jumpToLevel(currentLevelIndex + 1)
+			} else if gameOver {
+				gameOver = false
+				win = false
+				if currentLevelIndex < len(levels)-1 {
+					jumpToLevel(currentLevelIndex + 1)
+				} else {
+					jumpToLevel(0)
+				}
+			}
+			return nil
+		}
+		if key == "p" || key == "P" {
+			if !gameOver && currentLevelIndex > 0 {
+				jumpToLevel(currentLevelIndex - 1)
+			} else if gameOver {
+				gameOver = false
+				win = false
+				if currentLevelIndex > 0 {
+					jumpToLevel(currentLevelIndex - 1)
+				} else {
+					jumpToLevel(0)
+				}
+			}
+			return nil
+		}
+
+		// Paddle controls
+		if key == "ArrowLeft" {
+			leftPressed = true
+		} else if key == "ArrowRight" {
+			rightPressed = true
+		}
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "keydown", keyDown)
+
+	keyUp = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
+		defer func() {
+			if r := recover(); r != nil {
+				js.Global().Get("console").Call("error", "Panic in keyup handler:", fmt.Sprint(r))
+				ret = nil
+			}
+		}()
+
+		if len(args) == 0 {
+			return nil
+		}
+		e := args[0]
+		e.Call("preventDefault")
+		key := e.Get("key").String()
+		if key == "ArrowLeft" {
+			leftPressed = false
+		} else if key == "ArrowRight" {
+			rightPressed = false
+		}
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "keyup", keyUp)
+
+	// Mouse (no audio init here)
+	var lastX float64
+	mouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if paused || len(args) == 0 {
+			return nil
+		}
+		leftPressed = false
+		rightPressed = false
+		e := args[0]
+		rect := canvas.Call("getBoundingClientRect")
+		x := e.Get("clientX").Float() - rect.Get("left").Float()
+		if x < 0 {
+			x = 0
+		}
+		if x > canvasWidth-paddle.w {
+			x = canvasWidth - paddle.w
+		}
+		if lastX != 0 {
+			paddle.vx = (x - paddle.x) * 12
+		}
+		paddle.x = x
+		lastX = x
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "mousemove", mouseMove)
+
+	// Retry the current level with the left mouse button after game over.
+	mouseDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
+		defer func() {
+			if r := recover(); r != nil {
+				js.Global().Get("console").Call("error", "Panic in mousedown handler:", fmt.Sprint(r))
+				ret = nil
+			}
+		}()
+
+		if len(args) == 0 {
+			return nil
+		}
+
+		e := args[0]
+		if e.Get("button").Int() == 0 && gameOver && !win {
+			e.Call("preventDefault")
+			retryCurrentLevel()
+		}
+		return nil
+	})
+	canvas.Call("addEventListener", "mousedown", mouseDown)
+
+	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		paddle.vx = 0
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "mouseleave", mouseLeave)
+}
+
+// ---- main ----
+func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			js.Global().Get("console").Call("error", "Panic in main:", r)
+		}
+	}()
+
+	log("main: starting")
+	canvas = doc.Call("getElementById", "gameCanvas")
+	if canvas.IsNull() {
+		log("canvas not found!")
+		return
+	}
+	ctx = canvas.Call("getContext", "2d")
+	if ctx.IsNull() {
+		log("context not found!")
+		return
+	}
+	log("canvas and context obtained")
+
+	loadLevels()
+	setupInput()
+	resetGame()
+
+	loopFunc = js.FuncOf(gameLoop)
+	js.Global().Call("requestAnimationFrame", loopFunc)
+	log("main: requestAnimationFrame called")
+
+	select {}
+}
