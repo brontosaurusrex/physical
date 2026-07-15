@@ -1,17 +1,26 @@
-enablePassThrough=true
+enablePassThrough=false
 enableBlackHole=true
+brickWidth=15
+brickHeight=30
+brickPadding=10
 ---
-M####MMM####M
-######M######
-#####MM######
-######MM#####
-######M######
-M####MMM####M
+                  %MM%M                  
+               %%%M% MMM                 
+            %%%%#%%%%%M                  
+           %%#%##M%%%%                   
+         M%MM###%M%#M                    
+            #%%%%%%MM             M      
+              M%%M#%MM         MM%###%%  
+ MM           M M%%%%%%       %%% %M%##  
+ ##%              %#%%%M   ##%           
+  % M%%%%%M     ###%##%##M#M             
+            %M%####%#####%%              
+                 %%%%%#%#%               
+                  M###%%%     M          
+              MM           M             
+                     M M
 
 
 
 
-
-
-
-
+                     
