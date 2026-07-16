@@ -6,7 +6,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
   >
-  <title>Breakout with Spin</title>
+  <title>Physical</title>
 
   <style>
     @font-face {
@@ -29,7 +29,7 @@
     html,
     body {
       width: 100%;
-      height: 100%;
+      min-height: 100%;
       margin: 0;
       overflow: hidden;
       overscroll-behavior: none;
@@ -40,11 +40,14 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      min-height: 100svh;
+      min-height: 100dvh;
+      min-height: var(--app-height, 100dvh);
       padding:
-        env(safe-area-inset-top)
-        env(safe-area-inset-right)
-        env(safe-area-inset-bottom)
-        env(safe-area-inset-left);
+        max(6px, env(safe-area-inset-top))
+        max(6px, env(safe-area-inset-right))
+        max(6px, env(safe-area-inset-bottom))
+        max(6px, env(safe-area-inset-left));
     }
 
     #gameShell {
@@ -53,14 +56,17 @@
       align-items: center;
       justify-content: center;
       width: 100%;
-      height: 100%;
+      height: calc(var(--app-height, 100dvh) - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+      max-height: var(--app-height, 100dvh);
     }
 
     canvas {
       display: block;
-      width: min(1800px, 100vw);
+      width: auto;
       height: auto;
-      max-height: 100vh;
+      max-width: calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)));
+      max-height: calc(var(--app-height, 100dvh) - max(20px, env(safe-area-inset-top)) - max(64px, env(safe-area-inset-bottom)));
+      aspect-ratio: 2 / 1;
       object-fit: contain;
       background: #16213e;
       border-radius: 8px;
@@ -74,8 +80,8 @@
 
     #mobileControls {
       position: fixed;
-      right: max(10px, env(safe-area-inset-right));
-      bottom: max(10px, env(safe-area-inset-bottom));
+      right: max(12px, env(safe-area-inset-right));
+      bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
       display: flex;
       gap: 10px;
       z-index: 20;
@@ -155,6 +161,18 @@
       await document.fonts.ready;
       go.run(result.instance);
     }
+
+
+    function updateViewportHeight() {
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${window.innerHeight}px`
+      );
+    }
+
+    updateViewportHeight();
+    window.addEventListener("resize", updateViewportHeight);
+    window.addEventListener("orientationchange", updateViewportHeight);
 
     loadGame().catch(console.error);
 
