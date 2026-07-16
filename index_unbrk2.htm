@@ -17,11 +17,6 @@
       font-display: swap;
     }
 
-    :root {
-      color-scheme: dark;
-      font-family: GameFont, monospace;
-    }
-
     * {
       box-sizing: border-box;
     }
@@ -29,7 +24,7 @@
     html,
     body {
       width: 100%;
-      min-height: 100%;
+      height: 100%;
       margin: 0;
       overflow: hidden;
       overscroll-behavior: none;
@@ -37,40 +32,28 @@
     }
 
     body {
+      position: fixed;
+      inset: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100svh;
-      min-height: 100dvh;
-      min-height: var(--app-height, 100dvh);
-      padding:
-        max(6px, env(safe-area-inset-top))
-        max(6px, env(safe-area-inset-right))
-        max(6px, env(safe-area-inset-bottom))
-        max(6px, env(safe-area-inset-left));
+      font-family: GameFont, monospace;
     }
 
     #gameShell {
       position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      height: calc(var(--app-height, 100dvh) - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
-      max-height: var(--app-height, 100dvh);
-    }
-
-    canvas {
-      display: block;
-      width: auto;
-      height: auto;
-      max-width: calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)));
-      max-height: calc(var(--app-height, 100dvh) - max(20px, env(safe-area-inset-top)) - max(64px, env(safe-area-inset-bottom)));
-      aspect-ratio: 2 / 1;
-      object-fit: contain;
-      background: #16213e;
+      flex: none;
+      overflow: hidden;
       border-radius: 8px;
       box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+      background: #16213e;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: #16213e;
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
@@ -79,23 +62,25 @@
     }
 
     #mobileControls {
-      position: fixed;
-      right: max(12px, env(safe-area-inset-right));
-      bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
+      position: absolute;
+      top: 8px;
+      right: 8px;
       display: flex;
-      gap: 10px;
+      gap: 6px;
       z-index: 20;
     }
 
     #mobileControls button {
-      min-width: 56px;
-      min-height: 44px;
-      padding: 8px 12px;
+      width: auto;
+      min-width: 44px;
+      height: 34px;
+      padding: 4px 8px;
       border: 1px solid rgba(255, 255, 255, 0.35);
-      border-radius: 10px;
+      border-radius: 7px;
       color: white;
-      background: rgba(10, 10, 20, 0.72);
-      font: 700 14px GameFont, monospace;
+      background: rgba(10, 10, 20, 0.68);
+      font: 700 11px GameFont, monospace;
+      line-height: 1;
       touch-action: manipulation;
     }
 
@@ -114,8 +99,7 @@
     }
 
     @media (orientation: portrait) {
-      #gameShell,
-      #mobileControls {
+      #gameShell {
         display: none;
       }
 
@@ -129,11 +113,11 @@
 <body>
   <div id="gameShell">
     <canvas id="gameCanvas" width="1800" height="900"></canvas>
-  </div>
 
-  <div id="mobileControls">
-    <button id="pauseButton" type="button">Pause</button>
-    <button id="soundButton" type="button">Sound</button>
+    <div id="mobileControls">
+      <button id="pauseButton" type="button">Pause</button>
+      <button id="soundButton" type="button">Sound</button>
+    </div>
   </div>
 
   <div id="rotateOverlay">
@@ -144,8 +128,52 @@
   <script>
     const go = new Go();
 
+    const NATIVE_WIDTH = 1800;
+    const NATIVE_HEIGHT = 900;
+    const EDGE_GAP = 8;
+
+    function visibleViewportSize() {
+      const viewport = window.visualViewport;
+
+      return {
+        width: viewport ? viewport.width : window.innerWidth,
+        height: viewport ? viewport.height : window.innerHeight
+      };
+    }
+
+    function fitGameToViewport() {
+      const shell = document.getElementById("gameShell");
+      const { width, height } = visibleViewportSize();
+
+      const availableWidth = Math.max(1, width - EDGE_GAP * 2);
+      const availableHeight = Math.max(1, height - EDGE_GAP * 2);
+
+      const scale = Math.min(
+        availableWidth / NATIVE_WIDTH,
+        availableHeight / NATIVE_HEIGHT,
+        1
+      );
+
+      shell.style.width = `${Math.floor(NATIVE_WIDTH * scale)}px`;
+      shell.style.height = `${Math.floor(NATIVE_HEIGHT * scale)}px`;
+    }
+
+    fitGameToViewport();
+
+    window.addEventListener("resize", fitGameToViewport);
+    window.addEventListener("orientationchange", () => {
+      setTimeout(fitGameToViewport, 150);
+      setTimeout(fitGameToViewport, 500);
+    });
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", fitGameToViewport);
+      window.visualViewport.addEventListener("scroll", fitGameToViewport);
+    }
+
     async function loadGame() {
       const response = await fetch("main_unbrk2.wasm");
+
       if (!response.ok) {
         throw new Error(
           `Failed to load WASM: ${response.status} ${response.statusText}`
@@ -159,39 +187,12 @@
 
       await document.fonts.load("700 18px GameFont");
       await document.fonts.ready;
+
+      fitGameToViewport();
       go.run(result.instance);
     }
 
-
-    function updateViewportHeight() {
-      document.documentElement.style.setProperty(
-        "--app-height",
-        `${window.innerHeight}px`
-      );
-    }
-
-    updateViewportHeight();
-    window.addEventListener("resize", updateViewportHeight);
-    window.addEventListener("orientationchange", updateViewportHeight);
-
     loadGame().catch(console.error);
-
-    async function requestLandscape() {
-      try {
-        if (
-          screen.orientation &&
-          screen.orientation.lock &&
-          window.matchMedia("(orientation: landscape)").matches
-        ) {
-          await screen.orientation.lock("landscape");
-        }
-      } catch (_) {
-        // Orientation locking usually requires fullscreen or an installed PWA.
-        // The portrait overlay remains the reliable fallback.
-      }
-    }
-
-    document.addEventListener("pointerdown", requestLandscape, { once: true });
   </script>
 </body>
 </html>
