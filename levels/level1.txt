@@ -1,8 +1,14 @@
 enablePassThrough=false
 enableBlackHole=true
+ballX=1400.0
+ballY=100.0
+ballVx=1.0
+ballVy=-1.0
 brickWidth=15
 brickHeight=30
 brickPadding=10
+
+
 ---
                   %MM%M                  
                %%%M% MMM                 

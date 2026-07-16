@@ -24,6 +24,7 @@ unbreakableColor=#8338ec
 secondBallColor=#fb5607
 secondBallSpinColor=#fb5607
 
+magicColor=#ffbe0b
 magicStrokeColor=#ffbe0b
 unbreakableStrokeColor=#8338ec
 brickStrokeColor=#8338ec
