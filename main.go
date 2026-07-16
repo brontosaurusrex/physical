@@ -1915,17 +1915,8 @@ func clampFloat(x, min, max float64) float64 {
 	return x
 }
 
-func pointerInSideZone(e js.Value) bool {
-	rect := canvas.Call("getBoundingClientRect")
-	x := e.Get("clientX").Float() - rect.Get("left").Float()
-	width := rect.Get("width").Float()
-
-	return (x >= 0 && x < width*0.22) ||
-		(x > width*0.78 && x <= width)
-}
-
 func verticalDragToHorizontalDelta(deltaY float64) float64 {
-	// Finger up moves paddle right; finger down moves paddle left.
+	// Finger down moves paddle right; finger up moves paddle left.
 	rect := canvas.Call("getBoundingClientRect")
 	height := rect.Get("height").Float()
 	if height <= 0 {
@@ -1933,7 +1924,7 @@ func verticalDragToHorizontalDelta(deltaY float64) float64 {
 	}
 
 	scaleY := canvasHeight / height
-	return -deltaY * scaleY * 2.2
+	return deltaY * scaleY * 2.2
 }
 
 // ---- Input ----
@@ -2128,7 +2119,7 @@ func setupInput() {
 		pointerType := e.Get("pointerType").String()
 
 		if (pointerType == "touch" || pointerType == "pen") &&
-			pointerInSideZone(e) && !touchControlActive {
+			!touchControlActive {
 			touchControlActive = true
 			touchPointerID = e.Get("pointerId").Int()
 			touchLastY = e.Get("clientY").Float()
@@ -2244,6 +2235,43 @@ func setupInput() {
 
 	bindMobileButton("soundButton", func() {
 		toggleSound()
+	})
+
+	bindMobileButton("previousLevelButton", func() {
+		if !gameOver && currentLevelIndex > 0 {
+			jumpToLevel(currentLevelIndex - 1)
+		} else if gameOver {
+			gameOver = false
+			win = false
+			if currentLevelIndex > 0 {
+				jumpToLevel(currentLevelIndex - 1)
+			} else {
+				jumpToLevel(0)
+			}
+		}
+	})
+
+	bindMobileButton("nextLevelButton", func() {
+		if !gameOver && currentLevelIndex < len(levels)-1 {
+			jumpToLevel(currentLevelIndex + 1)
+		} else if gameOver {
+			gameOver = false
+			win = false
+			if currentLevelIndex < len(levels)-1 {
+				jumpToLevel(currentLevelIndex + 1)
+			} else {
+				jumpToLevel(0)
+			}
+		}
+	})
+
+	bindMobileButton("magnetsButton", func() {
+		magnetCheat = !magnetCheat
+		if magnetCheat {
+			showStatus("Magnets!", 2.0)
+		} else {
+			showStatus("Magnets off", 2.0)
+		}
 	})
 }
 
