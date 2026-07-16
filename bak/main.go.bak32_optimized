@@ -56,6 +56,7 @@ const (
 	defaultEnableMagnet         = true
 	defaultEnableInfluencer     = true
 
+	enableSounds  = true
 	showBlackHole = false // Set true to draw the moving black hole.
 )
 
@@ -107,7 +108,6 @@ var (
 	enableMagnet         = defaultEnableMagnet
 	enableInfluencer     = defaultEnableInfluencer
 
-	enableSounds = true
 	paused       bool
 	leftPressed  bool
 	rightPressed bool
@@ -191,7 +191,6 @@ var (
 	bricks                   []brick
 	brickGrid                map[int][]int
 	remainingBreakableBricks int
-	lastBrickSoundPlayed     bool
 	score                    int
 	lives                    int
 	gameOver                 bool
@@ -199,16 +198,14 @@ var (
 
 	lastTime float64
 
-	loopFunc      js.Func
-	keyDown       js.Func
-	keyUp         js.Func
-	pointerMove   js.Func
-	pointerDown   js.Func
-	pointerUp     js.Func
-	pointerCancel js.Func
-	mouseLeave    js.Func
+	loopFunc   js.Func
+	keyDown    js.Func
+	keyUp      js.Func
+	mouseMove  js.Func
+	mouseDown  js.Func
+	mouseLeave js.Func
 
-	// ---- PowerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòùΓö£ΓöñΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö¼├æ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£Γòæ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬ú╬ô├╗├åΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£ΓòæΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö£┬¬Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝╬ô├▓┬ÑΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬╝╬ô├▓┬Ñup states ----
+	// ---- PowerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬úΓö¼ΓòæΓò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬╝Γö¼┬╝up states ----
 	activePowerUp  int
 	powerUpTimer   float64
 	currentGravity float64
@@ -248,7 +245,6 @@ var (
 
 	// ---- Audio ----
 	audioCtx         js.Value
-	audioMaster      js.Value
 	audioInitialized bool
 )
 
@@ -318,7 +314,6 @@ func destroyBrick(br *brick) bool {
 		remainingBreakableBricks = 0
 	}
 	bricksDirty = true
-	maybePlayLastBrickSound()
 	return true
 }
 
@@ -335,15 +330,7 @@ func destroyAnyBrick(br *brick) bool {
 		}
 	}
 	bricksDirty = true
-	maybePlayLastBrickSound()
 	return true
-}
-
-func maybePlayLastBrickSound() {
-	if remainingBreakableBricks == 0 && !lastBrickSoundPlayed {
-		lastBrickSoundPlayed = true
-		playLastBrick()
-	}
 }
 
 func updateHUDCache() {
@@ -362,25 +349,6 @@ func updateHUDCache() {
 	}
 }
 
-func toggleSound() {
-	enableSounds = !enableSounds
-
-	if enableSounds {
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
-		showStatus("Sound on", 2.0)
-	} else {
-		if audioInitialized && !audioMaster.IsUndefined() && !audioMaster.IsNull() {
-			audioMaster.Get("gain").Call("cancelScheduledValues", audioCtx.Get("currentTime").Float())
-			audioMaster.Get("gain").Set("value", 0)
-		}
-		showStatus("Sound off", 2.0)
-	}
-}
-
 // ---- Audio (non-blocking, scheduled via Web Audio) ----
 func initAudio() {
 	if audioInitialized || !enableSounds {
@@ -391,7 +359,6 @@ func initAudio() {
 		if r := recover(); r != nil {
 			audioInitialized = false
 			audioCtx = js.Undefined()
-			audioMaster = js.Undefined()
 			js.Global().Get("console").Call("error", "Audio init panic:", fmt.Sprint(r))
 		}
 	}()
@@ -406,176 +373,92 @@ func initAudio() {
 		return
 	}
 
-	audioCtx = ctor.New()
-	if audioCtx.IsUndefined() || audioCtx.IsNull() {
+	ctx := ctor.New()
+	if ctx.IsUndefined() || ctx.IsNull() {
 		log("Failed to create AudioContext")
 		return
 	}
 
-	audioMaster = audioCtx.Call("createGain")
-	audioMaster.Get("gain").Set("value", 0.33)
-	audioMaster.Call("connect", audioCtx.Get("destination"))
-
+	audioCtx = ctx
 	audioInitialized = true
-	audioMaster.Get("gain").Set("value", 0.33)
-	ensureAudioRunning()
+
+	// AudioContext.resume() returns a Promise. It does not need to be awaited
+	// here because this function is called directly from a user keypress.
+	if state := audioCtx.Get("state"); state.Type() == js.TypeString && state.String() == "suspended" {
+		audioCtx.Call("resume")
+	}
+
 	log("Audio initialized")
 }
 
-func ensureAudioRunning() {
-	if !audioInitialized || audioCtx.IsUndefined() || audioCtx.IsNull() {
+func scheduleBeep(freq float64, duration float64, volume float64, delay float64) {
+	if !audioInitialized || !enableSounds || audioCtx.IsNull() || audioCtx.IsUndefined() {
 		return
 	}
-	if enableSounds && !audioMaster.IsUndefined() && !audioMaster.IsNull() {
-		audioMaster.Get("gain").Set("value", 0.33)
-	}
-	state := audioCtx.Get("state")
-	if state.Type() == js.TypeString && state.String() == "suspended" {
-		audioCtx.Call("resume")
-	}
-}
-
-func scheduleTone(
-	oscType string,
-	startFreq float64,
-	endFreq float64,
-	duration float64,
-	volume float64,
-	delay float64,
-) {
-	if !audioInitialized || !enableSounds ||
-		audioCtx.IsNull() || audioCtx.IsUndefined() ||
-		audioMaster.IsNull() || audioMaster.IsUndefined() {
-		return
-	}
-
 	defer func() {
-		_ = recover()
+		if r := recover(); r != nil {
+			// Ignore audio errors silently
+		}
 	}()
-
-	ensureAudioRunning()
-
-	start := audioCtx.Get("currentTime").Float() + delay
-	stop := start + duration
-
+	startTime := audioCtx.Get("currentTime").Float() + delay
 	osc := audioCtx.Call("createOscillator")
 	gain := audioCtx.Call("createGain")
-
-	osc.Set("type", oscType)
-	osc.Get("frequency").Call("setValueAtTime", math.Max(startFreq, 1), start)
-	osc.Get("frequency").Call("exponentialRampToValueAtTime", math.Max(endFreq, 1), stop)
-
-	gain.Get("gain").Call("setValueAtTime", 0.0001, start)
-	gain.Get("gain").Call("exponentialRampToValueAtTime", math.Max(volume, 0.0001), start+0.008)
-	gain.Get("gain").Call("exponentialRampToValueAtTime", 0.0001, stop)
-
+	osc.Set("type", "sine")
+	osc.Set("frequency", freq)
+	gain.Set("gain", volume)
 	osc.Call("connect", gain)
-	gain.Call("connect", audioMaster)
-	osc.Call("start", start)
-	osc.Call("stop", stop+0.02)
+	gain.Call("connect", audioCtx.Get("destination"))
+	osc.Call("start", startTime)
+	gain.Get("gain").Call("exponentialRampToValueAtTime", 0.001, startTime+duration)
+	osc.Call("stop", startTime+duration+0.05)
 }
 
-func scheduleChord(freqs []float64, oscType string, duration, volume, delay float64) {
-	if len(freqs) == 0 {
-		return
-	}
-	perVoice := volume / float64(len(freqs))
-	for i, freq := range freqs {
-		detune := 1.0 + float64(i)*0.002
-		scheduleTone(oscType, freq*detune, freq*0.98, duration, perVoice, delay)
-	}
-}
-
-func audioRand(min, max float64) float64 {
-	return min + rand.Float64()*(max-min)
-}
-
-func varyFreq(freq float64, amount float64) float64 {
-	return freq * audioRand(1-amount, 1+amount)
-}
-
-func playWallHit() {
-	start := varyFreq(230, 0.10)
-	end := varyFreq(175, 0.10)
-	scheduleTone("triangle", start, end, audioRand(0.038, 0.055), audioRand(0.11, 0.16), 0)
+func playBeep(freq float64, duration float64, volume float64) {
+	scheduleBeep(freq, duration, volume, 0)
 }
 
 func playPaddleHit() {
-	start := varyFreq(180, 0.08)
-	end := varyFreq(320, 0.08)
-	scheduleTone("triangle", start, end, audioRand(0.065, 0.085), audioRand(0.16, 0.22), 0)
-	scheduleTone("sine", varyFreq(90, 0.06), varyFreq(70, 0.06), audioRand(0.08, 0.11), audioRand(0.05, 0.08), 0)
+	playBeep(600, 0.08, 0.2)
 }
 
 func playBrickBreak() {
-	scheduleTone("square", varyFreq(520, 0.12), varyFreq(360, 0.12), audioRand(0.045, 0.065), audioRand(0.07, 0.11), 0)
-	scheduleTone("triangle", varyFreq(760, 0.10), varyFreq(520, 0.10), audioRand(0.032, 0.05), audioRand(0.035, 0.06), audioRand(0.005, 0.012))
+	playBeep(800, 0.1, 0.2)
 }
 
 func playUnbreakable() {
-	// Low, rounded impact with small natural variation.
-	base := varyFreq(82, 0.10)
-	scheduleTone("sine", base, varyFreq(52, 0.08), audioRand(0.09, 0.14), audioRand(0.12, 0.17), 0)
-	scheduleTone("triangle", varyFreq(46, 0.08), varyFreq(34, 0.08), audioRand(0.11, 0.16), audioRand(0.05, 0.08), 0.004)
+	playBeep(200, 0.15, 0.15)
 }
 
 func playMagic() {
-	scheduleTone("sine", varyFreq(660, 0.06), varyFreq(990, 0.06), audioRand(0.09, 0.13), audioRand(0.08, 0.11), 0)
-	scheduleTone("triangle", varyFreq(990, 0.05), varyFreq(1480, 0.05), audioRand(0.11, 0.15), audioRand(0.055, 0.08), audioRand(0.05, 0.075))
+	scheduleBeep(1000, 0.06, 0.15, 0)
+	scheduleBeep(1400, 0.08, 0.15, 0.1)
 }
 
 func playPowerup() {
-	root := varyFreq(330, 0.05)
-	scheduleTone("triangle", root, root*4/3, audioRand(0.09, 0.12), audioRand(0.08, 0.11), 0)
-	scheduleTone("triangle", root*4/3, root*2, audioRand(0.10, 0.14), audioRand(0.07, 0.10), audioRand(0.07, 0.10))
-	scheduleChord([]float64{root * 2, root * 2.5, root * 3}, "sine", audioRand(0.18, 0.24), audioRand(0.11, 0.15), audioRand(0.14, 0.19))
-}
-
-func playDie() {
-	// Audible life-loss cue: short falling mid tone plus low body.
-	scheduleTone(
-		"triangle",
-		varyFreq(420, 0.06),
-		varyFreq(150, 0.06),
-		audioRand(0.20, 0.26),
-		audioRand(0.14, 0.18),
-		0,
-	)
-	scheduleTone(
-		"sine",
-		varyFreq(150, 0.05),
-		varyFreq(58, 0.05),
-		audioRand(0.24, 0.32),
-		audioRand(0.08, 0.11),
-		0.025,
-	)
+	scheduleBeep(500, 0.08, 0.15, 0)
+	scheduleBeep(700, 0.08, 0.15, 0.1)
+	scheduleBeep(900, 0.12, 0.2, 0.2)
 }
 
 func playGameOver() {
-	scheduleTone("sawtooth", varyFreq(260, 0.03), varyFreq(120, 0.03), audioRand(0.24, 0.30), audioRand(0.08, 0.11), 0)
-	scheduleTone("triangle", varyFreq(170, 0.03), varyFreq(62, 0.03), audioRand(0.36, 0.44), audioRand(0.08, 0.11), 0.20)
-	scheduleChord([]float64{55, 65.4, 82.4}, "sine", audioRand(0.42, 0.52), audioRand(0.10, 0.14), 0.42)
+	scheduleBeep(600, 0.2, 0.2, 0)
+	scheduleBeep(400, 0.3, 0.2, 0.25)
 }
 
-func playLastBrick() {
-	root := varyFreq(520, 0.04)
-	scheduleTone("triangle", root, root*1.5, audioRand(0.07, 0.10), audioRand(0.08, 0.11), 0)
-	scheduleTone("sine", root*1.5, root*2, audioRand(0.11, 0.15), audioRand(0.07, 0.10), 0.055)
-	scheduleChord([]float64{root * 2, root * 2.5}, "sine", audioRand(0.16, 0.22), audioRand(0.10, 0.14), 0.14)
-}
-
-func playYouWin() {
-	root := varyFreq(392, 0.02)
-	scheduleTone("triangle", root, root*4/3, 0.14, 0.09, 0)
-	scheduleTone("triangle", root*4/3, root*5/3, 0.15, 0.09, 0.13)
-	scheduleTone("triangle", root*5/3, root*2, 0.17, 0.09, 0.27)
-	scheduleChord([]float64{root, root * 5 / 4, root * 3 / 2, root * 2}, "sine", 0.48, 0.18, 0.43)
+func playWin() {
+	scheduleBeep(500, 0.12, 0.2, 0)
+	scheduleBeep(700, 0.12, 0.2, 0.15)
+	scheduleBeep(900, 0.2, 0.25, 0.3)
 }
 
 func playLevelComplete() {
-	root := varyFreq(440, 0.04)
-	scheduleTone("triangle", root, root*1.5, audioRand(0.085, 0.115), audioRand(0.07, 0.09), 0.08)
-	scheduleChord([]float64{root * 1.5, root * 1.875}, "sine", audioRand(0.14, 0.19), audioRand(0.09, 0.12), audioRand(0.16, 0.20))
+	scheduleBeep(600, 0.08, 0.2, 0)
+	scheduleBeep(800, 0.12, 0.2, 0.12)
+}
+
+func playBallLost() {
+	scheduleBeep(400, 0.2, 0.15, 0)
+	scheduleBeep(300, 0.25, 0.15, 0.2)
 }
 
 // ---- Reset globals to defaults ----
@@ -806,7 +689,6 @@ func buildBricksFromLevel(lvl levelData) {
 	bricks = nil
 	brickGrid = make(map[int][]int)
 	remainingBreakableBricks = 0
-	lastBrickSoundPlayed = false
 	if len(lvl.layout) == 0 {
 		initBricksDefault()
 		return
@@ -885,7 +767,6 @@ func initBricksDefault() {
 	bricks = nil
 	brickGrid = make(map[int][]int)
 	remainingBreakableBricks = 0
-	lastBrickSoundPlayed = false
 
 	totalWidth := float64(brickCols)*(brickWidth+brickPadding) - brickPadding
 	totalHeight := float64(brickRows)*(brickHeight+brickPadding) - brickPadding
@@ -948,7 +829,7 @@ func nukeBricks(hitBrick *brick) {
 	}
 }
 
-// ---- Activate powerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòùΓö£ΓöñΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö¼├æ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£Γòæ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬ú╬ô├╗├åΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£ΓòæΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö£┬¬Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝╬ô├▓┬ÑΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬╝╬ô├▓┬Ñup ----
+// ---- Activate powerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬úΓö¼ΓòæΓò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬╝Γö¼┬╝up ----
 func activatePowerUpWithBrick(hitBrick *brick) {
 	if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
 		currentGravity = baseGravity
@@ -1385,20 +1266,17 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 	if b.x-b.r < 0 {
 		b.x = b.r
 		resolveCollisionBall(b, 1, 0, 0, 0)
-		playWallHit()
 	}
 	if b.x+b.r > canvasWidth {
 		b.x = canvasWidth - b.r
 		resolveCollisionBall(b, -1, 0, 0, 0)
-		playWallHit()
 	}
 	if b.y-b.r < 0 {
 		b.y = b.r
 		resolveCollisionBall(b, 0, 1, 0, 0)
-		playWallHit()
 	}
 	if b.y+b.r > canvasHeight {
-		// Ball lost Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòùΓö£ΓöñΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö¼├æ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£Γòæ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬ú╬ô├╗├åΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£ΓòæΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö£┬¬Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ªΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòùΓö£├Ñ handled by caller
+		// Ball lost Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬úΓö¼ΓòæΓò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòóΓö£ΓûÆ handled by caller
 		return
 	}
 
@@ -1571,7 +1449,7 @@ func update(dt float64) {
 		paddle.x = canvasWidth - paddle.w
 	}
 
-	// PowerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòùΓö£ΓöñΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö¼├æ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£Γòæ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬ú╬ô├╗├åΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£ΓòæΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö£┬¬Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝╬ô├▓┬ÑΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬╝╬ô├▓┬Ñup timers
+	// PowerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬úΓö¼ΓòæΓò¼├┤Γö£ΓòóΓö¼├║╬ô├╢┬╝Γö¼┬╝up timers
 	if activePowerUp != POWER_NONE {
 		powerUpTimer -= dt
 		if powerUpTimer <= 0 {
@@ -1636,17 +1514,19 @@ func update(dt float64) {
 		updateBall(&secondBall, dt, false)
 
 		if primaryLost && !secondLost {
-			// Keep playing with the second ball. No life was lost.
+			// Keep playing with the second ball.
 			ball = secondBall
 			secondBallActive = false
+			playBallLost()
 		} else if secondLost && !primaryLost {
-			// Primary ball is still alive. No life was lost.
+			// Primary ball is still alive.
 			secondBallActive = false
+			playBallLost()
 		} else if primaryLost && secondLost {
 			// Both balls were lost.
 			secondBallActive = false
 			lives--
-			playDie()
+			playBallLost()
 
 			if lives <= 0 {
 				gameOver = true
@@ -1659,7 +1539,7 @@ func update(dt float64) {
 	} else if primaryLost {
 		// Only one ball was active.
 		lives--
-		playDie()
+		playBallLost()
 
 		if lives <= 0 {
 			gameOver = true
@@ -1676,7 +1556,7 @@ func update(dt float64) {
 		if nextLevel >= len(levels) {
 			gameOver = true
 			win = true
-			playYouWin()
+			playWin()
 		} else {
 			playLevelComplete()
 			startLevel(nextLevel)
@@ -1898,51 +1778,6 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 }
 
 // ---- Input ----
-func movePaddleToPointer(e js.Value) {
-	rect := canvas.Call("getBoundingClientRect")
-	displayWidth := rect.Get("width").Float()
-	if displayWidth <= 0 {
-		return
-	}
-
-	scaleX := canvasWidth / displayWidth
-	pointerX := (e.Get("clientX").Float() - rect.Get("left").Float()) * scaleX
-	x := pointerX - paddle.w/2
-
-	if x < 0 {
-		x = 0
-	}
-	if x > canvasWidth-paddle.w {
-		x = canvasWidth - paddle.w
-	}
-
-	paddle.vx = (x - paddle.x) * 12
-	paddle.x = x
-}
-
-func bindMobileButton(id string, handler func()) {
-	button := doc.Call("getElementById", id)
-	if button.IsUndefined() || button.IsNull() {
-		return
-	}
-
-	fn := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if len(args) > 0 {
-			args[0].Call("preventDefault")
-		}
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
-		handler()
-		return nil
-	})
-
-	js.Global().Set("__breakout_"+id, fn)
-	button.Call("addEventListener", "pointerdown", fn)
-}
-
 func setupInput() {
 	keyDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
@@ -1968,17 +1803,9 @@ func setupInput() {
 			return nil
 		}
 
-		// Browser audio must be unlocked from a user gesture.
+		// Initialize audio only on key press (not mouse move)
 		if !audioInitialized {
 			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
-
-		// Sound toggle.
-		if (key == "s" || key == "S") && !e.Get("repeat").Bool() {
-			toggleSound()
-			return nil
 		}
 
 		// Hidden magnetism cheat. It persists across levels until toggled again.
@@ -2064,11 +1891,37 @@ func setupInput() {
 	})
 	js.Global().Get("document").Call("addEventListener", "keyup", keyUp)
 
-	// Pointer controls work with mouse, touch, and pen.
-	pointerDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
+	// Mouse (no audio init here)
+	var lastX float64
+	mouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if paused || len(args) == 0 {
+			return nil
+		}
+		leftPressed = false
+		rightPressed = false
+		e := args[0]
+		rect := canvas.Call("getBoundingClientRect")
+		x := e.Get("clientX").Float() - rect.Get("left").Float()
+		if x < 0 {
+			x = 0
+		}
+		if x > canvasWidth-paddle.w {
+			x = canvasWidth - paddle.w
+		}
+		if lastX != 0 {
+			paddle.vx = (x - paddle.x) * 12
+		}
+		paddle.x = x
+		lastX = x
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "mousemove", mouseMove)
+
+	// Retry the current level with the left mouse button after game over.
+	mouseDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
 			if r := recover(); r != nil {
-				js.Global().Get("console").Call("error", "Panic in pointerdown handler:", fmt.Sprint(r))
+				js.Global().Get("console").Call("error", "Panic in mousedown handler:", fmt.Sprint(r))
 				ret = nil
 			}
 		}()
@@ -2078,90 +1931,19 @@ func setupInput() {
 		}
 
 		e := args[0]
-		e.Call("preventDefault")
-
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
-
-		pointerID := e.Get("pointerId")
-		if !pointerID.IsUndefined() {
-			canvas.Call("setPointerCapture", pointerID)
-		}
-
-		leftPressed = false
-		rightPressed = false
-		movePaddleToPointer(e)
-
-		if gameOver && !win {
+		if e.Get("button").Int() == 0 && gameOver && !win {
+			e.Call("preventDefault")
 			retryCurrentLevel()
 		}
-
 		return nil
 	})
-	canvas.Call("addEventListener", "pointerdown", pointerDown)
-
-	pointerMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if paused || len(args) == 0 {
-			return nil
-		}
-
-		e := args[0]
-		pointerType := e.Get("pointerType").String()
-
-		if pointerType != "mouse" && e.Get("buttons").Int() == 0 {
-			return nil
-		}
-
-		e.Call("preventDefault")
-		leftPressed = false
-		rightPressed = false
-		movePaddleToPointer(e)
-		return nil
-	})
-	canvas.Call("addEventListener", "pointermove", pointerMove)
-
-	pointerUp = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		paddle.vx = 0
-		if len(args) > 0 {
-			e := args[0]
-			pointerID := e.Get("pointerId")
-			if !pointerID.IsUndefined() &&
-				canvas.Call("hasPointerCapture", pointerID).Bool() {
-				canvas.Call("releasePointerCapture", pointerID)
-			}
-		}
-		return nil
-	})
-	canvas.Call("addEventListener", "pointerup", pointerUp)
-
-	pointerCancel = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		paddle.vx = 0
-		return nil
-	})
-	canvas.Call("addEventListener", "pointercancel", pointerCancel)
+	canvas.Call("addEventListener", "mousedown", mouseDown)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		paddle.vx = 0
 		return nil
 	})
-	canvas.Call("addEventListener", "mouseleave", mouseLeave)
-
-	bindMobileButton("pauseButton", func() {
-		if gameOver {
-			return
-		}
-		paused = !paused
-		leftPressed = false
-		rightPressed = false
-		paddle.vx = 0
-	})
-
-	bindMobileButton("soundButton", func() {
-		toggleSound()
-	})
+	js.Global().Get("document").Call("addEventListener", "mouseleave", mouseLeave)
 }
 
 // ---- main ----

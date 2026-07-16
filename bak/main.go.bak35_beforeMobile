@@ -199,14 +199,12 @@ var (
 
 	lastTime float64
 
-	loopFunc      js.Func
-	keyDown       js.Func
-	keyUp         js.Func
-	pointerMove   js.Func
-	pointerDown   js.Func
-	pointerUp     js.Func
-	pointerCancel js.Func
-	mouseLeave    js.Func
+	loopFunc   js.Func
+	keyDown    js.Func
+	keyUp      js.Func
+	mouseMove  js.Func
+	mouseDown  js.Func
+	mouseLeave js.Func
 
 	// ---- PowerΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓòùΓö£ΓöñΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö¼├æ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£Γòæ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬ú╬ô├╗├åΓò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝Γö£ΓòæΓò¼├┤Γö£ΓòóΓö¼Γò¥Γò¼├┤Γö£ΓûôΓö£┬¬Γò¼├┤Γö£ΓûôΓö¼Γò¥╬ô├╢┬ú╬ô├╢├▒Γò¼├┤Γö£ΓòóΓö¼├║Γò¼├┤Γö£ΓûôΓö£ΓöéΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬ú╬ô├▓├ª╬ô├▓┬╝Γö£Γöñ╬ô├╢┬ú╬ô├▓├│╬ô├╢┬╝╬ô├▓┬ÑΓò¼├┤Γö£ΓòóΓö¼Γò¥╬ô├╢┬╝╬ô├▓┬Ñup states ----
 	activePowerUp  int
@@ -1898,51 +1896,6 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 }
 
 // ---- Input ----
-func movePaddleToPointer(e js.Value) {
-	rect := canvas.Call("getBoundingClientRect")
-	displayWidth := rect.Get("width").Float()
-	if displayWidth <= 0 {
-		return
-	}
-
-	scaleX := canvasWidth / displayWidth
-	pointerX := (e.Get("clientX").Float() - rect.Get("left").Float()) * scaleX
-	x := pointerX - paddle.w/2
-
-	if x < 0 {
-		x = 0
-	}
-	if x > canvasWidth-paddle.w {
-		x = canvasWidth - paddle.w
-	}
-
-	paddle.vx = (x - paddle.x) * 12
-	paddle.x = x
-}
-
-func bindMobileButton(id string, handler func()) {
-	button := doc.Call("getElementById", id)
-	if button.IsUndefined() || button.IsNull() {
-		return
-	}
-
-	fn := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if len(args) > 0 {
-			args[0].Call("preventDefault")
-		}
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
-		handler()
-		return nil
-	})
-
-	js.Global().Set("__breakout_"+id, fn)
-	button.Call("addEventListener", "pointerdown", fn)
-}
-
 func setupInput() {
 	keyDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
@@ -2064,11 +2017,38 @@ func setupInput() {
 	})
 	js.Global().Get("document").Call("addEventListener", "keyup", keyUp)
 
-	// Pointer controls work with mouse, touch, and pen.
-	pointerDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
+	// Mouse (no audio init here)
+	var lastX float64
+	mouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if paused || len(args) == 0 {
+			return nil
+		}
+		leftPressed = false
+		rightPressed = false
+		e := args[0]
+		rect := canvas.Call("getBoundingClientRect")
+		scaleX := canvasWidth / rect.Get("width").Float()
+		x := (e.Get("clientX").Float() - rect.Get("left").Float()) * scaleX
+		if x < 0 {
+			x = 0
+		}
+		if x > canvasWidth-paddle.w {
+			x = canvasWidth - paddle.w
+		}
+		if lastX != 0 {
+			paddle.vx = (x - paddle.x) * 12
+		}
+		paddle.x = x
+		lastX = x
+		return nil
+	})
+	js.Global().Get("document").Call("addEventListener", "mousemove", mouseMove)
+
+	// Retry the current level with the left mouse button after game over.
+	mouseDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
 			if r := recover(); r != nil {
-				js.Global().Get("console").Call("error", "Panic in pointerdown handler:", fmt.Sprint(r))
+				js.Global().Get("console").Call("error", "Panic in mousedown handler:", fmt.Sprint(r))
 				ret = nil
 			}
 		}()
@@ -2077,91 +2057,26 @@ func setupInput() {
 			return nil
 		}
 
-		e := args[0]
-		e.Call("preventDefault")
-
 		if !audioInitialized {
 			initAudio()
 		} else {
 			ensureAudioRunning()
 		}
 
-		pointerID := e.Get("pointerId")
-		if !pointerID.IsUndefined() {
-			canvas.Call("setPointerCapture", pointerID)
-		}
-
-		leftPressed = false
-		rightPressed = false
-		movePaddleToPointer(e)
-
-		if gameOver && !win {
+		e := args[0]
+		if e.Get("button").Int() == 0 && gameOver && !win {
+			e.Call("preventDefault")
 			retryCurrentLevel()
 		}
-
 		return nil
 	})
-	canvas.Call("addEventListener", "pointerdown", pointerDown)
-
-	pointerMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if paused || len(args) == 0 {
-			return nil
-		}
-
-		e := args[0]
-		pointerType := e.Get("pointerType").String()
-
-		if pointerType != "mouse" && e.Get("buttons").Int() == 0 {
-			return nil
-		}
-
-		e.Call("preventDefault")
-		leftPressed = false
-		rightPressed = false
-		movePaddleToPointer(e)
-		return nil
-	})
-	canvas.Call("addEventListener", "pointermove", pointerMove)
-
-	pointerUp = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		paddle.vx = 0
-		if len(args) > 0 {
-			e := args[0]
-			pointerID := e.Get("pointerId")
-			if !pointerID.IsUndefined() &&
-				canvas.Call("hasPointerCapture", pointerID).Bool() {
-				canvas.Call("releasePointerCapture", pointerID)
-			}
-		}
-		return nil
-	})
-	canvas.Call("addEventListener", "pointerup", pointerUp)
-
-	pointerCancel = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		paddle.vx = 0
-		return nil
-	})
-	canvas.Call("addEventListener", "pointercancel", pointerCancel)
+	canvas.Call("addEventListener", "mousedown", mouseDown)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		paddle.vx = 0
 		return nil
 	})
-	canvas.Call("addEventListener", "mouseleave", mouseLeave)
-
-	bindMobileButton("pauseButton", func() {
-		if gameOver {
-			return
-		}
-		paused = !paused
-		leftPressed = false
-		rightPressed = false
-		paddle.vx = 0
-	})
-
-	bindMobileButton("soundButton", func() {
-		toggleSound()
-	})
+	js.Global().Get("document").Call("addEventListener", "mouseleave", mouseLeave)
 }
 
 // ---- main ----
