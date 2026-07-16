@@ -3,6 +3,23 @@ enableBlackHole=true
 brickPadding=15.0
 frictionCoeff=0.4
 ballRadius=30.0
+
+
+
+backgroundColor=#30638e
+paddleColor=#003d5b
+brickColor=#d1495b
+ballColor=#edae49
+textColor=#edae49
+spinColor=#edae49
+unbreakableColor=#2c6e49
+secondBallColor=#edae49
+secondBallSpinColor=#edae49
+
+magicStrokeColor=#d1495b
+unbreakableStrokeColor=#d1495b
+brickStrokeColor=#d1495b
+
 ---
 M######## ########M
 M########M########M

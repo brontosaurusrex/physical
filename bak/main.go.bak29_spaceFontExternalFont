@@ -114,7 +114,7 @@ var (
 )
 
 // ---- Color palette ----
-var defaultPalette = []string{
+var palette = []string{
 	"#1d3557", // background (0)
 	"#f1faee", // paddle (1) & magic bricks
 	"#a8dadc", // normal bricks (2)
@@ -125,18 +125,6 @@ var defaultPalette = []string{
 	"#e63946", // second ball (7)
 	"#e63946", // second ball spin marker (8)
 }
-
-var palette = append([]string(nil), defaultPalette...)
-
-var (
-	defaultMagicStrokeColor       = "#ffd700"
-	defaultUnbreakableStrokeColor = "#e76f51"
-	defaultBrickStrokeColor       = "#27ae60"
-
-	magicStrokeColor       = defaultMagicStrokeColor
-	unbreakableStrokeColor = defaultUnbreakableStrokeColor
-	brickStrokeColor       = defaultBrickStrokeColor
-)
 
 // ---- Powerup types ----
 const (
@@ -199,7 +187,7 @@ var (
 	mouseDown  js.Func
 	mouseLeave js.Func
 
-	// ---- Power╬ô├▓┬╝Γö£Γöñ╬ô├╢┬úΓö£┬║╬ô├╢┬úΓö¼┬¼up states ----
+	// ---- PowerΓò¼├┤Γö£├ºΓö£┬¬up states ----
 	activePowerUp  int
 	powerUpTimer   float64
 	currentGravity float64
@@ -425,40 +413,12 @@ func resetGlobals() {
 	enableBlackHole = defaultEnableBlackHole
 	enableMagnet = defaultEnableMagnet
 	enableInfluencer = defaultEnableInfluencer
-	palette = append([]string(nil), defaultPalette...)
-	magicStrokeColor = defaultMagicStrokeColor
-	unbreakableStrokeColor = defaultUnbreakableStrokeColor
-	brickStrokeColor = defaultBrickStrokeColor
 }
 
 // ---- Apply config overrides from map ----
 func applyConfig(config map[string]string) {
 	for key, val := range config {
 		switch key {
-		case "backgroundColor":
-			palette[0] = val
-		case "paddleColor":
-			palette[1] = val
-		case "brickColor":
-			palette[2] = val
-		case "ballColor":
-			palette[3] = val
-		case "textColor":
-			palette[4] = val
-		case "spinColor":
-			palette[5] = val
-		case "unbreakableColor":
-			palette[6] = val
-		case "secondBallColor":
-			palette[7] = val
-		case "secondBallSpinColor":
-			palette[8] = val
-		case "magicStrokeColor":
-			magicStrokeColor = val
-		case "unbreakableStrokeColor":
-			unbreakableStrokeColor = val
-		case "brickStrokeColor":
-			brickStrokeColor = val
 		case "gravity":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				baseGravity = f
@@ -785,7 +745,7 @@ func nukeBricks(hitBrick *brick) {
 	}
 }
 
-// ---- Activate power╬ô├▓┬╝Γö£Γöñ╬ô├╢┬úΓö£┬║╬ô├╢┬úΓö¼┬¼up ----
+// ---- Activate powerΓò¼├┤Γö£├ºΓö£┬¬up ----
 func activatePowerUpWithBrick(hitBrick *brick) {
 	if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
 		currentGravity = baseGravity
@@ -1204,7 +1164,7 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 		resolveCollisionBall(b, 0, 1, 0, 0)
 	}
 	if b.y+b.r > canvasHeight {
-		// Ball lost ╬ô├▓┬╝Γö£Γöñ╬ô├╢┬úΓö£┬║╬ô├╢┬ú╬ô├╢├▒ handled by caller
+		// Ball lost Γò¼├┤Γö£├ºΓö£Γöñ handled by caller
 		return
 	}
 
@@ -1380,7 +1340,7 @@ func update(dt float64) {
 		paddle.x = canvasWidth - paddle.w
 	}
 
-	// Power╬ô├▓┬╝Γö£Γöñ╬ô├╢┬úΓö£┬║╬ô├╢┬úΓö¼┬¼up timers
+	// PowerΓò¼├┤Γö£├ºΓö£┬¬up timers
 	if activePowerUp != POWER_NONE {
 		powerUpTimer -= dt
 		if powerUpTimer <= 0 {
@@ -1538,14 +1498,14 @@ func draw() {
 		ctx.Call("fill")
 
 		if b.magic {
-			ctx.Set("strokeStyle", magicStrokeColor)
+			ctx.Set("strokeStyle", "#ffd700")
 			ctx.Set("lineWidth", 2)
 		} else if b.unbreakable {
-			ctx.Set("strokeStyle", unbreakableStrokeColor)
+			ctx.Set("strokeStyle", "#e76f51")
 			ctx.Set("lineWidth", 2)
 			ctx.Set("setLineDash", []interface{}{4, 4})
 		} else {
-			ctx.Set("strokeStyle", brickStrokeColor)
+			ctx.Set("strokeStyle", "#27ae60")
 			ctx.Set("lineWidth", 1)
 			ctx.Set("setLineDash", []interface{}{})
 		}
