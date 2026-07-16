@@ -17,9 +17,7 @@
       font-display: swap;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     html,
     body {
@@ -76,12 +74,10 @@
       height: auto;
       padding: 0;
       border: 0;
-      border-radius: 0;
       color: rgba(255, 255, 255, 0.58);
       background: transparent;
       font: 700 25px GameFont, monospace;
       line-height: 1.2;
-      text-decoration: none;
       touch-action: manipulation;
     }
 
@@ -104,13 +100,8 @@
     }
 
     @media (orientation: portrait) {
-      #gameShell {
-        display: none;
-      }
-
-      #rotateOverlay {
-        display: flex;
-      }
+      #gameShell { display: none; }
+      #rotateOverlay { display: flex; }
     }
   </style>
 </head>
@@ -120,11 +111,12 @@
     <canvas id="gameCanvas" width="1800" height="900"></canvas>
 
     <div id="mobileControls">
-      <button id="previousLevelButton" type="button" aria-label="Previous level"></button>
-      <button id="nextLevelButton" type="button" aria-label="Next level"></button>
-      <button id="magnetsButton" type="button">󰍈</button>
-      <button id="pauseButton" type="button">󰏤</button>
-      <button id="soundButton" type="button">󰕾</button>
+      <button id="previousLevelButton" type="button" aria-label="previous level"></button>
+      <button id="nextLevelButton" type="button" aria-label="next level"></button>
+      <button id="magnetsButton" type="button" aria-label="toggle magnets">󰍈</button>
+      <button id="zapperButton" type="button" aria-label="Toggle zapper">⚡</button>
+      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
+      <button id="soundButton" type="button" aria-label="toggle sound">󰕾</button>
     </div>
   </div>
 
@@ -142,7 +134,6 @@
 
     function visibleViewportSize() {
       const viewport = window.visualViewport;
-
       return {
         width: viewport ? viewport.width : window.innerWidth,
         height: viewport ? viewport.height : window.innerHeight
