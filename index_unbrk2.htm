@@ -11,7 +11,7 @@
   <style>
     @font-face {
       font-family: "GameFont";
-      src: url("font/SpaceMono-Bold.ttf") format("truetype");
+      src: url("font/SpaceMonoNerdFontMono-Regular.ttf") format("truetype");
       font-weight: 700;
       font-style: normal;
       font-display: swap;
@@ -63,10 +63,10 @@
 
     #mobileControls {
       position: absolute;
-      top: 8px;
-      right: 10px;
+      top: 10px;
+      right: 20px;
       display: flex;
-      gap: 9px;
+      gap: 20px;
       z-index: 20;
     }
 
@@ -79,7 +79,7 @@
       border-radius: 0;
       color: rgba(255, 255, 255, 0.58);
       background: transparent;
-      font: 700 10px GameFont, monospace;
+      font: 700 25px GameFont, monospace;
       line-height: 1.2;
       text-decoration: none;
       touch-action: manipulation;
@@ -120,11 +120,11 @@
     <canvas id="gameCanvas" width="1800" height="900"></canvas>
 
     <div id="mobileControls">
-      <button id="previousLevelButton" type="button" aria-label="Previous level">&lt;</button>
-      <button id="nextLevelButton" type="button" aria-label="Next level">&gt;</button>
-      <button id="magnetsButton" type="button">Magnets</button>
-      <button id="pauseButton" type="button">Pause</button>
-      <button id="soundButton" type="button">Sound</button>
+      <button id="previousLevelButton" type="button" aria-label="Previous level"></button>
+      <button id="nextLevelButton" type="button" aria-label="Next level"></button>
+      <button id="magnetsButton" type="button">󰍈</button>
+      <button id="pauseButton" type="button">󰏤</button>
+      <button id="soundButton" type="button">󰕾</button>
     </div>
   </div>
 
