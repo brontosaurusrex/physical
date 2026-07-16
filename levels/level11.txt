@@ -1,6 +1,6 @@
 brickPadding=15.0
 brickWidth=26
-brickHeight=26
+brickHeight=36
 backgroundColor=#2c6e49
 paddleColor=#ffc9b9
 brickColor=#4c956c
