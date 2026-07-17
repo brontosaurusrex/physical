@@ -1,0 +1,19 @@
+
+brickWidth=30
+brickHeight=60
+brickPadding=30
+ballRadius=20.0
+---
+ MMMMMMMM  MMMMMMMM
+##       ##       ##
+#                  #
+#        UU        #
+##       UU       ##
+ ##              ##
+   ##          ##
+     ###    ###
+       #####
+
+
+
+

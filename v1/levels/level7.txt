@@ -1,0 +1,23 @@
+
+brickWidth=30
+brickHeight=30
+brickPadding=30
+ballRadius=10.0
+---
+U # U # M # M
+ U # U # M # M
+  U # U # M # M
+   U # U # M # M
+    U # U # M # M
+     U # U # M # M
+      U # U # M # M
+       U # U # M # M
+        U # U # M # M
+         U # U # M # M
+          U # U # M # M
+           U # U # M # M
+
+
+
+
+
