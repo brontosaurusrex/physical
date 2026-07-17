@@ -115,8 +115,9 @@
       <button id="nextLevelButton" type="button" aria-label="next level"></button>
       <button id="magnetsButton" type="button" aria-label="toggle magnets">󰍈</button>
       <button id="zapperButton" type="button" aria-label="Toggle zapper">⚡</button>
-      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
       <button id="soundButton" type="button" aria-label="toggle sound">󰕾</button>
+      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
+      <button id="fullscreenButton" type="button" aria-label="toggle fullscreen"></button>
     </div>
   </div>
 
@@ -169,6 +170,37 @@
       window.visualViewport.addEventListener("resize", fitGameToViewport);
       window.visualViewport.addEventListener("scroll", fitGameToViewport);
     }
+
+    const fullscreenButton = document.getElementById("fullscreenButton");
+
+    async function toggleFullscreen() {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (error) {
+        console.error("Fullscreen request failed:", error);
+      }
+    }
+
+    fullscreenButton.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      toggleFullscreen();
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      fullscreenButton.setAttribute(
+        "aria-label",
+        document.fullscreenElement
+          ? "exit fullscreen"
+          : "toggle fullscreen"
+      );
+
+      setTimeout(fitGameToViewport, 50);
+      setTimeout(fitGameToViewport, 250);
+    });
 
     async function loadGame() {
       const response = await fetch("main_unbrk2.wasm");
