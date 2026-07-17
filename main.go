@@ -27,9 +27,9 @@ const (
 	defaultBrickHeight          = 20.0
 	defaultBrickPadding         = 20.0
 	defaultBrickOffsetTop       = -1.0
-	defaultPaddleBoost          = 630.0
+	defaultPaddleBoost          = 550.0
 	defaultBrickBoost           = 100.0
-	defaultMaxSpeed             = 1200.0
+	defaultMaxSpeed             = 900.0
 	defaultPaddleRadius         = 12.0
 	defaultBrickRadius          = 6.0
 	defaultUnbreakableChance    = 0.15
