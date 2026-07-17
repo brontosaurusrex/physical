@@ -49,9 +49,9 @@ const (
 	defaultZapperHitTime        = 0.1
 	defaultZapperRange          = 320.0
 
-	defaultPhoneTiltDeadZone  = 2.5
+	defaultPhoneTiltDeadZone  = 1.0
 	defaultPhoneTiltMaxAngle  = 10.0
-	defaultPhoneTiltSmoothing = 10.0
+	defaultPhoneTiltSmoothing = 18.0
 
 	defaultStartBallX  = 1000.0
 	defaultStartBallY  = 600.0
