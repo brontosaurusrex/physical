@@ -27,9 +27,9 @@ const (
 	defaultBrickHeight          = 20.0
 	defaultBrickPadding         = 20.0
 	defaultBrickOffsetTop       = -1.0
-	defaultPaddleBoost          = 630.0
+	defaultPaddleBoost          = 1000.0
 	defaultBrickBoost           = 100.0
-	defaultMaxSpeed             = 1200.0
+	defaultMaxSpeed             = 900.0
 	defaultPaddleRadius         = 12.0
 	defaultBrickRadius          = 6.0
 	defaultUnbreakableChance    = 0.15
@@ -1661,20 +1661,26 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 			hitPos = 1
 		}
 
-		angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
-
+		angle := (hitPos - 0.5) * 2.0 * (60.0 * math.Pi / 180.0)
 		speed := math.Sqrt(b.vx*b.vx + b.vy*b.vy)
 		if speed < 100 {
 			speed = 100
 		}
 
-		speed += paddleBoost
-		if speed > maxSpeed {
-			speed = maxSpeed
-		}
+		newVx := speed * math.Sin(angle)
+		newVy := -speed * math.Cos(angle)
 
-		b.vx = speed * math.Sin(angle)
-		b.vy = -speed * math.Cos(angle)
+		b.vx = newVx
+		b.vy = newVy
+
+		b.vy -= paddleBoost
+
+		if math.Abs(b.vy) > maxSpeed {
+			b.vy = math.Copysign(maxSpeed, b.vy)
+		}
+		if math.Abs(b.vx) > maxSpeed {
+			b.vx = math.Copysign(maxSpeed, b.vx)
+		}
 
 		b.omega += paddle.vx * 0.1 * (hitPos - 0.5)
 		if math.Abs(b.omega) > 30 {
