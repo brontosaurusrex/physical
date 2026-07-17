@@ -1,4 +1,4 @@
-enablePassThrough=false
+enablePassThrough=true
 enableBlackHole=true
 brickWidth=15
 brickHeight=30
