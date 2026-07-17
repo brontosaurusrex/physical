@@ -50,7 +50,7 @@ const (
 	defaultZapperRange          = 320.0
 
 	defaultPhoneTiltDeadZone  = 2.5
-	defaultPhoneTiltMaxAngle  = 20.0
+	defaultPhoneTiltMaxAngle  = 16.0
 	defaultPhoneTiltSmoothing = 10.0
 
 	defaultStartBallX  = 1000.0
@@ -1856,9 +1856,9 @@ func orientationTiltValue(event js.Value) (float64, bool) {
 
 	switch ((screenOrientationAngle() % 360) + 360) % 360 {
 	case 90:
-		return -beta, true
-	case 270:
 		return beta, true
+	case 270:
+		return -beta, true
 	default:
 		return gamma, true
 	}
