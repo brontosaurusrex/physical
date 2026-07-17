@@ -273,8 +273,10 @@ var (
 	influencerActive bool
 	influencerTimer  float64
 
-	zapperTargetIndex int
-	zapperHitTimer    float64
+	zapperTargetIndex       int
+	zapperHitTimer          float64
+	secondZapperTargetIndex int
+	secondZapperHitTimer    float64
 
 	statusMessages []statusMessage
 
@@ -1388,6 +1390,8 @@ func startLevel(index int) {
 	influencerTimer = 0
 	zapperTargetIndex = -1
 	zapperHitTimer = 0
+	secondZapperTargetIndex = -1
+	secondZapperHitTimer = 0
 	statusMessages = nil
 	if levelMagnetActive {
 		showStatus("Magnets enabled by level", 2.0)
@@ -1630,37 +1634,69 @@ func zapperThreshold() int {
 	return threshold
 }
 
-func updateZapper(dt float64) {
-	if !zapperIsActive() {
-		zapperTargetIndex = -1
-		zapperHitTimer = 0
+func updateOneZapper(
+	b *Ball,
+	active bool,
+	targetIndex *int,
+	hitTimer *float64,
+	dt float64,
+) {
+	if !active {
+		*targetIndex = -1
+		*hitTimer = 0
 		return
 	}
 
-	target := nearestBreakableBrickIndex(ball.x, ball.y)
+	target := nearestBreakableBrickIndex(b.x, b.y)
 	if target < 0 {
-		zapperTargetIndex = -1
-		zapperHitTimer = 0
+		*targetIndex = -1
+		*hitTimer = 0
 		return
 	}
 
-	if target != zapperTargetIndex {
-		zapperTargetIndex = target
-		zapperHitTimer = 0
+	if target != *targetIndex {
+		*targetIndex = target
+		*hitTimer = 0
 	}
 
-	zapperHitTimer += dt
-	if zapperHitTimer < defaultZapperHitTime {
+	*hitTimer += dt
+	if *hitTimer < defaultZapperHitTime {
 		return
 	}
 
-	br := &bricks[zapperTargetIndex]
+	br := &bricks[*targetIndex]
 	if destroyBrick(br) {
 		playZapper()
 	}
 
-	zapperTargetIndex = -1
-	zapperHitTimer = 0
+	*targetIndex = -1
+	*hitTimer = 0
+}
+
+func updateZapper(dt float64) {
+	if !zapperIsActive() {
+		zapperTargetIndex = -1
+		zapperHitTimer = 0
+		secondZapperTargetIndex = -1
+		secondZapperHitTimer = 0
+		return
+	}
+
+	updateOneZapper(
+		&ball,
+		true,
+		&zapperTargetIndex,
+		&zapperHitTimer,
+		dt,
+	)
+
+	updateOneZapper(
+		&secondBall,
+		secondBallActive,
+		&secondZapperTargetIndex,
+		&secondZapperHitTimer,
+		dt,
+	)
 }
 
 // ---- Update a single ball ----
@@ -2158,6 +2194,8 @@ func update(dt float64) {
 		paddle.vx = 0
 		zapperTargetIndex = -1
 		zapperHitTimer = 0
+		secondZapperTargetIndex = -1
+		secondZapperHitTimer = 0
 		playLevelComplete()
 		showStatus("Level complete!", 3.0)
 	}
@@ -2235,28 +2273,31 @@ func rebuildBrickCanvas() {
 }
 
 // ---- Draw ----
-func drawZapperBolt() {
-	if !zapperIsActive() ||
-		zapperTargetIndex < 0 ||
-		zapperTargetIndex >= len(bricks) {
+func drawOneZapperBolt(
+	b *Ball,
+	targetIndex int,
+	strokeColor string,
+	shadowColor string,
+) {
+	if targetIndex < 0 || targetIndex >= len(bricks) {
 		return
 	}
 
-	br := &bricks[zapperTargetIndex]
+	br := &bricks[targetIndex]
 	if !br.alive || br.unbreakable {
 		return
 	}
 
-	startX, startY := ball.x, ball.y
+	startX, startY := b.x, b.y
 	endX := br.x + br.w/2
 	endY := br.y + br.h/2
 
 	const segments = 12
 
 	ctx.Call("save")
-	ctx.Set("strokeStyle", "#e8fbff")
+	ctx.Set("strokeStyle", strokeColor)
 	ctx.Set("lineWidth", 3)
-	ctx.Set("shadowColor", "#58d9ff")
+	ctx.Set("shadowColor", shadowColor)
 	ctx.Set("shadowBlur", 12)
 	ctx.Call("beginPath")
 	ctx.Call("moveTo", startX, startY)
@@ -2285,6 +2326,30 @@ func drawZapperBolt() {
 	ctx.Call("restore")
 }
 
+func drawZapperBolts() {
+	if !zapperIsActive() {
+		return
+	}
+
+	// Primary ball: blue-white electricity.
+	drawOneZapperBolt(
+		&ball,
+		zapperTargetIndex,
+		"#e8fbff",
+		"#58d9ff",
+	)
+
+	// Second ball: slightly different violet-cyan electricity.
+	if secondBallActive {
+		drawOneZapperBolt(
+			&secondBall,
+			secondZapperTargetIndex,
+			"#f3e8ff",
+			"#b56cff",
+		)
+	}
+}
+
 func drawCenteredOverlay() {
 	ctx.Call("save")
 	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.5)")
@@ -2300,7 +2365,7 @@ func draw() {
 		rebuildBrickCanvas()
 	}
 	ctx.Call("drawImage", brickCanvas, 0, 0)
-	drawZapperBolt()
+	drawZapperBolts()
 
 	if blackHoleActive && showBlackHole {
 		ctx.Set("fillStyle", "#000000")
@@ -2595,6 +2660,21 @@ func setupInput() {
 				showStatus("Zapper on", 2.0)
 			} else {
 				showStatus("Zapper off", 2.0)
+			}
+			return nil
+		}
+
+		if key == "2" && !e.Get("repeat").Bool() {
+			if !secondBallActive {
+				secondBallActive = true
+				secondBall = ball
+				secondBall.vx = -ball.vx
+				secondBall.omega = -ball.omega
+				secondBall.x += secondBall.r * 2
+				if secondBall.x+secondBall.r > canvasWidth {
+					secondBall.x = ball.x - secondBall.r*2
+				}
+				secondBall.stuckTimer = 0
 			}
 			return nil
 		}
