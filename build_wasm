@@ -1,1 +1,1 @@
-GOOS=js GOARCH=wasm go build -o physical.wasm
+GOOS=js GOARCH=wasm go build -o physical2.wasm
