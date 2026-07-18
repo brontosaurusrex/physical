@@ -6,25 +6,27 @@ maxSpeed=1500
 //paddleBoost=1300
 //paddleWidth=600
 brickBoost=300
-ballRadius=25  
+ballRadius=18
 
-backgroundColor=#2c6e49
-paddleColor=#ffc9b9
-brickColor=#4c956c
-ballColor=#d68c45
-textColor=#ffc9b9
-spinColor=#333333
-unbreakableColor=#2c6e49
-secondBallColor=#d68c45
-secondBallSpinColor=#333333
+#1f1a3a, #4b3879, #ff3366, #00ffff, #ffcc00
+
+backgroundColor=#1f1a3a
+paddleColor=#4b3879
+brickColor=#ff3366
+ballColor=#00ffff
+textColor=#00ffff
+spinColor=#00ffff
+unbreakableColor=#1f1a3a
+secondBallColor=#00ffff
+secondBallSpinColor=#00ffff
 
 magicStrokeColor=#ffd700
 unbreakableStrokeColor=#e76f51
 brickStrokeColor=#4c956c
 brickWidth=50
 brickHeight=50
-ballX=20.0
-ballY=10.0
+ballX=150.0
+ballY=20.0
 ballVx=30.0
 ballVy=-30.0
 ---
@@ -41,7 +43,7 @@ XXXXXX   XX    XXXX XXXXXXX
 #mmmmm  #  #  "#mmm    #
 #       #mm#      "#   #
 X      X    X "XXXX"   X
-
+X     X      X  XX     X
 
 
 
