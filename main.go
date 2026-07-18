@@ -1961,6 +1961,7 @@ func selectMobileControlMode(mode string) {
 	saveMobileControlMode()
 
 	if mode == "tilt" {
+		phoneTiltAvailable = false
 		recalibratePhoneTilt()
 		requestPhoneTiltPermission()
 	}
@@ -2230,33 +2231,44 @@ func installPhoneTiltListener() {
 }
 
 func requestPhoneTiltPermission() {
-	if phoneTiltPermissionAsked {
-		return
-	}
-	phoneTiltPermissionAsked = true
-
-	orientationEvent := js.Global().Get("DeviceOrientationEvent")
+	window := js.Global().Get("window")
+	orientationEvent := window.Get("DeviceOrientationEvent")
 	if orientationEvent.IsUndefined() || orientationEvent.IsNull() {
+		orientationEvent = js.Global().Get("DeviceOrientationEvent")
+	}
+	if orientationEvent.IsUndefined() || orientationEvent.IsNull() {
+		showStatus("Tilt unavailable", 2.0)
 		return
 	}
 
 	requestPermission := orientationEvent.Get("requestPermission")
 	if requestPermission.Type() != js.TypeFunction {
 		installPhoneTiltListener()
+		recalibratePhoneTilt()
 		return
 	}
 
+	if phoneTiltPermissionAsked && phoneTiltListenerSet {
+		recalibratePhoneTilt()
+		return
+	}
+
+	phoneTiltPermissionAsked = true
 	promise := orientationEvent.Call("requestPermission")
 
 	granted := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) > 0 && args[0].String() == "granted" {
 			installPhoneTiltListener()
+			recalibratePhoneTilt()
+			showStatus("Tilt ready", 1.5)
 		} else {
+			phoneTiltPermissionAsked = false
 			showStatus("Tilt permission denied", 2.0)
 		}
 		return nil
 	})
 	rejected := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		phoneTiltPermissionAsked = false
 		showStatus("Tilt unavailable", 2.0)
 		return nil
 	})
@@ -2332,6 +2344,7 @@ func update(dt float64) {
 	}
 
 	const keyboardPaddleSpeed = 700.0
+	const twoThumbPaddleSpeed = 1500.0
 
 	if leftPressed && !rightPressed {
 		paddle.vx = -keyboardPaddleSpeed
@@ -2347,10 +2360,10 @@ func update(dt float64) {
 			}
 		case "two-thumb":
 			if mobileLeftHeld && !mobileRightHeld {
-				paddle.vx = -keyboardPaddleSpeed
+				paddle.vx = -twoThumbPaddleSpeed
 				paddle.x += paddle.vx * dt
 			} else if mobileRightHeld && !mobileLeftHeld {
-				paddle.vx = keyboardPaddleSpeed
+				paddle.vx = twoThumbPaddleSpeed
 				paddle.x += paddle.vx * dt
 			} else {
 				paddle.vx = 0
