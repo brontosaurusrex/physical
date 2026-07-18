@@ -741,6 +741,10 @@ func applyConfig(config map[string]string) {
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				baseGravity = f
 			}
+		case "restitution":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				restitution = f
+			}
 		case "frictionCoeff":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
 				frictionCoeff = f
@@ -943,6 +947,7 @@ func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
 	b.vx += deltaVn*nx + deltaVt*tx
 	b.vy += deltaVn*ny + deltaVt*ty
 	b.omega -= 2 * deltaVt / b.r
+	b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
 }
 
 // ---- Build bricks from level layout (with auto-scaling) ----
@@ -1420,8 +1425,6 @@ func startLevel(index int) {
 	// Apply level-specific config. A level can use magnet=true.
 	applyConfig(levels[index].config)
 
-	// Copy level-configured dimensions into the actual paddle object used
-	// for drawing, collision detection, and clamping.
 	paddle.w = paddleWidth
 	paddle.h = paddleHeight
 
@@ -1463,11 +1466,8 @@ func startLevel(index int) {
 	currentLevelIndex = index
 	saveCurrentLevel()
 	log(fmt.Sprintf(
-		"Level %d started: paddleWidth=%.1f paddleHeight=%.1f frictionCoeff=%.3f",
-		index+1,
-		paddle.w,
-		paddle.h,
-		frictionCoeff,
+		"Level %d: restitution=%.3f friction=%.3f maxSpin=%.1f paddle=%.1fx%.1f boost=%.1f",
+		index+1, restitution, frictionCoeff, maxSpin, paddle.w, paddle.h, paddleBoost,
 	))
 }
 
@@ -1832,7 +1832,9 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 			speed = 100
 		}
 
-		speed += paddleBoost
+		// Restitution controls retained speed; paddleBoost represents energy
+		// actively supplied by the paddle.
+		speed = speed*restitution + paddleBoost
 		if speed > maxSpeed {
 			speed = maxSpeed
 		}
@@ -1865,9 +1867,7 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 			b.vy *= scale
 		}
 
-		if math.Abs(b.omega) > maxSpin {
-			b.omega = math.Copysign(maxSpin, b.omega)
-		}
+		b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
 		playPaddleHit()
 	}
 
@@ -1890,49 +1890,53 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 				continue
 			}
 
-			// Normal collision
-			overlapX := 0.0
-			overlapY := 0.0
-			if b.x < brickPtr.x+brickPtr.w/2 {
-				overlapX = (b.x + b.r) - brickPtr.x
-			} else {
-				overlapX = brickPtr.x + brickPtr.w - (b.x - b.r)
-			}
-			if b.y < brickPtr.y+brickPtr.h/2 {
-				overlapY = (b.y + b.r) - brickPtr.y
-			} else {
-				overlapY = brickPtr.y + brickPtr.h - (b.y - b.r)
-			}
+			// Proper circle-vs-AABB collision. The closest point gives a
+			// diagonal normal at corners instead of forcing an axis-only bounce.
+			closestX := clampFloat(b.x, brickPtr.x, brickPtr.x+brickPtr.w)
+			closestY := clampFloat(b.y, brickPtr.y, brickPtr.y+brickPtr.h)
+			dx := b.x - closestX
+			dy := b.y - closestY
+			distanceSquared := dx*dx + dy*dy
+
 			var nx, ny float64
-			if overlapX < overlapY {
-				if b.x < brickPtr.x+brickPtr.w/2 {
-					nx = -1
-				} else {
-					nx = 1
+			if distanceSquared > 1e-12 {
+				distance := math.Sqrt(distanceSquared)
+				nx = dx / distance
+				ny = dy / distance
+				penetration := b.r - distance
+				if penetration > 0 {
+					b.x += nx * penetration
+					b.y += ny * penetration
 				}
-				ny = 0
 			} else {
-				if b.y < brickPtr.y+brickPtr.h/2 {
-					ny = -1
-				} else {
-					ny = 1
+				// The centre is inside the rectangle. Push it through the nearest
+				// face; adaptive substeps make this fallback uncommon.
+				left := b.x - brickPtr.x
+				right := brickPtr.x + brickPtr.w - b.x
+				top := b.y - brickPtr.y
+				bottom := brickPtr.y + brickPtr.h - b.y
+
+				minimum := left
+				nx, ny = -1, 0
+				push := left + b.r
+				if right < minimum {
+					minimum = right
+					nx, ny = 1, 0
+					push = right + b.r
 				}
-				nx = 0
-			}
-			if nx != 0 {
-				if nx == -1 {
-					b.x = brickPtr.x - b.r
-				} else if nx == 1 {
-					b.x = brickPtr.x + brickPtr.w + b.r
+				if top < minimum {
+					minimum = top
+					nx, ny = 0, -1
+					push = top + b.r
 				}
-			}
-			if ny != 0 {
-				if ny == -1 {
-					b.y = brickPtr.y - b.r
-				} else if ny == 1 {
-					b.y = brickPtr.y + brickPtr.h + b.r
+				if bottom < minimum {
+					nx, ny = 0, 1
+					push = bottom + b.r
 				}
+				b.x += nx * push
+				b.y += ny * push
 			}
+
 			resolveCollisionBall(b, nx, ny, 0, 0)
 
 			if brickPtr.unbreakable {
@@ -2395,6 +2399,32 @@ func applyPhoneTiltControl(dt float64) bool {
 	return true
 }
 
+// Update a ball with adaptive substeps so it cannot cross a thin brick in
+// one large frame. The cap prevents pathological slowdown.
+func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
+	if dt <= 0 {
+		return
+	}
+
+	speed := math.Hypot(b.vx, b.vy)
+	maxTravelPerStep := math.Max(b.r, 6.0)
+	steps := int(math.Ceil(speed * dt / maxTravelPerStep))
+	if steps < 1 {
+		steps = 1
+	}
+	if steps > 6 {
+		steps = 6
+	}
+
+	stepDT := dt / float64(steps)
+	for step := 0; step < steps; step++ {
+		updateBall(b, stepDT, isPrimary)
+		if b.y+b.r > canvasHeight {
+			break
+		}
+	}
+}
+
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
@@ -2528,14 +2558,14 @@ func update(dt float64) {
 	}
 
 	// Primary ball
-	updateBall(&ball, dt, true)
+	updateBallAdaptive(&ball, dt, true)
 
 	primaryLost := ball.y+ball.r > canvasHeight
 	secondLost := secondBallActive &&
 		secondBall.y+secondBall.r > canvasHeight
 
 	if secondBallActive {
-		updateBall(&secondBall, dt, false)
+		updateBallAdaptive(&secondBall, dt, false)
 
 		if primaryLost && !secondLost {
 			// Keep playing with the second ball. No life was lost.
@@ -2578,8 +2608,9 @@ func resetBalls() {
 	ball.stuckTimer = 0
 	secondBall.stuckTimer = 0
 	secondBallActive = false
-	paddle.x = (canvasWidth - paddleWidth) / 2
+	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
+	paddlePreviousX = paddle.x
 }
 
 func ensureBrickCanvas() {
