@@ -26,9 +26,9 @@ tiltUpSpeed=-2600
 tiltSideMin=280
 tiltSideMax=420
 
-ballX=900
-ballY=800
-ballVx=0
+ballX=120
+ballY=60
+ballVx=5
 ballVy=100
 
 brickWidth=50

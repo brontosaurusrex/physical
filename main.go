@@ -69,6 +69,7 @@ const (
 	defaultEnableInfluencer       = true
 	defaultEnableZapper           = false
 	defaultEnableBreakUnbreakable = true
+	defaultEnableCornerPhysics    = false
 
 	showBlackHole = false // Set true to draw the moving black hole.
 )
@@ -130,6 +131,7 @@ var (
 	enableInfluencer       = defaultEnableInfluencer
 	enableZapper           = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
+	enableCornerPhysics    = defaultEnableCornerPhysics
 
 	enableSounds = true
 	paused       bool
@@ -206,10 +208,11 @@ const (
 
 // ---- Ball struct ----
 type Ball struct {
-	x, y, r      float64
-	vx, vy       float64
-	omega, angle float64
-	stuckTimer   float64
+	x, y, r       float64
+	vx, vy        float64
+	omega, angle  float64
+	stuckTimer    float64
+	soundCooldown float64
 }
 
 type statusMessage struct {
@@ -360,6 +363,19 @@ func showStatus(text string, duration float64) {
 	if len(statusMessages) > 3 {
 		statusMessages = statusMessages[len(statusMessages)-3:]
 	}
+}
+
+const (
+	minimumCollisionSoundSpeed = 35.0
+	collisionSoundCooldown     = 0.045
+)
+
+func playImpactSound(b *Ball, impactSpeed float64, play func()) {
+	if impactSpeed < minimumCollisionSoundSpeed || b.soundCooldown > 0 {
+		return
+	}
+	play()
+	b.soundCooldown = collisionSoundCooldown
 }
 
 func gridKey(row, col int) int {
@@ -700,6 +716,7 @@ func resetGlobals() {
 	enableInfluencer = defaultEnableInfluencer
 	enableZapper = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
+	enableCornerPhysics = defaultEnableCornerPhysics
 	palette = append([]string(nil), defaultPalette...)
 	magicColor = defaultMagicColor
 	magicStrokeColor = defaultMagicStrokeColor
@@ -896,6 +913,10 @@ func applyConfig(config map[string]string) {
 		case "enableBreakUnbreakable":
 			if b, err := strconv.ParseBool(val); err == nil {
 				enableBreakUnbreakable = b
+			}
+		case "enableCornerPhysics":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableCornerPhysics = b
 			}
 		case "paddleWidth":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
@@ -1432,6 +1453,7 @@ func startLevel(index int) {
 	ball.vx, ball.vy = startBallVx, startBallVy
 	ball.omega, ball.angle = 0, 0
 	ball.stuckTimer = 0
+	ball.soundCooldown = 0
 	ball.r = ballRadius
 	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
@@ -1766,6 +1788,10 @@ func updateZapper(dt float64) {
 
 // ---- Update a single ball ----
 func updateBall(b *Ball, dt float64, isPrimary bool) {
+	if b.soundCooldown > 0 {
+		b.soundCooldown = math.Max(0, b.soundCooldown-dt)
+	}
+
 	b.vy += currentGravity * dt
 	applyBrickMagnetism(b, dt)
 
@@ -1790,19 +1816,22 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 
 	// Walls
 	if b.x-b.r < 0 {
+		impactSpeed := math.Max(0, -b.vx)
 		b.x = b.r
 		resolveCollisionBall(b, 1, 0, 0, 0)
-		playWallHit()
+		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.x+b.r > canvasWidth {
+		impactSpeed := math.Max(0, b.vx)
 		b.x = canvasWidth - b.r
 		resolveCollisionBall(b, -1, 0, 0, 0)
-		playWallHit()
+		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y-b.r < 0 {
+		impactSpeed := math.Max(0, -b.vy)
 		b.y = b.r
 		resolveCollisionBall(b, 0, 1, 0, 0)
-		playWallHit()
+		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y+b.r > canvasHeight {
 		// Ball lost handled by caller
@@ -1839,9 +1868,10 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 			speed = maxSpeed
 		}
 
+		incomingVx := b.vx
 		incomingVy := b.vy
 
-		b.vx = speed * math.Sin(angle)
+		b.vx = speed*math.Sin(angle) + incomingVx*0.15
 		b.vy = -speed * math.Cos(angle)
 
 		// The moving paddle drags the bottom contact point of the ball.
@@ -1859,6 +1889,33 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 		b.vx += deltaVx
 		b.omega -= 2 * deltaVx / b.r
 
+		// Prevent a perfectly vertical, indefinitely repeating trajectory.
+		// Preserve the current total speed while enforcing only a small
+		// horizontal component.
+		const minimumHorizontalSpeed = 60.0
+		if math.Abs(b.vx) < minimumHorizontalSpeed {
+			direction := sign(incomingVx)
+			if direction == 0 {
+				direction = sign(paddle.vx)
+			}
+			if direction == 0 {
+				direction = sign(hitPos - 0.5)
+			}
+			if direction == 0 {
+				if rand.Intn(2) == 0 {
+					direction = -1
+				} else {
+					direction = 1
+				}
+			}
+
+			currentSpeed := math.Hypot(b.vx, b.vy)
+			targetVx := direction * math.Min(minimumHorizontalSpeed, currentSpeed*0.35)
+			remainingVySquared := math.Max(0, currentSpeed*currentSpeed-targetVx*targetVx)
+			b.vx = targetVx
+			b.vy = -math.Sqrt(remainingVySquared)
+		}
+
 		// Keep the game's configured speed limit after paddle friction.
 		postCollisionSpeed := math.Hypot(b.vx, b.vy)
 		if postCollisionSpeed > maxSpeed {
@@ -1868,7 +1925,7 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 		}
 
 		b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
-		playPaddleHit()
+		playImpactSound(b, math.Abs(incomingVy), playPaddleHit)
 	}
 
 	// ---- Bricks ----
@@ -1890,57 +1947,91 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 				continue
 			}
 
-			// Proper circle-vs-AABB collision. The closest point gives a
-			// diagonal normal at corners instead of forcing an axis-only bounce.
-			closestX := clampFloat(b.x, brickPtr.x, brickPtr.x+brickPtr.w)
-			closestY := clampFloat(b.y, brickPtr.y, brickPtr.y+brickPtr.h)
-			dx := b.x - closestX
-			dy := b.y - closestY
-			distanceSquared := dx*dx + dy*dy
-
 			var nx, ny float64
-			if distanceSquared > 1e-12 {
-				distance := math.Sqrt(distanceSquared)
-				nx = dx / distance
-				ny = dy / distance
-				penetration := b.r - distance
-				if penetration > 0 {
-					b.x += nx * penetration
-					b.y += ny * penetration
+
+			if enableCornerPhysics {
+				// Optional physically diagonal corner response.
+				closestX := clampFloat(b.x, brickPtr.x, brickPtr.x+brickPtr.w)
+				closestY := clampFloat(b.y, brickPtr.y, brickPtr.y+brickPtr.h)
+				dx := b.x - closestX
+				dy := b.y - closestY
+				distanceSquared := dx*dx + dy*dy
+
+				if distanceSquared > 1e-12 {
+					distance := math.Sqrt(distanceSquared)
+					nx = dx / distance
+					ny = dy / distance
+					penetration := b.r - distance
+					if penetration > 0 {
+						b.x += nx * penetration
+						b.y += ny * penetration
+					}
+				} else {
+					left := b.x - brickPtr.x
+					right := brickPtr.x + brickPtr.w - b.x
+					top := b.y - brickPtr.y
+					bottom := brickPtr.y + brickPtr.h - b.y
+
+					minimum := left
+					nx, ny = -1, 0
+					push := left + b.r
+					if right < minimum {
+						minimum = right
+						nx, ny = 1, 0
+						push = right + b.r
+					}
+					if top < minimum {
+						minimum = top
+						nx, ny = 0, -1
+						push = top + b.r
+					}
+					if bottom < minimum {
+						nx, ny = 0, 1
+						push = bottom + b.r
+					}
+					b.x += nx * push
+					b.y += ny * push
 				}
 			} else {
-				// The centre is inside the rectangle. Push it through the nearest
-				// face; adaptive substeps make this fallback uncommon.
-				left := b.x - brickPtr.x
-				right := brickPtr.x + brickPtr.w - b.x
-				top := b.y - brickPtr.y
-				bottom := brickPtr.y + brickPtr.h - b.y
+				// Classic Breakout response: choose one axis only. This keeps
+				// trajectories predictable and avoids extreme corner deflections.
+				overlapX := 0.0
+				overlapY := 0.0
+				if b.x < brickPtr.x+brickPtr.w/2 {
+					overlapX = (b.x + b.r) - brickPtr.x
+				} else {
+					overlapX = brickPtr.x + brickPtr.w - (b.x - b.r)
+				}
+				if b.y < brickPtr.y+brickPtr.h/2 {
+					overlapY = (b.y + b.r) - brickPtr.y
+				} else {
+					overlapY = brickPtr.y + brickPtr.h - (b.y - b.r)
+				}
 
-				minimum := left
-				nx, ny = -1, 0
-				push := left + b.r
-				if right < minimum {
-					minimum = right
-					nx, ny = 1, 0
-					push = right + b.r
+				if overlapX < overlapY {
+					if b.x < brickPtr.x+brickPtr.w/2 {
+						nx = -1
+						b.x = brickPtr.x - b.r
+					} else {
+						nx = 1
+						b.x = brickPtr.x + brickPtr.w + b.r
+					}
+				} else {
+					if b.y < brickPtr.y+brickPtr.h/2 {
+						ny = -1
+						b.y = brickPtr.y - b.r
+					} else {
+						ny = 1
+						b.y = brickPtr.y + brickPtr.h + b.r
+					}
 				}
-				if top < minimum {
-					minimum = top
-					nx, ny = 0, -1
-					push = top + b.r
-				}
-				if bottom < minimum {
-					nx, ny = 0, 1
-					push = bottom + b.r
-				}
-				b.x += nx * push
-				b.y += ny * push
 			}
 
+			impactSpeed := math.Max(0, -(b.vx*nx + b.vy*ny))
 			resolveCollisionBall(b, nx, ny, 0, 0)
 
 			if brickPtr.unbreakable {
-				playUnbreakable()
+				playImpactSound(b, impactSpeed, playUnbreakable)
 				continue
 			}
 
@@ -2606,7 +2697,9 @@ func resetBalls() {
 	ball.vx, ball.vy = startBallVx, startBallVy
 	ball.omega, ball.angle = 0, 0
 	ball.stuckTimer = 0
+	ball.soundCooldown = 0
 	secondBall.stuckTimer = 0
+	secondBall.soundCooldown = 0
 	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
