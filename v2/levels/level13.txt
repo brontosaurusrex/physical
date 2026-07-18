@@ -1,0 +1,20 @@
+brickPadding=12
+ballRadius=25
+---
+UUUUUUUUUUUUUUUUUUU     
+U      #####      U
+U    #########    U
+U    #########    U
+U                 U
+U    MMMMMMMMM    U
+U                 U
+U                 U
+U                 U
+UUUUUUU    UUUUUUUU
+
+
+
+
+
+
+
