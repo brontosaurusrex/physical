@@ -19,7 +19,7 @@ paddleColor#ffbe0b
 brickColor=#ff006e
 ballColor=#ffbe0b
 textColor=#ffbe0b
-spinColor=#ffbe0b
+spinColor=#111111
 unbreakableColor=#8338ec
 secondBallColor=#fb5607
 secondBallSpinColor=#fb5607

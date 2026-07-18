@@ -30,7 +30,7 @@ const (
 	defaultPaddleBoost          = 700.0
 	defaultBrickBoost           = 100.0
 	defaultMaxSpeed             = 1000.0
-	defaultMaxSpin              = 100.0
+	defaultMaxSpin              = 30.0
 	defaultPaddleRadius         = 12.0
 	defaultBrickRadius          = 6.0
 	defaultUnbreakableChance    = 0.15
@@ -69,7 +69,6 @@ const (
 	defaultEnableInfluencer       = true
 	defaultEnableZapper           = false
 	defaultEnableBreakUnbreakable = true
-	defaultEnableCornerPhysics    = false
 
 	showBlackHole = false // Set true to draw the moving black hole.
 )
@@ -131,7 +130,6 @@ var (
 	enableInfluencer       = defaultEnableInfluencer
 	enableZapper           = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
-	enableCornerPhysics    = defaultEnableCornerPhysics
 
 	enableSounds = true
 	paused       bool
@@ -160,8 +158,6 @@ var (
 	phoneTiltTargetX         float64
 
 	deviceOrientationCallback js.Func
-	nextLevelCallback         js.Func
-	previousLevelCallback     js.Func
 )
 
 // ---- Color palette ----
@@ -716,7 +712,6 @@ func resetGlobals() {
 	enableInfluencer = defaultEnableInfluencer
 	enableZapper = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
-	enableCornerPhysics = defaultEnableCornerPhysics
 	palette = append([]string(nil), defaultPalette...)
 	magicColor = defaultMagicColor
 	magicStrokeColor = defaultMagicStrokeColor
@@ -914,10 +909,6 @@ func applyConfig(config map[string]string) {
 			if b, err := strconv.ParseBool(val); err == nil {
 				enableBreakUnbreakable = b
 			}
-		case "enableCornerPhysics":
-			if b, err := strconv.ParseBool(val); err == nil {
-				enableCornerPhysics = b
-			}
 		case "paddleWidth":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
 				paddleWidth = f
@@ -934,41 +925,32 @@ func applyConfig(config map[string]string) {
 
 // ---- Physics ----
 func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
-	// nx,ny point from the surface toward the ball, so the point touching
-	// the surface is on the opposite side of the ball.
-	cx := b.x - nx*b.r
-	cy := b.y - ny*b.r
-
+	cx := b.x + nx*b.r
+	cy := b.y + ny*b.r
 	contactVx := b.vx - b.omega*(cy-b.y)
 	contactVy := b.vy + b.omega*(cx-b.x)
 	relVx := contactVx - surfVx
 	relVy := contactVy - surfVy
-
 	vn := relVx*nx + relVy*ny
 	vt := relVx*(-ny) + relVy*nx
 	if vn >= 0 {
 		return
 	}
-
 	vnNew := -restitution * vn
 	deltaVn := vnNew - vn
-
-	// For a solid disk, a tangential impulse changes contact velocity three
-	// times as much as it changes centre velocity: once through translation
-	// and twice through rotation. Therefore no-slip correction is -vt/3.
 	maxFriction := frictionCoeff * math.Abs(deltaVn)
-	desiredDeltaVt := -vt / 3.0
-	deltaVt := math.Max(
-		-maxFriction,
-		math.Min(maxFriction, desiredDeltaVt),
-	)
-
+	var deltaVt float64
+	if math.Abs(vt) < 0.001 {
+		deltaVt = -vt
+	} else {
+		friction := math.Min(math.Abs(vt), maxFriction)
+		deltaVt = -sign(vt) * friction
+	}
 	tx := -ny
 	ty := nx
 	b.vx += deltaVn*nx + deltaVt*tx
 	b.vy += deltaVn*ny + deltaVt*ty
 	b.omega -= 2 * deltaVt / b.r
-	b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
 }
 
 // ---- Build bricks from level layout (with auto-scaling) ----
@@ -1028,15 +1010,6 @@ func buildBricksFromLevel(lvl levelData) {
 			ch := byte(' ')
 			if col < len(line) {
 				ch = line[col]
-			}
-			if ch == 'X' {
-				if rand.Float64() < unbreakableChance {
-					ch = 'U'
-				} else if rand.Float64() < magicChance {
-					ch = 'M'
-				} else {
-					ch = '#'
-				}
 			}
 			if ch == ' ' {
 				continue
@@ -1487,10 +1460,7 @@ func startLevel(index int) {
 	buildBricksFromLevel(levels[index])
 	currentLevelIndex = index
 	saveCurrentLevel()
-	log(fmt.Sprintf(
-		"Level %d: restitution=%.3f friction=%.3f maxSpin=%.1f paddle=%.1fx%.1f boost=%.1f",
-		index+1, restitution, frictionCoeff, maxSpin, paddle.w, paddle.h, paddleBoost,
-	))
+	log("Level " + strconv.Itoa(index+1) + " started")
 }
 
 // ---- Jump to a specific level (cheat) ----
@@ -1854,78 +1824,27 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 			hitPos = 1
 		}
 
-		angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
+		//angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
+		angle := (hitPos - 0.5) * 2.0 * (69.0 * math.Pi / 180.0)
 
 		speed := math.Sqrt(b.vx*b.vx + b.vy*b.vy)
 		if speed < 100 {
 			speed = 100
 		}
 
-		// Restitution controls retained speed; paddleBoost represents energy
-		// actively supplied by the paddle.
-		speed = speed*restitution + paddleBoost
+		speed += paddleBoost
 		if speed > maxSpeed {
 			speed = maxSpeed
 		}
 
-		incomingVx := b.vx
-		incomingVy := b.vy
-
-		b.vx = speed*math.Sin(angle) + incomingVx*0.15
+		b.vx = speed * math.Sin(angle)
 		b.vy = -speed * math.Cos(angle)
 
-		// The moving paddle drags the bottom contact point of the ball.
-		// Positive omega is clockwise on canvas, so a paddle moving right
-		// normally creates negative (counter-clockwise) omega.
-		relativeSlip := b.vx - b.omega*b.r - paddle.vx
-		normalDeltaSpeed := math.Abs(b.vy - incomingVy)
-		maxFrictionDelta := frictionCoeff * normalDeltaSpeed
-		desiredDeltaVx := -relativeSlip / 3.0
-		deltaVx := math.Max(
-			-maxFrictionDelta,
-			math.Min(maxFrictionDelta, desiredDeltaVx),
-		)
-
-		b.vx += deltaVx
-		b.omega -= 2 * deltaVx / b.r
-
-		// Prevent a perfectly vertical, indefinitely repeating trajectory.
-		// Preserve the current total speed while enforcing only a small
-		// horizontal component.
-		const minimumHorizontalSpeed = 60.0
-		if math.Abs(b.vx) < minimumHorizontalSpeed {
-			direction := sign(incomingVx)
-			if direction == 0 {
-				direction = sign(paddle.vx)
-			}
-			if direction == 0 {
-				direction = sign(hitPos - 0.5)
-			}
-			if direction == 0 {
-				if rand.Intn(2) == 0 {
-					direction = -1
-				} else {
-					direction = 1
-				}
-			}
-
-			currentSpeed := math.Hypot(b.vx, b.vy)
-			targetVx := direction * math.Min(minimumHorizontalSpeed, currentSpeed*0.35)
-			remainingVySquared := math.Max(0, currentSpeed*currentSpeed-targetVx*targetVx)
-			b.vx = targetVx
-			b.vy = -math.Sqrt(remainingVySquared)
+		b.omega += paddle.vx * 0.1 * (hitPos - 0.5)
+		if math.Abs(b.omega) > maxSpin {
+			b.omega = math.Copysign(maxSpin, b.omega)
 		}
-
-		// Keep the game's configured speed limit after paddle friction.
-		postCollisionSpeed := math.Hypot(b.vx, b.vy)
-		if postCollisionSpeed > maxSpeed {
-			scale := maxSpeed / postCollisionSpeed
-			b.vx *= scale
-			b.vy *= scale
-		}
-
-		b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
-		playImpactSound(b, math.Abs(incomingVy), playPaddleHit)
+		playImpactSound(b, math.Abs(b.vy), playPaddleHit)
 	}
 
 	// ---- Bricks ----
@@ -1947,86 +1866,49 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 				continue
 			}
 
-			var nx, ny float64
-
-			if enableCornerPhysics {
-				// Optional physically diagonal corner response.
-				closestX := clampFloat(b.x, brickPtr.x, brickPtr.x+brickPtr.w)
-				closestY := clampFloat(b.y, brickPtr.y, brickPtr.y+brickPtr.h)
-				dx := b.x - closestX
-				dy := b.y - closestY
-				distanceSquared := dx*dx + dy*dy
-
-				if distanceSquared > 1e-12 {
-					distance := math.Sqrt(distanceSquared)
-					nx = dx / distance
-					ny = dy / distance
-					penetration := b.r - distance
-					if penetration > 0 {
-						b.x += nx * penetration
-						b.y += ny * penetration
-					}
-				} else {
-					left := b.x - brickPtr.x
-					right := brickPtr.x + brickPtr.w - b.x
-					top := b.y - brickPtr.y
-					bottom := brickPtr.y + brickPtr.h - b.y
-
-					minimum := left
-					nx, ny = -1, 0
-					push := left + b.r
-					if right < minimum {
-						minimum = right
-						nx, ny = 1, 0
-						push = right + b.r
-					}
-					if top < minimum {
-						minimum = top
-						nx, ny = 0, -1
-						push = top + b.r
-					}
-					if bottom < minimum {
-						nx, ny = 0, 1
-						push = bottom + b.r
-					}
-					b.x += nx * push
-					b.y += ny * push
-				}
+			// Normal collision
+			overlapX := 0.0
+			overlapY := 0.0
+			if b.x < brickPtr.x+brickPtr.w/2 {
+				overlapX = (b.x + b.r) - brickPtr.x
 			} else {
-				// Classic Breakout response: choose one axis only. This keeps
-				// trajectories predictable and avoids extreme corner deflections.
-				overlapX := 0.0
-				overlapY := 0.0
+				overlapX = brickPtr.x + brickPtr.w - (b.x - b.r)
+			}
+			if b.y < brickPtr.y+brickPtr.h/2 {
+				overlapY = (b.y + b.r) - brickPtr.y
+			} else {
+				overlapY = brickPtr.y + brickPtr.h - (b.y - b.r)
+			}
+			var nx, ny float64
+			if overlapX < overlapY {
 				if b.x < brickPtr.x+brickPtr.w/2 {
-					overlapX = (b.x + b.r) - brickPtr.x
+					nx = -1
 				} else {
-					overlapX = brickPtr.x + brickPtr.w - (b.x - b.r)
+					nx = 1
 				}
+				ny = 0
+			} else {
 				if b.y < brickPtr.y+brickPtr.h/2 {
-					overlapY = (b.y + b.r) - brickPtr.y
+					ny = -1
 				} else {
-					overlapY = brickPtr.y + brickPtr.h - (b.y - b.r)
+					ny = 1
 				}
-
-				if overlapX < overlapY {
-					if b.x < brickPtr.x+brickPtr.w/2 {
-						nx = -1
-						b.x = brickPtr.x - b.r
-					} else {
-						nx = 1
-						b.x = brickPtr.x + brickPtr.w + b.r
-					}
-				} else {
-					if b.y < brickPtr.y+brickPtr.h/2 {
-						ny = -1
-						b.y = brickPtr.y - b.r
-					} else {
-						ny = 1
-						b.y = brickPtr.y + brickPtr.h + b.r
-					}
+				nx = 0
+			}
+			if nx != 0 {
+				if nx == -1 {
+					b.x = brickPtr.x - b.r
+				} else if nx == 1 {
+					b.x = brickPtr.x + brickPtr.w + b.r
 				}
 			}
-
+			if ny != 0 {
+				if ny == -1 {
+					b.y = brickPtr.y - b.r
+				} else if ny == 1 {
+					b.y = brickPtr.y + brickPtr.h + b.r
+				}
+			}
 			impactSpeed := math.Max(0, -(b.vx*nx + b.vy*ny))
 			resolveCollisionBall(b, nx, ny, 0, 0)
 
@@ -2490,32 +2372,6 @@ func applyPhoneTiltControl(dt float64) bool {
 	return true
 }
 
-// Update a ball with adaptive substeps so it cannot cross a thin brick in
-// one large frame. The cap prevents pathological slowdown.
-func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
-	if dt <= 0 {
-		return
-	}
-
-	speed := math.Hypot(b.vx, b.vy)
-	maxTravelPerStep := math.Max(b.r, 6.0)
-	steps := int(math.Ceil(speed * dt / maxTravelPerStep))
-	if steps < 1 {
-		steps = 1
-	}
-	if steps > 6 {
-		steps = 6
-	}
-
-	stepDT := dt / float64(steps)
-	for step := 0; step < steps; step++ {
-		updateBall(b, stepDT, isPrimary)
-		if b.y+b.r > canvasHeight {
-			break
-		}
-	}
-}
-
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
@@ -2582,9 +2438,6 @@ func update(dt float64) {
 		paddle.x = canvasWidth - paddle.w
 	}
 
-	// Use actual frame-to-frame movement for paddle collision friction.
-	// This works consistently for keyboard, mouse, follow, vertical drag,
-	// two-thumb control, and tilt.
 	if dt > 0 {
 		paddle.vx = (paddle.x - paddlePreviousX) / dt
 	} else {
@@ -2649,14 +2502,14 @@ func update(dt float64) {
 	}
 
 	// Primary ball
-	updateBallAdaptive(&ball, dt, true)
+	updateBall(&ball, dt, true)
 
 	primaryLost := ball.y+ball.r > canvasHeight
 	secondLost := secondBallActive &&
 		secondBall.y+secondBall.r > canvasHeight
 
 	if secondBallActive {
-		updateBallAdaptive(&secondBall, dt, false)
+		updateBall(&secondBall, dt, false)
 
 		if primaryLost && !secondLost {
 			// Keep playing with the second ball. No life was lost.
@@ -2933,31 +2786,28 @@ func draw() {
 	}
 
 	if gameOver {
-		drawCenteredOverlay()
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
 
+		ctx.Set(
+			"font",
+			"40px GameFont, monospace",
+		)
+
+		msg := "GAME OVER"
 		if win {
-			// Deliberately the largest title used anywhere in the game.
-			ctx.Set("font", "144px GameFont, monospace")
-			ctx.Call("fillText", "YOU WIN!", canvasWidth/2, canvasHeight/2-10)
-			ctx.Set("font", "28px GameFont, monospace")
-			ctx.Call(
-				"fillText",
-				"Press Space or touch screen to restart",
-				canvasWidth/2,
-				canvasHeight/2+75,
-			)
+			msg = "YOU WIN!"
+		}
+		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2)
+
+		ctx.Set(
+			"font",
+			"18px GameFont, monospace",
+		)
+		if win {
+			ctx.Call("fillText", "Press N to start again", canvasWidth/2, canvasHeight/2+50)
 		} else {
-			ctx.Set("font", "72px GameFont, monospace")
-			ctx.Call("fillText", "GAME OVER", canvasWidth/2, canvasHeight/2)
-			ctx.Set("font", "24px GameFont, monospace")
-			ctx.Call(
-				"fillText",
-				"Press Space, Enter, or left-click to retry",
-				canvasWidth/2,
-				canvasHeight/2+60,
-			)
+			ctx.Call("fillText", "Press Space, Enter, or left-click to retry", canvasWidth/2, canvasHeight/2+50)
 		}
 
 		ctx.Set("textAlign", "start")
@@ -3029,33 +2879,6 @@ func verticalDragToHorizontalDelta(deltaY float64) float64 {
 	return deltaY * scaleY * 2.2
 }
 
-func goToNextLevel() {
-	if currentLevelIndex < len(levels)-1 {
-		jumpToLevel(currentLevelIndex + 1)
-	}
-}
-
-func goToPreviousLevel() {
-	if currentLevelIndex > 0 {
-		jumpToLevel(currentLevelIndex - 1)
-	}
-}
-
-func setupLevelNavigationBridge() {
-	nextLevelCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		goToNextLevel()
-		return nil
-	})
-
-	previousLevelCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		goToPreviousLevel()
-		return nil
-	})
-
-	js.Global().Set("breakoutNextLevel", nextLevelCallback)
-	js.Global().Set("breakoutPreviousLevel", previousLevelCallback)
-}
-
 // ---- Input ----
 func movePaddleToPointer(e js.Value) {
 	rect := canvas.Call("getBoundingClientRect")
@@ -3117,25 +2940,6 @@ func setupInput() {
 		e := args[0]
 		e.Call("preventDefault")
 		key := e.Get("key").String()
-
-		// Cheat keys must work even while a newly selected level is waiting
-		// for its first launch input.
-		if key == "n" || key == "N" {
-			goToNextLevel()
-			return nil
-		}
-		if key == "p" || key == "P" {
-			goToPreviousLevel()
-			return nil
-		}
-
-		// Restart from level one after winning.
-		if gameOver && win {
-			if key == " " && !e.Get("repeat").Bool() {
-				jumpToLevel(0)
-			}
-			return nil
-		}
 
 		// Retry the same level after losing all lives. This must come
 		// before pause handling so Space retries instead of toggling pause.
@@ -3224,6 +3028,24 @@ func setupInput() {
 			return nil
 		}
 
+		// Cheat keys: N = next level, P = previous level
+		if key == "n" || key == "N" {
+			if currentLevelIndex < len(levels)-1 {
+				jumpToLevel(currentLevelIndex + 1)
+			} else if gameOver {
+				jumpToLevel(0)
+			}
+			return nil
+		}
+		if key == "p" || key == "P" {
+			if currentLevelIndex > 0 {
+				jumpToLevel(currentLevelIndex - 1)
+			} else if gameOver {
+				jumpToLevel(0)
+			}
+			return nil
+		}
+
 		// Paddle controls
 		if key == "ArrowLeft" {
 			leftPressed = true
@@ -3284,11 +3106,6 @@ func setupInput() {
 			initAudio()
 		} else {
 			ensureAudioRunning()
-		}
-
-		if gameOver && win {
-			jumpToLevel(0)
-			return nil
 		}
 
 		pointerType := e.Get("pointerType").String()
@@ -3504,11 +3321,19 @@ func setupInput() {
 	})
 
 	bindMobileButton("previousLevelButton", func() {
-		goToPreviousLevel()
+		if currentLevelIndex > 0 {
+			jumpToLevel(currentLevelIndex - 1)
+		} else if gameOver {
+			jumpToLevel(0)
+		}
 	})
 
 	bindMobileButton("nextLevelButton", func() {
-		goToNextLevel()
+		if currentLevelIndex < len(levels)-1 {
+			jumpToLevel(currentLevelIndex + 1)
+		} else if gameOver {
+			jumpToLevel(0)
+		}
 	})
 
 	bindMobileButton("magnetsButton", func() {
@@ -3560,7 +3385,6 @@ func main() {
 	loadLevels()
 	setupInput()
 	setupMobileControlSelector()
-	setupLevelNavigationBridge()
 	resetGame()
 
 	loopFunc = js.FuncOf(gameLoop)

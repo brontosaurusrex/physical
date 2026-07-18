@@ -20,6 +20,8 @@ maxSpeed=800
 paddleBoost=1800
 brickBoost=0
 
+enableCornerPhysics=false
+
 stuckSpeedThreshold=250
 stuckDuration=0.1
 tiltUpSpeed=-2600
