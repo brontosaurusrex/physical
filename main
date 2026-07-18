@@ -131,6 +131,7 @@ var (
 
 	enableSounds = true
 	paused       bool
+	menuPaused   bool
 	leftPressed  bool
 	rightPressed bool
 
@@ -156,8 +157,8 @@ var (
 	phoneTiltTargetX         float64
 
 	deviceOrientationCallback js.Func
-	nextLevelCallback         js.Func
-	previousLevelCallback     js.Func
+	isGamePausedCallback      js.Func
+	setMenuPausedCallback     js.Func
 )
 
 // ---- Color palette ----
@@ -2332,7 +2333,7 @@ func applyPhoneTiltControl(dt float64) bool {
 
 // ---- Update (main loop) ----
 func update(dt float64) {
-	if gameOver || paused || waitingForStart {
+	if gameOver || paused || menuPaused || waitingForStart {
 		return
 	}
 
@@ -2722,7 +2723,7 @@ func draw() {
 		ctx.Set("textAlign", "start")
 	}
 
-	if paused && !gameOver && !waitingForStart && !levelAdvancePending {
+	if (paused || menuPaused) && !gameOver && !waitingForStart && !levelAdvancePending {
 		drawCenteredOverlay()
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
@@ -2827,37 +2828,6 @@ func verticalDragToHorizontalDelta(deltaY float64) float64 {
 	return deltaY * scaleY * 2.2
 }
 
-func goToNextLevel() {
-	if currentLevelIndex < len(levels)-1 {
-		jumpToLevel(currentLevelIndex + 1)
-	} else if gameOver {
-		jumpToLevel(0)
-	}
-}
-
-func goToPreviousLevel() {
-	if currentLevelIndex > 0 {
-		jumpToLevel(currentLevelIndex - 1)
-	} else if gameOver {
-		jumpToLevel(0)
-	}
-}
-
-func setupLevelNavigationBridge() {
-	nextLevelCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		goToNextLevel()
-		return nil
-	})
-
-	previousLevelCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		goToPreviousLevel()
-		return nil
-	})
-
-	js.Global().Set("breakoutNextLevel", nextLevelCallback)
-	js.Global().Set("breakoutPreviousLevel", previousLevelCallback)
-}
-
 // ---- Input ----
 func movePaddleToPointer(e js.Value) {
 	rect := canvas.Call("getBoundingClientRect")
@@ -2923,11 +2893,19 @@ func setupInput() {
 		// Cheat keys must work even while a newly selected level is waiting
 		// for its first launch input.
 		if key == "n" || key == "N" {
-			goToNextLevel()
+			if currentLevelIndex < len(levels)-1 {
+				jumpToLevel(currentLevelIndex + 1)
+			} else if gameOver {
+				jumpToLevel(0)
+			}
 			return nil
 		}
 		if key == "p" || key == "P" {
-			goToPreviousLevel()
+			if currentLevelIndex > 0 {
+				jumpToLevel(currentLevelIndex - 1)
+			} else if gameOver {
+				jumpToLevel(0)
+			}
 			return nil
 		}
 
@@ -3165,7 +3143,7 @@ func setupInput() {
 	canvas.Call("addEventListener", "pointerdown", pointerDown)
 
 	pointerMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if paused || len(args) == 0 {
+		if paused || menuPaused || len(args) == 0 {
 			return nil
 		}
 
@@ -3293,11 +3271,19 @@ func setupInput() {
 	})
 
 	bindMobileButton("previousLevelButton", func() {
-		goToPreviousLevel()
+		if currentLevelIndex > 0 {
+			jumpToLevel(currentLevelIndex - 1)
+		} else if gameOver {
+			jumpToLevel(0)
+		}
 	})
 
 	bindMobileButton("nextLevelButton", func() {
-		goToNextLevel()
+		if currentLevelIndex < len(levels)-1 {
+			jumpToLevel(currentLevelIndex + 1)
+		} else if gameOver {
+			jumpToLevel(0)
+		}
 	})
 
 	bindMobileButton("magnetsButton", func() {
@@ -3319,6 +3305,30 @@ func setupInput() {
 			showStatus("Zapper off", 2.0)
 		}
 	})
+}
+
+func setupPauseBridge() {
+	isGamePausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return paused
+	})
+
+	setMenuPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) == 0 {
+			return nil
+		}
+
+		menuPaused = args[0].Bool()
+		leftPressed = false
+		rightPressed = false
+		mobileLeftHeld = false
+		mobileRightHeld = false
+		touchControlActive = false
+		paddle.vx = 0
+		return nil
+	})
+
+	js.Global().Set("isGamePaused", isGamePausedCallback)
+	js.Global().Set("setMenuPaused", setMenuPausedCallback)
 }
 
 // ---- main ----
@@ -3349,7 +3359,7 @@ func main() {
 	loadLevels()
 	setupInput()
 	setupMobileControlSelector()
-	setupLevelNavigationBridge()
+	setupPauseBridge()
 	resetGame()
 
 	loopFunc = js.FuncOf(gameLoop)

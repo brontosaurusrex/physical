@@ -59,31 +59,40 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    #toolbarToggleButton {
+    #alwaysControls {
       position: absolute;
       top: 10px;
       right: 14px;
       z-index: 22;
-      width: 40px;
-      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #alwaysControls button {
+      width: 48px;
+      min-width: 48px;
+      height: 48px;
       padding: 0;
       border: 0;
       border-radius: 8px;
       color: rgba(255, 255, 255, 0.72);
-      background: rgba(10, 12, 25, 0.0);
-      font: 700 25px/1 GameFont, monospace;
+      background: transparent;
+      font: 700 34px/1 GameFont, monospace;
+      display: grid;
+      place-items: center;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
     }
 
-    #toolbarToggleButton:active {
+    #alwaysControls button:active {
       color: rgba(255, 255, 255, 0.98);
-      background: rgba(10, 12, 25, 0.92);
+      background: rgba(10, 12, 25, 0.72);
     }
 
     #mobileControls {
       position: absolute;
-      top: 50px;
+      top: 66px;
       right: 14px;
       display: flex;
       align-items: center;
@@ -117,6 +126,7 @@
 
     #mobileControls button {
       width: 48px;
+      min-width: 48px;
       height: 48px;
       padding: 0;
       border: 0;
@@ -128,6 +138,7 @@
       display: grid;
       place-items: center;
       touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
 
     #mobileControls button:active {
@@ -159,23 +170,25 @@
   <div id="gameShell">
     <canvas id="gameCanvas" width="1800" height="900"></canvas>
 
-    <button
-      id="toolbarToggleButton"
-      type="button"
-      aria-label="show game controls"
-      aria-expanded="false"
-      aria-controls="mobileControls"
-    >⋮</button>
+    <div id="alwaysControls">
+      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
+      <button id="fullscreenButton" type="button" aria-label="toggle fullscreen"></button>
+      <button
+        id="toolbarToggleButton"
+        type="button"
+        aria-label="show game controls"
+        aria-expanded="false"
+        aria-controls="mobileControls"
+      >⋮</button>
+    </div>
 
     <div id="mobileControls">
       <button id="previousLevelButton" type="button" aria-label="previous level"></button>
       <button id="nextLevelButton" type="button" aria-label="next level"></button>
       <button id="magnetsButton" type="button" aria-label="toggle magnets">󰍈</button>
       <button id="zapperButton" type="button" aria-label="Toggle zapper">⚡</button>
-      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
       <button id="soundButton" type="button" aria-label="toggle sound">󰕾</button>
       <button id="mobileControlModeButton" type="button" aria-label="choose mobile controls">◉</button>
-      <button id="fullscreenButton" type="button" aria-label="toggle fullscreen"></button>
     </div>
   </div>
 
@@ -186,6 +199,7 @@
   <script src="wasm_exec.js"></script>
   <script>
     const go = new Go();
+    console.log("Breakout build: pause-fixed-v2");
 
     const NATIVE_WIDTH = 1800;
     const NATIVE_HEIGHT = 900;
@@ -249,6 +263,7 @@
       mobileControls.classList.remove("is-open");
       toolbarToggleButton.setAttribute("aria-expanded", "false");
       toolbarToggleButton.setAttribute("aria-label", "show game controls");
+
     }
 
     function scheduleToolbarHide() {
@@ -298,6 +313,28 @@
         }
       });
     });
+
+
+    document.addEventListener("keydown", event => {
+      const key = event.key.toLowerCase();
+
+      if (
+        key === "n" &&
+        typeof window.breakoutNextLevel === "function"
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.breakoutNextLevel();
+      } else if (
+        key === "p" &&
+        typeof window.breakoutPreviousLevel === "function"
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.breakoutPreviousLevel();
+      }
+    }, true);
+
     const fullscreenButton =
       document.getElementById("fullscreenButton");
 
@@ -332,7 +369,7 @@
     });
 
     async function loadGame() {
-      const response = await fetch("main_unbrk2.wasm");
+      const response = await fetch("physical.wasm");
 
       if (!response.ok) {
         throw new Error(
