@@ -1,4 +1,4 @@
-gravity=700
+gravity=300
 
 //maxSpeed=800
 //paddleBoost=1300
