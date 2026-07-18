@@ -138,6 +138,15 @@ var (
 	touchPointerID     int
 	touchLastY         float64
 
+	mobileControlsEnabled  bool
+	mobileControlMode      = "vertical"
+	mobileSelectorVisible  bool
+	mobileLeftHeld         bool
+	mobileRightHeld        bool
+	mobileLeftPointerID    = -1
+	mobileRightPointerID   = -1
+	mobileControlCallbacks []js.Func
+
 	phoneTiltAvailable       bool
 	phoneTiltCalibrated      bool
 	phoneTiltPermissionAsked bool
@@ -1353,6 +1362,10 @@ func startLevel(index int) {
 	leftPressed = false
 	rightPressed = false
 	touchControlActive = false
+	mobileLeftHeld = false
+	mobileRightHeld = false
+	mobileLeftPointerID = -1
+	mobileRightPointerID = -1
 	paddle.vx = 0
 
 	// User toggles never carry into a new level.
@@ -1906,6 +1919,242 @@ func loseLife() {
 	}
 }
 
+const mobileControlStorageKey = "breakout.mobileControlMode"
+
+func validMobileControlMode(mode string) bool {
+	switch mode {
+	case "vertical", "tilt", "follow", "two-thumb":
+		return true
+	default:
+		return false
+	}
+}
+
+func resetMobileControlState() {
+	touchControlActive = false
+	touchPointerID = -1
+	mobileLeftHeld = false
+	mobileRightHeld = false
+	mobileLeftPointerID = -1
+	mobileRightPointerID = -1
+	leftPressed = false
+	rightPressed = false
+	paddle.vx = 0
+}
+
+func saveMobileControlMode() {
+	defer func() { _ = recover() }()
+	storage := js.Global().Get("localStorage")
+	if storage.IsUndefined() || storage.IsNull() {
+		return
+	}
+	storage.Call("setItem", mobileControlStorageKey, mobileControlMode)
+}
+
+func selectMobileControlMode(mode string) {
+	if !validMobileControlMode(mode) {
+		return
+	}
+
+	mobileControlMode = mode
+	resetMobileControlState()
+	saveMobileControlMode()
+
+	if mode == "tilt" {
+		recalibratePhoneTilt()
+		requestPhoneTiltPermission()
+	}
+}
+
+func hideMobileControlSelector() {
+	overlay := doc.Call("getElementById", "mobileControlSelector")
+	if !overlay.IsUndefined() && !overlay.IsNull() {
+		overlay.Get("style").Set("display", "none")
+	}
+	mobileSelectorVisible = false
+}
+
+func showMobileControlSelector() {
+	if !mobileControlsEnabled {
+		return
+	}
+
+	overlay := doc.Call("getElementById", "mobileControlSelector")
+	if overlay.IsUndefined() || overlay.IsNull() {
+		return
+	}
+
+	resetMobileControlState()
+	mobileSelectorVisible = true
+	overlay.Get("style").Set("display", "flex")
+}
+
+func setupMobileControlSelector() {
+	window := js.Global().Get("window")
+	navigator := js.Global().Get("navigator")
+
+	maxTouchPoints := 0
+	if !navigator.IsUndefined() && !navigator.IsNull() {
+		value := navigator.Get("maxTouchPoints")
+		if value.Type() == js.TypeNumber {
+			maxTouchPoints = value.Int()
+		}
+	}
+
+	coarsePointer := false
+	matchMedia := window.Get("matchMedia")
+	if matchMedia.Type() == js.TypeFunction {
+		coarsePointer = window.Call("matchMedia", "(pointer: coarse)").Get("matches").Bool()
+	}
+
+	width := window.Get("innerWidth").Int()
+	height := window.Get("innerHeight").Int()
+	mobileControlsEnabled = (maxTouchPoints > 0 || coarsePointer) &&
+		(width <= 1200 || height <= 800)
+
+	if !mobileControlsEnabled {
+		return
+	}
+
+	style := doc.Call("createElement", "style")
+	style.Set("textContent", `
+#mobileControlSelector {
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	padding: 18px;
+	background: rgba(8, 10, 24, 0.94);
+	font-family: GameFont, monospace;
+}
+#mobileControlPanel {
+	width: min(620px, 96vw);
+	padding: 20px;
+	border: 1px solid rgba(255,255,255,0.22);
+	border-radius: 12px;
+	background: #16213e;
+	box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+	color: white;
+}
+#mobileControlPanel h2 {
+	margin: 0 0 8px;
+	text-align: center;
+	font-size: 24px;
+}
+#mobileControlPanel p {
+	margin: 0 0 16px;
+	text-align: center;
+	color: rgba(255,255,255,0.68);
+	font-size: 14px;
+}
+.mobileControlChoice {
+	display: block;
+	width: 100%;
+	margin: 9px 0;
+	padding: 12px 14px;
+	border: 1px solid rgba(255,255,255,0.18);
+	border-radius: 8px;
+	background: rgba(255,255,255,0.07);
+	color: white;
+	text-align: left;
+	font: 700 16px/1.25 GameFont, monospace;
+	touch-action: manipulation;
+}
+.mobileControlChoice small {
+	display: block;
+	margin-top: 4px;
+	color: rgba(255,255,255,0.60);
+	font: 700 12px/1.3 GameFont, monospace;
+}
+.mobileControlChoice:active {
+	background: rgba(255,255,255,0.18);
+}
+`)
+	doc.Get("head").Call("appendChild", style)
+
+	overlay := doc.Call("createElement", "div")
+	overlay.Set("id", "mobileControlSelector")
+	overlay.Set("innerHTML", `
+<div id="mobileControlPanel">
+	<h2>Choose controls</h2>
+	<p>You can change this later with the Controls button.</p>
+	<button class="mobileControlChoice" data-mode="vertical">
+		Up / down drag
+		<small>Slide one finger vertically. Down moves right; up moves left.</small>
+	</button>
+	<button class="mobileControlChoice" data-mode="tilt">
+		Phone tilt
+		<small>Rotate the phone left or right. Selecting this also calibrates it.</small>
+	</button>
+	<button class="mobileControlChoice" data-mode="follow">
+		Follow finger
+		<small>The paddle follows one finger's horizontal position.</small>
+	</button>
+	<button class="mobileControlChoice" data-mode="two-thumb">
+		Two thumbs
+		<small>Hold the left or right half of the screen to move.</small>
+	</button>
+</div>
+`)
+	doc.Get("body").Call("appendChild", overlay)
+
+	settingsButton := doc.Call("getElementById", "mobileControlModeButton")
+	if !settingsButton.IsUndefined() && !settingsButton.IsNull() {
+		settingsCallback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			if len(args) > 0 {
+				args[0].Call("preventDefault")
+				args[0].Call("stopPropagation")
+			}
+			showMobileControlSelector()
+			return nil
+		})
+		mobileControlCallbacks = append(mobileControlCallbacks, settingsCallback)
+		settingsButton.Call("addEventListener", "pointerdown", settingsCallback)
+	}
+
+	buttons := overlay.Call("querySelectorAll", ".mobileControlChoice")
+	for i := 0; i < buttons.Get("length").Int(); i++ {
+		button := buttons.Index(i)
+		mode := button.Get("dataset").Get("mode").String()
+
+		callback := js.FuncOf(func(selectedMode string) func(js.Value, []js.Value) interface{} {
+			return func(this js.Value, args []js.Value) interface{} {
+				if len(args) > 0 {
+					args[0].Call("preventDefault")
+					args[0].Call("stopPropagation")
+				}
+				selectMobileControlMode(selectedMode)
+				hideMobileControlSelector()
+				return nil
+			}
+		}(mode))
+
+		mobileControlCallbacks = append(mobileControlCallbacks, callback)
+		button.Call("addEventListener", "pointerdown", callback)
+	}
+
+	savedMode := ""
+	func() {
+		defer func() { _ = recover() }()
+		storage := js.Global().Get("localStorage")
+		if storage.IsUndefined() || storage.IsNull() {
+			return
+		}
+		value := storage.Call("getItem", mobileControlStorageKey)
+		if !value.IsUndefined() && !value.IsNull() {
+			savedMode = value.String()
+		}
+	}()
+
+	if validMobileControlMode(savedMode) {
+		selectMobileControlMode(savedMode)
+	} else {
+		showMobileControlSelector()
+	}
+}
+
 // ---- Phone/tablet tilt paddle control ----
 func screenOrientationAngle() int {
 	screen := js.Global().Get("screen")
@@ -2084,15 +2333,36 @@ func update(dt float64) {
 
 	const keyboardPaddleSpeed = 700.0
 
-	if touchControlActive {
-		// Touch dragging updates paddle.x directly.
-	} else if leftPressed && !rightPressed {
+	if leftPressed && !rightPressed {
 		paddle.vx = -keyboardPaddleSpeed
 		paddle.x += paddle.vx * dt
 	} else if rightPressed && !leftPressed {
 		paddle.vx = keyboardPaddleSpeed
 		paddle.x += paddle.vx * dt
-	} else if !applyPhoneTiltControl(dt) {
+	} else if mobileControlsEnabled {
+		switch mobileControlMode {
+		case "vertical", "follow":
+			if !touchControlActive {
+				paddle.vx = 0
+			}
+		case "two-thumb":
+			if mobileLeftHeld && !mobileRightHeld {
+				paddle.vx = -keyboardPaddleSpeed
+				paddle.x += paddle.vx * dt
+			} else if mobileRightHeld && !mobileLeftHeld {
+				paddle.vx = keyboardPaddleSpeed
+				paddle.x += paddle.vx * dt
+			} else {
+				paddle.vx = 0
+			}
+		case "tilt":
+			if !applyPhoneTiltControl(dt) {
+				paddle.vx = 0
+			}
+		default:
+			paddle.vx = 0
+		}
+	} else {
 		paddle.vx = 0
 	}
 	if paddle.x < 0 {
@@ -2580,12 +2850,6 @@ func bindMobileButton(id string, handler func()) {
 }
 
 func setupInput() {
-	orientationEvent := js.Global().Get("DeviceOrientationEvent")
-	if !orientationEvent.IsUndefined() && !orientationEvent.IsNull() &&
-		orientationEvent.Get("requestPermission").Type() != js.TypeFunction {
-		installPhoneTiltListener()
-	}
-
 	keyDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -2768,8 +3032,6 @@ func setupInput() {
 			ensureAudioRunning()
 		}
 
-		requestPhoneTiltPermission()
-
 		pointerType := e.Get("pointerType").String()
 
 		if waitingForStart {
@@ -2795,16 +3057,47 @@ func setupInput() {
 			return nil
 		}
 
-		if (pointerType == "touch" || pointerType == "pen") &&
-			!touchControlActive {
-			touchControlActive = true
-			touchPointerID = e.Get("pointerId").Int()
-			touchLastY = e.Get("clientY").Float()
-			paddle.vx = 0
-			canvas.Call("setPointerCapture", e.Get("pointerId"))
+		if pointerType == "touch" || pointerType == "pen" {
+			pointerID := e.Get("pointerId").Int()
 
 			if gameOver && !win {
 				retryCurrentLevel()
+			}
+
+			if mobileControlsEnabled {
+				switch mobileControlMode {
+				case "vertical":
+					if !touchControlActive {
+						touchControlActive = true
+						touchPointerID = pointerID
+						touchLastY = e.Get("clientY").Float()
+						paddle.vx = 0
+						canvas.Call("setPointerCapture", e.Get("pointerId"))
+					}
+				case "follow":
+					if !touchControlActive {
+						touchControlActive = true
+						touchPointerID = pointerID
+						canvas.Call("setPointerCapture", e.Get("pointerId"))
+					}
+					movePaddleToPointer(e)
+				case "two-thumb":
+					rect := canvas.Call("getBoundingClientRect")
+					midX := rect.Get("left").Float() + rect.Get("width").Float()/2
+					if e.Get("clientX").Float() < midX {
+						if mobileLeftPointerID < 0 {
+							mobileLeftPointerID = pointerID
+							mobileLeftHeld = true
+						}
+					} else if mobileRightPointerID < 0 {
+						mobileRightPointerID = pointerID
+						mobileRightHeld = true
+					}
+					touchControlActive = mobileLeftHeld || mobileRightHeld
+					canvas.Call("setPointerCapture", e.Get("pointerId"))
+				case "tilt":
+					requestPhoneTiltPermission()
+				}
 			}
 			return nil
 		}
@@ -2833,22 +3126,30 @@ func setupInput() {
 		pointerID := e.Get("pointerId").Int()
 
 		if (pointerType == "touch" || pointerType == "pen") &&
-			touchControlActive && pointerID == touchPointerID {
-			y := e.Get("clientY").Float()
-			deltaY := y - touchLastY
-			touchLastY = y
+			mobileControlsEnabled {
+			switch mobileControlMode {
+			case "vertical":
+				if touchControlActive && pointerID == touchPointerID {
+					y := e.Get("clientY").Float()
+					deltaY := y - touchLastY
+					touchLastY = y
 
-			deltaX := verticalDragToHorizontalDelta(deltaY)
-			paddle.x += deltaX
-			paddle.vx = deltaX * 60
+					deltaX := verticalDragToHorizontalDelta(deltaY)
+					paddle.x += deltaX
+					paddle.vx = deltaX * 60
 
-			if paddle.x < 0 {
-				paddle.x = 0
+					if paddle.x < 0 {
+						paddle.x = 0
+					}
+					if paddle.x+paddle.w > canvasWidth {
+						paddle.x = canvasWidth - paddle.w
+					}
+				}
+			case "follow":
+				if touchControlActive && pointerID == touchPointerID {
+					movePaddleToPointer(e)
+				}
 			}
-			if paddle.x+paddle.w > canvasWidth {
-				paddle.x = canvasWidth - paddle.w
-			}
-
 			e.Call("preventDefault")
 			return nil
 		}
@@ -2869,8 +3170,22 @@ func setupInput() {
 			e := args[0]
 			pointerID := e.Get("pointerId").Int()
 
-			if touchControlActive && pointerID == touchPointerID {
+			if mobileControlMode == "two-thumb" {
+				if pointerID == mobileLeftPointerID {
+					mobileLeftPointerID = -1
+					mobileLeftHeld = false
+				}
+				if pointerID == mobileRightPointerID {
+					mobileRightPointerID = -1
+					mobileRightHeld = false
+				}
+				touchControlActive = mobileLeftHeld || mobileRightHeld
+				if !touchControlActive {
+					paddle.vx = 0
+				}
+			} else if touchControlActive && pointerID == touchPointerID {
 				touchControlActive = false
+				touchPointerID = -1
 				paddle.vx = 0
 			}
 
@@ -2885,10 +3200,25 @@ func setupInput() {
 	canvas.Call("addEventListener", "pointerup", pointerUp)
 
 	pointerCancel = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if len(args) > 0 && touchControlActive &&
-			args[0].Get("pointerId").Int() == touchPointerID {
-			touchControlActive = false
-			paddle.vx = 0
+		if len(args) > 0 {
+			pointerID := args[0].Get("pointerId").Int()
+			if mobileControlMode == "two-thumb" {
+				if pointerID == mobileLeftPointerID {
+					mobileLeftPointerID = -1
+					mobileLeftHeld = false
+				}
+				if pointerID == mobileRightPointerID {
+					mobileRightPointerID = -1
+					mobileRightHeld = false
+				}
+				touchControlActive = mobileLeftHeld || mobileRightHeld
+			} else if touchControlActive && pointerID == touchPointerID {
+				touchControlActive = false
+				touchPointerID = -1
+			}
+			if !touchControlActive {
+				paddle.vx = 0
+			}
 		}
 		return nil
 	})
@@ -2978,6 +3308,7 @@ func main() {
 
 	loadLevels()
 	setupInput()
+	setupMobileControlSelector()
 	resetGame()
 
 	loopFunc = js.FuncOf(gameLoop)

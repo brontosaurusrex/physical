@@ -62,14 +62,10 @@
     #mobileControls {
       position: absolute;
       top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
+      right: 20px;
       display: flex;
-      align-items: center;
-      justify-content: center;
       gap: 20px;
       z-index: 20;
-      white-space: nowrap;
     }
 
     #mobileControls button {
@@ -119,9 +115,8 @@
       <button id="nextLevelButton" type="button" aria-label="next level"></button>
       <button id="magnetsButton" type="button" aria-label="toggle magnets">󰍈</button>
       <button id="zapperButton" type="button" aria-label="Toggle zapper">⚡</button>
-      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
       <button id="soundButton" type="button" aria-label="toggle sound">󰕾</button>
-      <button id="mobileControlModeButton" type="button" aria-label="choose mobile controls">◉</button>
+      <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
       <button id="fullscreenButton" type="button" aria-label="toggle fullscreen"></button>
     </div>
   </div>
@@ -192,7 +187,6 @@
 
     fullscreenButton.addEventListener("pointerdown", event => {
       event.preventDefault();
-      event.stopPropagation();
       toggleFullscreen();
     });
 
