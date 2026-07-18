@@ -1011,6 +1011,18 @@ func buildBricksFromLevel(lvl levelData) {
 			if col < len(line) {
 				ch = line[col]
 			}
+			// X is a randomized block using the level's existing chances:
+			// unbreakable first, then magic, otherwise a normal brick.
+			if ch == 'X' {
+				if rand.Float64() < unbreakableChance {
+					ch = 'U'
+				} else if rand.Float64() < magicChance {
+					ch = 'M'
+				} else {
+					ch = '#'
+				}
+			}
+
 			if ch == ' ' {
 				continue
 			}
@@ -1824,8 +1836,7 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 			hitPos = 1
 		}
 
-		//angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
-		angle := (hitPos - 0.5) * 2.0 * (69.0 * math.Pi / 180.0)
+		angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
 
 		speed := math.Sqrt(b.vx*b.vx + b.vy*b.vy)
 		if speed < 100 {
@@ -2786,29 +2797,24 @@ func draw() {
 	}
 
 	if gameOver {
+		drawCenteredOverlay()
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
 
-		ctx.Set(
-			"font",
-			"40px GameFont, monospace",
-		)
-
 		msg := "GAME OVER"
+		fontSize := "88px GameFont, monospace"
+		instruction := "Press Space, Enter, click, or touch to retry"
 		if win {
 			msg = "YOU WIN!"
+			fontSize = "112px GameFont, monospace"
+			instruction = "Press Space, Enter, click, or touch to start again"
 		}
-		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2)
 
-		ctx.Set(
-			"font",
-			"18px GameFont, monospace",
-		)
-		if win {
-			ctx.Call("fillText", "Press N to start again", canvasWidth/2, canvasHeight/2+50)
-		} else {
-			ctx.Call("fillText", "Press Space, Enter, or left-click to retry", canvasWidth/2, canvasHeight/2+50)
-		}
+		ctx.Set("font", fontSize)
+		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2-10)
+
+		ctx.Set("font", "28px GameFont, monospace")
+		ctx.Call("fillText", instruction, canvasWidth/2, canvasHeight/2+70)
 
 		ctx.Set("textAlign", "start")
 	}
@@ -2941,6 +2947,33 @@ func setupInput() {
 		e.Call("preventDefault")
 		key := e.Get("key").String()
 
+		// Start a new game after winning. N/P remain level-navigation cheats.
+		if gameOver && win {
+			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
+				jumpToLevel(0)
+			}
+			return nil
+		}
+
+		// Cheat keys must work even while waiting to launch, paused, or on
+		// a game-over/win screen.
+		if (key == "n" || key == "N") && !e.Get("repeat").Bool() {
+			if currentLevelIndex < len(levels)-1 {
+				jumpToLevel(currentLevelIndex + 1)
+			} else {
+				jumpToLevel(0)
+			}
+			return nil
+		}
+		if (key == "p" || key == "P") && !e.Get("repeat").Bool() {
+			if currentLevelIndex > 0 {
+				jumpToLevel(currentLevelIndex - 1)
+			} else {
+				jumpToLevel(len(levels) - 1)
+			}
+			return nil
+		}
+
 		// Retry the same level after losing all lives. This must come
 		// before pause handling so Space retries instead of toggling pause.
 		if gameOver && !win {
@@ -3028,24 +3061,6 @@ func setupInput() {
 			return nil
 		}
 
-		// Cheat keys: N = next level, P = previous level
-		if key == "n" || key == "N" {
-			if currentLevelIndex < len(levels)-1 {
-				jumpToLevel(currentLevelIndex + 1)
-			} else if gameOver {
-				jumpToLevel(0)
-			}
-			return nil
-		}
-		if key == "p" || key == "P" {
-			if currentLevelIndex > 0 {
-				jumpToLevel(currentLevelIndex - 1)
-			} else if gameOver {
-				jumpToLevel(0)
-			}
-			return nil
-		}
-
 		// Paddle controls
 		if key == "ArrowLeft" {
 			leftPressed = true
@@ -3109,6 +3124,11 @@ func setupInput() {
 		}
 
 		pointerType := e.Get("pointerType").String()
+
+		if gameOver && win {
+			jumpToLevel(0)
+			return nil
+		}
 
 		if waitingForStart {
 			waitingForStart = false
