@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting...</title>
+
+    <!-- 1. Strict Anti-Caching Headers (Forces browsers to check for updates every time) -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
+    <!-- 2. HTML Meta Refresh Redirect (Triggers at 0 seconds) -->
+    <meta http-equiv="refresh" content="0; url=https://brontosaurusrex.github.io/physical/dev.htm">
+
+    <!-- 3. JavaScript Redirect Backup (Simulates a true 302 redirect in history) -->
+    <script>
+        window.location.replace("https://brontosaurusrex.github.io/physical/dev.htm");
+    </script>
+</head>
+<body>
+    <!-- 4. Fallback link for users with JavaScript and Meta Refresh disabled -->
+    <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+        <p>Redirecting you to our latest page...</p>
+        <p>If you are not redirected automatically, <a href="https://brontosaurusrex.github.io/physical/dev.htm">click here to continue</a>.</p>
+    </div>
+</body>
+</html>
