@@ -335,6 +335,64 @@
       }
     }, true);
 
+    // Keep the display awake only while phone-tilt controls are active.
+    let screenWakeLock = null;
+    let tiltModeActive = false;
+
+    async function acquireScreenWakeLock() {
+      if (
+        !tiltModeActive ||
+        document.visibilityState !== "visible" ||
+        !("wakeLock" in navigator)
+      ) {
+        return;
+      }
+
+      if (screenWakeLock && !screenWakeLock.released) {
+        return;
+      }
+
+      try {
+        screenWakeLock = await navigator.wakeLock.request("screen");
+        screenWakeLock.addEventListener("release", () => {
+          screenWakeLock = null;
+        });
+      } catch (error) {
+        console.warn("Screen wake lock request failed:", error);
+        screenWakeLock = null;
+      }
+    }
+
+    async function releaseScreenWakeLock() {
+      if (!screenWakeLock) {
+        return;
+      }
+
+      try {
+        await screenWakeLock.release();
+      } catch (error) {
+        console.warn("Screen wake lock release failed:", error);
+      }
+
+      screenWakeLock = null;
+    }
+
+    window.breakoutSetTiltWakeLock = active => {
+      tiltModeActive = Boolean(active);
+
+      if (tiltModeActive) {
+        acquireScreenWakeLock();
+      } else {
+        releaseScreenWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && tiltModeActive) {
+        acquireScreenWakeLock();
+      }
+    });
+
     const fullscreenButton =
       document.getElementById("fullscreenButton");
 

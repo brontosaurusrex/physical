@@ -76,7 +76,7 @@
       padding: 0;
       border: 0;
       border-radius: 8px;
-      color: rgba(255, 255, 255, 0.72);
+      color: rgba(255, 255, 255, 0.2);
       background: transparent;
       font: 700 34px/1 GameFont, monospace;
       display: grid;
@@ -369,7 +369,7 @@
     });
 
     async function loadGame() {
-      const response = await fetch("physical.wasm");
+      const response = await fetch("physical2.wasm");
 
       if (!response.ok) {
         throw new Error(
