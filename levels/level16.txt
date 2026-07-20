@@ -4,7 +4,7 @@ frictionCoeff=0.1
 maxSpin=300
 maxSpeed=1350
 //paddleBoost=1300
-paddleWidth=180
+//paddleWidth=180
 brickBoost=300
 ballRadius=18
 
