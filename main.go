@@ -158,6 +158,8 @@ var (
 	phoneTiltTargetX         float64
 
 	deviceOrientationCallback js.Func
+	setPausedCallback         js.Func
+	getPausedCallback         js.Func
 )
 
 // ---- Color palette ----
@@ -2024,6 +2026,12 @@ func selectMobileControlMode(mode string) {
 	resetMobileControlState()
 	saveMobileControlMode()
 
+	// Let the HTML page own the Screen Wake Lock lifecycle.
+	wakeLockCallback := js.Global().Get("breakoutSetTiltWakeLock")
+	if wakeLockCallback.Type() == js.TypeFunction {
+		wakeLockCallback.Invoke(mode == "tilt")
+	}
+
 	if mode == "tilt" {
 		phoneTiltAvailable = false
 		recalibratePhoneTilt()
@@ -3406,6 +3414,27 @@ func main() {
 	setupInput()
 	setupMobileControlSelector()
 	resetGame()
+
+	setPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) == 0 || gameOver {
+			return nil
+		}
+
+		paused = args[0].Bool()
+		leftPressed = false
+		rightPressed = false
+		mobileLeftHeld = false
+		mobileRightHeld = false
+		touchControlActive = false
+		paddle.vx = 0
+		return nil
+	})
+	js.Global().Set("breakoutSetPaused", setPausedCallback)
+
+	getPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		return paused
+	})
+	js.Global().Set("breakoutIsPaused", getPausedCallback)
 
 	loopFunc = js.FuncOf(gameLoop)
 	js.Global().Call("requestAnimationFrame", loopFunc)
