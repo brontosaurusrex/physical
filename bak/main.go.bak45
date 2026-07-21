@@ -2415,7 +2415,7 @@ func update(dt float64) {
 		return
 	}
 
-	const keyboardPaddleSpeed = 1500.0
+	const keyboardPaddleSpeed = 1500.0 //700.0
 	const twoThumbPaddleSpeed = 1500.0
 
 	if leftPressed && !rightPressed {
@@ -2954,7 +2954,6 @@ func setupInput() {
 		e := args[0]
 		e.Call("preventDefault")
 		key := e.Get("key").String()
-		code := e.Get("code").String()
 
 		// Start a new game after winning. N/P remain level-navigation cheats.
 		if gameOver && win {
@@ -2994,9 +2993,7 @@ func setupInput() {
 
 		if waitingForStart {
 			if (key == " " || key == "Enter" ||
-				key == "ArrowLeft" || key == "ArrowRight" ||
-				key == "a" || key == "A" || key == "d" || key == "D" ||
-				code == "AltLeft" || code == "AltRight") &&
+				key == "ArrowLeft" || key == "ArrowRight") &&
 				!e.Get("repeat").Bool() {
 				waitingForStart = false
 				leftPressed = false
@@ -3072,10 +3069,10 @@ func setupInput() {
 			return nil
 		}
 
-		// Paddle controls: arrows, A/D, and separate left/right Alt keys.
-		if key == "ArrowLeft" || key == "a" || key == "A" || code == "AltLeft" {
+		// Paddle controls
+		if key == "ArrowLeft" {
 			leftPressed = true
-		} else if key == "ArrowRight" || key == "d" || key == "D" || code == "AltRight" {
+		} else if key == "ArrowRight" {
 			rightPressed = true
 		}
 		return nil
@@ -3096,10 +3093,9 @@ func setupInput() {
 		e := args[0]
 		e.Call("preventDefault")
 		key := e.Get("key").String()
-		code := e.Get("code").String()
-		if key == "ArrowLeft" || key == "a" || key == "A" || code == "AltLeft" {
+		if key == "ArrowLeft" {
 			leftPressed = false
-		} else if key == "ArrowRight" || key == "d" || key == "D" || code == "AltRight" {
+		} else if key == "ArrowRight" {
 			rightPressed = false
 		}
 		return nil

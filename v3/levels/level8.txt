@@ -1,0 +1,19 @@
+brickWidth=30
+ballX=100.0
+ballY=100.0
+ballVx=1.0
+ballVy=-1.0
+brickHeight=30
+brickPadding=30
+ballRadius=10.0
+---
+U      ####MM       U
+U      MM####       U
+U      ####MM       U
+U      MM####       U
+U      ####MM       U
+       MMMMMM
+UUUUUUUUUUUUUUUUUUUUU
+
+
+
