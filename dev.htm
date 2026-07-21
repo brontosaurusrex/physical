@@ -163,12 +163,41 @@
       #gameShell { display: none; }
       #rotateOverlay { display: flex; }
     }
+
+
+    #loadingTitle {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    color: #f1faee;
+    background: #16213e;
+
+    font: 700 clamp(48px, 8vw, 112px)/1 GameFont, monospace;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 60ms ease;
+    }
+
+    #loadingTitle.is-hidden {
+      opacity: 0;
+    }
+
   </style>
 </head>
 
 <body>
   <div id="gameShell">
     <canvas id="gameCanvas" width="1800" height="900"></canvas>
+
+    <div id="loadingTitle">Physical</div>
 
     <div id="alwaysControls">
       <button id="pauseButton" type="button" aria-label="toggle pause">󰏤</button>
@@ -206,6 +235,22 @@
     const NATIVE_HEIGHT = 900;
     const EDGE_GAP = 8;
     const TOOLBAR_HIDE_DELAY = 4000;
+
+    function hideLoadingTitle() {
+      const title = document.getElementById("loadingTitle");
+
+      if (!title) {
+        return;
+      }
+
+      title.classList.add("is-hidden");
+
+      title.addEventListener(
+        "transitionend",
+        () => title.remove(),
+        { once: true }
+      );
+    }
 
     function visibleViewportSize() {
       const viewport = window.visualViewport;
@@ -477,6 +522,7 @@
 
       fitGameToViewport();
       go.run(result.instance);
+      hideLoadingTitle();
 
       let rotatePauseAttempts = 0;
       const rotatePauseTimer = setInterval(() => {

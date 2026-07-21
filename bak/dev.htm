@@ -190,6 +190,7 @@
       <button id="soundButton" type="button" aria-label="toggle sound">󰕾</button>
       <button id="mobileControlModeButton" type="button" aria-label="choose mobile controls">◉</button>
     </div>
+
   </div>
 
   <div id="rotateOverlay">
@@ -234,9 +235,40 @@
     fitGameToViewport();
 
     window.addEventListener("resize", fitGameToViewport);
+    let pausedByRotateOverlay = false;
+
+    function updateRotatePause() {
+      const portrait = window.matchMedia("(orientation: portrait)").matches;
+
+      if (
+        portrait &&
+        typeof window.breakoutSetPaused === "function" &&
+        typeof window.breakoutIsPaused === "function"
+      ) {
+        if (!window.breakoutIsPaused()) {
+          window.breakoutSetPaused(true);
+          pausedByRotateOverlay = true;
+        }
+      } else if (
+        !portrait &&
+        pausedByRotateOverlay &&
+        typeof window.breakoutSetPaused === "function"
+      ) {
+        window.breakoutSetPaused(false);
+        pausedByRotateOverlay = false;
+      }
+    }
+
     window.addEventListener("orientationchange", () => {
-      setTimeout(fitGameToViewport, 150);
-      setTimeout(fitGameToViewport, 500);
+      updateRotatePause();
+      setTimeout(() => {
+        updateRotatePause();
+        fitGameToViewport();
+      }, 150);
+      setTimeout(() => {
+        updateRotatePause();
+        fitGameToViewport();
+      }, 500);
     });
 
     if (window.visualViewport) {
@@ -335,6 +367,64 @@
       }
     }, true);
 
+    // Keep the display awake only while phone-tilt controls are active.
+    let screenWakeLock = null;
+    let tiltModeActive = false;
+
+    async function acquireScreenWakeLock() {
+      if (
+        !tiltModeActive ||
+        document.visibilityState !== "visible" ||
+        !("wakeLock" in navigator)
+      ) {
+        return;
+      }
+
+      if (screenWakeLock && !screenWakeLock.released) {
+        return;
+      }
+
+      try {
+        screenWakeLock = await navigator.wakeLock.request("screen");
+        screenWakeLock.addEventListener("release", () => {
+          screenWakeLock = null;
+        });
+      } catch (error) {
+        console.warn("Screen wake lock request failed:", error);
+        screenWakeLock = null;
+      }
+    }
+
+    async function releaseScreenWakeLock() {
+      if (!screenWakeLock) {
+        return;
+      }
+
+      try {
+        await screenWakeLock.release();
+      } catch (error) {
+        console.warn("Screen wake lock release failed:", error);
+      }
+
+      screenWakeLock = null;
+    }
+
+    window.breakoutSetTiltWakeLock = active => {
+      tiltModeActive = Boolean(active);
+
+      if (tiltModeActive) {
+        acquireScreenWakeLock();
+      } else {
+        releaseScreenWakeLock();
+      }
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && tiltModeActive) {
+        acquireScreenWakeLock();
+      }
+    });
+
     const fullscreenButton =
       document.getElementById("fullscreenButton");
 
@@ -387,6 +477,18 @@
 
       fitGameToViewport();
       go.run(result.instance);
+
+      let rotatePauseAttempts = 0;
+      const rotatePauseTimer = setInterval(() => {
+        rotatePauseAttempts++;
+
+        if (typeof window.breakoutSetPaused === "function") {
+          clearInterval(rotatePauseTimer);
+          updateRotatePause();
+        } else if (rotatePauseAttempts >= 100) {
+          clearInterval(rotatePauseTimer);
+        }
+      }, 50);
     }
 
     loadGame().catch(console.error);
