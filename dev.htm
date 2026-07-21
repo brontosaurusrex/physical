@@ -51,7 +51,7 @@
       display: block;
       width: 100%;
       height: 100%;
-      background: #16213e;
+      background: #16213e00;
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
@@ -175,17 +175,19 @@
     justify-content: center;
 
     color: #f1faee;
-    background: #16213e;
+    background: #16213e00;
 
-    font: 700 clamp(48px, 8vw, 112px)/1 GameFont, monospace;
-    letter-spacing: 0.2em;
+    font: 700 clamp(48px, 8vw, 72px)/1 GameFont, monospace;
+    letter-spacing: 0.01em; 
+    
     text-transform: uppercase;
-    transform: translateY(-0.34em);
+    transform: translateY(-1.20em);
 
     pointer-events: none;
     opacity: 1;
-    transition: opacity 60ms ease;
+    transition: opacity 4000ms ease;
     }
+
 
     #loadingTitle.is-hidden {
       opacity: 0;
