@@ -69,6 +69,7 @@ const (
 	defaultEnableInfluencer       = true
 	defaultEnableZapper           = false
 	defaultEnableBreakUnbreakable = true
+	defaultEnableBigPaddle        = true
 
 	showBlackHole = false // Set true to draw the moving black hole.
 )
@@ -130,6 +131,7 @@ var (
 	enableInfluencer       = defaultEnableInfluencer
 	enableZapper           = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
+	enableBigPaddle        = defaultEnableBigPaddle
 
 	enableSounds = true
 	paused       bool
@@ -202,6 +204,7 @@ const (
 	POWER_INFLUENCER
 	POWER_ZAPPER
 	POWER_BREAK_UNBREAKABLE
+	POWER_BIG_PADDLE
 )
 
 // ---- Ball struct ----
@@ -311,8 +314,9 @@ var (
 	hudScoreText  string
 
 	// ---- Level system ----
-	currentLevelIndex int
-	levels            []levelData
+	currentLevelIndex    int
+	highestUnlockedLevel int
+	levels               []levelData
 
 	// ---- Audio ----
 	audioCtx         js.Value
@@ -714,6 +718,7 @@ func resetGlobals() {
 	enableInfluencer = defaultEnableInfluencer
 	enableZapper = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
+	enableBigPaddle = defaultEnableBigPaddle
 	palette = append([]string(nil), defaultPalette...)
 	magicColor = defaultMagicColor
 	magicStrokeColor = defaultMagicStrokeColor
@@ -910,6 +915,10 @@ func applyConfig(config map[string]string) {
 		case "enableBreakUnbreakable":
 			if b, err := strconv.ParseBool(val); err == nil {
 				enableBreakUnbreakable = b
+			}
+		case "enableBigPaddle":
+			if b, err := strconv.ParseBool(val); err == nil {
+				enableBigPaddle = b
 			}
 		case "paddleWidth":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
@@ -1138,11 +1147,32 @@ func breakRandomUnbreakable() bool {
 	return destroyAnyBrick(&bricks[index])
 }
 
+// Resize the paddle while preserving its center and keeping it on-screen.
+func setPaddleSize(width, height float64) {
+	center := paddle.x + paddle.w/2
+	paddle.w = width
+	paddle.h = height
+	paddle.x = center - paddle.w/2
+	paddle.x = math.Max(0, math.Min(paddle.x, canvasWidth-paddle.w))
+	paddlePreviousX = paddle.x
+}
+
+func deactivateActivePowerUp() {
+	switch activePowerUp {
+	case POWER_LOW_GRAVITY, POWER_REVERSE_GRAVITY:
+		if !blackHoleActive {
+			currentGravity = baseGravity
+		}
+	case POWER_BIG_PADDLE:
+		setPaddleSize(paddleWidth, paddleHeight)
+	}
+	activePowerUp = POWER_NONE
+	powerUpTimer = 0
+}
+
 // Activate powerup
 func activatePowerUpWithBrick(hitBrick *brick) {
-	if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
-		currentGravity = baseGravity
-	}
+	deactivateActivePowerUp()
 	// Black Hole persists independently.
 
 	var available []int
@@ -1180,6 +1210,9 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 				break
 			}
 		}
+	}
+	if enableBigPaddle {
+		available = append(available, POWER_BIG_PADDLE)
 	}
 
 	if len(available) == 0 {
@@ -1276,6 +1309,12 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 			showStatus("Unbreakable destroyed!", 2.0)
 			playPowerup()
 		}
+	case POWER_BIG_PADDLE:
+		activePowerUp = POWER_BIG_PADDLE
+		powerUpTimer = powerUpDuration
+		setPaddleSize(paddleWidth*2, paddleHeight*1)
+		showStatus("Big Paddle!", powerUpDuration)
+		playPowerup()
 	}
 }
 
@@ -1346,8 +1385,11 @@ func loadLevels() {
 	}
 }
 
-// ---- Remember current level in browser storage ----
-const savedLevelKey = "breakout.currentLevel"
+// ---- Remember progression in browser storage ----
+const (
+	savedLevelKey           = "breakout.currentLevel"
+	highestUnlockedLevelKey = "breakout.highestUnlockedLevel"
+)
 
 func saveCurrentLevel() {
 	defer func() {
@@ -1361,6 +1403,52 @@ func saveCurrentLevel() {
 		return
 	}
 	storage.Call("setItem", savedLevelKey, strconv.Itoa(currentLevelIndex))
+}
+
+func saveHighestUnlockedLevel() {
+	defer func() { _ = recover() }()
+	storage := js.Global().Get("localStorage")
+	if storage.IsUndefined() || storage.IsNull() {
+		return
+	}
+	storage.Call("setItem", highestUnlockedLevelKey, strconv.Itoa(highestUnlockedLevel))
+}
+
+func loadHighestUnlockedLevel() int {
+	if len(levels) == 0 {
+		return 0
+	}
+	unlocked := 0
+	func() {
+		defer func() { _ = recover() }()
+		storage := js.Global().Get("localStorage")
+		if storage.IsUndefined() || storage.IsNull() {
+			return
+		}
+		value := storage.Call("getItem", highestUnlockedLevelKey)
+		if value.IsUndefined() || value.IsNull() {
+			return
+		}
+		if index, err := strconv.Atoi(value.String()); err == nil {
+			unlocked = index
+		}
+	}()
+	if unlocked < 0 {
+		return 0
+	}
+	if unlocked >= len(levels) {
+		return len(levels) - 1
+	}
+	return unlocked
+}
+
+func unlockNextLevel() {
+	next := currentLevelIndex + 1
+	if next < len(levels) && next > highestUnlockedLevel {
+		highestUnlockedLevel = next
+		saveHighestUnlockedLevel()
+		showStatus("Level "+strconv.Itoa(next+1)+" unlocked!", 3.0)
+	}
 }
 
 func loadSavedLevel() int {
@@ -1396,7 +1484,10 @@ func loadSavedLevel() int {
 		return 0
 	}
 	if savedIndex >= len(levels) {
-		return len(levels) - 1
+		savedIndex = len(levels) - 1
+	}
+	if savedIndex > highestUnlockedLevel {
+		savedIndex = highestUnlockedLevel
 	}
 	return savedIndex
 }
@@ -1485,6 +1576,10 @@ func jumpToLevel(index int) {
 	if index >= len(levels) {
 		index = len(levels) - 1
 	}
+	if index > highestUnlockedLevel {
+		showStatus("Level locked", 2.0)
+		return
+	}
 
 	lives = defaultLives
 	score = 0
@@ -1503,6 +1598,7 @@ func resetGame() {
 	paused = false
 	leftPressed = false
 	rightPressed = false
+	highestUnlockedLevel = loadHighestUnlockedLevel()
 	startLevel(loadSavedLevel())
 }
 
@@ -2094,16 +2190,28 @@ func setupMobileControlSelector() {
 #mobileControlSelector {
 	position: fixed;
 	inset: 0;
-	z-index: 1000;
+	z-index: 100000;
 	display: none;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: center;
-	padding: 18px;
+	box-sizing: border-box;
+	padding:
+		max(18px, env(safe-area-inset-top))
+		max(18px, env(safe-area-inset-right))
+		max(18px, env(safe-area-inset-bottom))
+		max(18px, env(safe-area-inset-left));
+	overflow-x: hidden;
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior: contain;
 	background: rgba(8, 10, 24, 0.94);
 	font-family: GameFont, monospace;
 }
 #mobileControlPanel {
+	box-sizing: border-box;
 	width: min(620px, 96vw);
+	max-width: 100%;
+	margin: auto 0;
 	padding: 20px;
 	border: 1px solid rgba(255,255,255,0.22);
 	border-radius: 12px;
@@ -2468,12 +2576,7 @@ func update(dt float64) {
 	if activePowerUp != POWER_NONE {
 		powerUpTimer -= dt
 		if powerUpTimer <= 0 {
-			if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
-				if !blackHoleActive {
-					currentGravity = baseGravity
-				}
-			}
-			activePowerUp = POWER_NONE
+			deactivateActivePowerUp()
 		}
 	}
 
@@ -2548,6 +2651,7 @@ func update(dt float64) {
 	}
 	// Hold the cleared level on screen for three seconds.
 	if !gameOver && !levelAdvancePending && remainingBreakableBricks == 0 {
+		unlockNextLevel()
 		levelAdvancePending = true
 		levelCompleteTimer = 3.0
 		leftPressed = false
@@ -2967,18 +3071,20 @@ func setupInput() {
 		// Cheat keys must work even while waiting to launch, paused, or on
 		// a game-over/win screen.
 		if (key == "n" || key == "N") && !e.Get("repeat").Bool() {
-			if currentLevelIndex < len(levels)-1 {
+			if currentLevelIndex < highestUnlockedLevel {
 				jumpToLevel(currentLevelIndex + 1)
-			} else {
+			} else if highestUnlockedLevel == len(levels)-1 {
 				jumpToLevel(0)
+			} else {
+				showStatus("Finish this level to unlock the next", 2.0)
 			}
 			return nil
 		}
 		if (key == "p" || key == "P") && !e.Get("repeat").Bool() {
 			if currentLevelIndex > 0 {
 				jumpToLevel(currentLevelIndex - 1)
-			} else {
-				jumpToLevel(len(levels) - 1)
+			} else if highestUnlockedLevel > 0 {
+				jumpToLevel(highestUnlockedLevel)
 			}
 			return nil
 		}
@@ -3355,16 +3461,18 @@ func setupInput() {
 	bindMobileButton("previousLevelButton", func() {
 		if currentLevelIndex > 0 {
 			jumpToLevel(currentLevelIndex - 1)
-		} else if gameOver {
-			jumpToLevel(0)
+		} else if highestUnlockedLevel > 0 {
+			jumpToLevel(highestUnlockedLevel)
 		}
 	})
 
 	bindMobileButton("nextLevelButton", func() {
-		if currentLevelIndex < len(levels)-1 {
+		if currentLevelIndex < highestUnlockedLevel {
 			jumpToLevel(currentLevelIndex + 1)
-		} else if gameOver {
+		} else if highestUnlockedLevel == len(levels)-1 {
 			jumpToLevel(0)
+		} else {
+			showStatus("Finish this level to unlock the next", 2.0)
 		}
 	})
 
