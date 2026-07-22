@@ -270,10 +270,21 @@ var (
 	pointerCancel js.Func
 	mouseLeave    js.Func
 
-	// Powerup states
-	activePowerUp  int
-	powerUpTimer   float64
-	currentGravity float64
+	// Independent power-up states. Timed effects can coexist.
+	lowGravityActive     bool
+	lowGravityTimer      float64
+	passActive           bool
+	passTimer            float64
+	reverseGravityActive bool
+	reverseGravityTimer  float64
+	dualBallsTimer       float64
+	magnetPowerActive    bool
+	magnetPowerTimer     float64
+	zapperPowerActive    bool
+	zapperPowerTimer     float64
+	bigPaddleActive      bool
+	bigPaddleTimer       float64
+	currentGravity       float64
 
 	blackHoleActive    bool
 	blackHoleTimer     float64
@@ -1157,23 +1168,45 @@ func setPaddleSize(width, height float64) {
 	paddlePreviousX = paddle.x
 }
 
-func deactivateActivePowerUp() {
-	switch activePowerUp {
-	case POWER_LOW_GRAVITY, POWER_REVERSE_GRAVITY:
-		if !blackHoleActive {
-			currentGravity = baseGravity
-		}
-	case POWER_BIG_PADDLE:
-		setPaddleSize(paddleWidth, paddleHeight)
+// Gravity effects coexist. Black hole overrides both; otherwise reverse
+// gravity has priority over low gravity.
+func refreshCurrentGravity() {
+	if blackHoleActive {
+		currentGravity = 0
+	} else if reverseGravityActive {
+		currentGravity = -baseGravity
+	} else if lowGravityActive {
+		currentGravity = baseGravity / 3
+	} else {
+		currentGravity = baseGravity
 	}
-	activePowerUp = POWER_NONE
-	powerUpTimer = 0
+}
+
+func clearTimedPowerUps() {
+	lowGravityActive = false
+	lowGravityTimer = 0
+	passActive = false
+	passTimer = 0
+	reverseGravityActive = false
+	reverseGravityTimer = 0
+	dualBallsTimer = 0
+	magnetPowerActive = false
+	magnetPowerTimer = 0
+	zapperPowerActive = false
+	zapperPowerTimer = 0
+	bigPaddleActive = false
+	bigPaddleTimer = 0
+	blackHoleActive = false
+	blackHoleTimer = 0
+	influencerActive = false
+	influencerTimer = 0
+	secondBallActive = false
+	setPaddleSize(paddleWidth, paddleHeight)
+	refreshCurrentGravity()
 }
 
 // Activate powerup
 func activatePowerUpWithBrick(hitBrick *brick) {
-	deactivateActivePowerUp()
-	// Black Hole persists independently.
 
 	var available []int
 	if enableLowGravity {
@@ -1221,20 +1254,16 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 
 	p := available[rand.Intn(len(available))]
 
-	if blackHoleActive && (p == POWER_LOW_GRAVITY || p == POWER_REVERSE_GRAVITY) {
-		return
-	}
-
 	switch p {
 	case POWER_LOW_GRAVITY:
-		activePowerUp = POWER_LOW_GRAVITY
-		powerUpTimer = powerUpDuration
-		currentGravity = baseGravity / 3
+		lowGravityActive = true
+		lowGravityTimer = powerUpDuration
+		refreshCurrentGravity()
 		showStatus("Low Gravity!", powerUpDuration)
 		playPowerup()
 	case POWER_PASS:
-		activePowerUp = POWER_PASS
-		powerUpTimer = powerUpDuration
+		passActive = true
+		passTimer = powerUpDuration
 		showStatus("Pass Through!", powerUpDuration)
 		playPowerup()
 	case POWER_NUKE:
@@ -1242,12 +1271,13 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 		showStatus("Nuke!", 2.0)
 		playPowerup()
 	case POWER_REVERSE_GRAVITY:
-		activePowerUp = POWER_REVERSE_GRAVITY
-		powerUpTimer = powerUpDuration
-		currentGravity = -baseGravity
+		reverseGravityActive = true
+		reverseGravityTimer = powerUpDuration
+		refreshCurrentGravity()
 		showStatus("Reverse Gravity!", powerUpDuration)
 		playPowerup()
 	case POWER_DUAL_BALLS:
+		dualBallsTimer = powerUpDuration
 		if !secondBallActive {
 			secondBallActive = true
 			secondBall.x = ball.x
@@ -1283,13 +1313,10 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 
 		showStatus("Black Hole!", powerUpDuration)
 		playPowerup()
-		if activePowerUp == POWER_LOW_GRAVITY || activePowerUp == POWER_REVERSE_GRAVITY {
-			activePowerUp = POWER_NONE
-			powerUpTimer = 0
-		}
+		refreshCurrentGravity()
 	case POWER_MAGNET:
-		activePowerUp = POWER_MAGNET
-		powerUpTimer = powerUpDuration
+		magnetPowerActive = true
+		magnetPowerTimer = powerUpDuration
 		showStatus("Magnets!", powerUpDuration)
 		playPowerup()
 	case POWER_INFLUENCER:
@@ -1298,8 +1325,8 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 		showStatus("Influencer!", powerUpDuration)
 		playPowerup()
 	case POWER_ZAPPER:
-		activePowerUp = POWER_ZAPPER
-		powerUpTimer = powerUpDuration
+		zapperPowerActive = true
+		zapperPowerTimer = powerUpDuration
 		zapperTargetIndex = -1
 		zapperHitTimer = 0
 		showStatus("Zapper!", powerUpDuration)
@@ -1310,9 +1337,9 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 			playPowerup()
 		}
 	case POWER_BIG_PADDLE:
-		activePowerUp = POWER_BIG_PADDLE
-		powerUpTimer = powerUpDuration
-		setPaddleSize(paddleWidth*2, paddleHeight*1)
+		bigPaddleActive = true
+		bigPaddleTimer = powerUpDuration
+		setPaddleSize(paddleWidth*2, paddleHeight)
 		showStatus("Big Paddle!", powerUpDuration)
 		playPowerup()
 	}
@@ -1539,8 +1566,19 @@ func startLevel(index int) {
 	paddle.vx = 0
 	paddlePreviousX = paddle.x
 
-	activePowerUp = POWER_NONE
-	powerUpTimer = 0
+	lowGravityActive = false
+	lowGravityTimer = 0
+	passActive = false
+	passTimer = 0
+	reverseGravityActive = false
+	reverseGravityTimer = 0
+	dualBallsTimer = 0
+	magnetPowerActive = false
+	magnetPowerTimer = 0
+	zapperPowerActive = false
+	zapperPowerTimer = 0
+	bigPaddleActive = false
+	bigPaddleTimer = 0
 	blackHoleActive = false
 	blackHoleTimer = 0
 	blackHoleX = canvasWidth / 2
@@ -1617,7 +1655,7 @@ func retryCurrentLevel() {
 
 // ---- Magnetic breakable bricks ----
 func magnetIsActive() bool {
-	return activePowerUp == POWER_MAGNET || (levelMagnetActive != magnetCheat)
+	return magnetPowerActive || (levelMagnetActive != magnetCheat)
 }
 
 func applyBrickMagnetism(b *Ball, dt float64) {
@@ -1785,7 +1823,7 @@ func zapperIsActive() bool {
 		remainingBreakableBricks <= threshold
 
 	return autoActive ||
-		activePowerUp == POWER_ZAPPER ||
+		zapperPowerActive ||
 		(levelZapperActive != zapperCheat)
 }
 
@@ -1965,7 +2003,7 @@ func updateBall(b *Ball, dt float64, isPrimary bool) {
 		if b.x+b.r > brickPtr.x && b.x-b.r < brickPtr.x+brickPtr.w &&
 			b.y+b.r > brickPtr.y && b.y-b.r < brickPtr.y+brickPtr.h {
 
-			if activePowerUp == POWER_PASS {
+			if passActive {
 				if destroyBrick(brickPtr) {
 					playBrickBreak()
 					if influencerActive {
@@ -2572,11 +2610,62 @@ func update(dt float64) {
 	}
 	paddlePreviousX = paddle.x
 
-	// ---- Power-up timers ----
-	if activePowerUp != POWER_NONE {
-		powerUpTimer -= dt
-		if powerUpTimer <= 0 {
-			deactivateActivePowerUp()
+	// ---- Independent power-up timers ----
+	gravityChanged := false
+	if lowGravityActive {
+		lowGravityTimer -= dt
+		if lowGravityTimer <= 0 {
+			lowGravityActive = false
+			lowGravityTimer = 0
+			gravityChanged = true
+		}
+	}
+	if reverseGravityActive {
+		reverseGravityTimer -= dt
+		if reverseGravityTimer <= 0 {
+			reverseGravityActive = false
+			reverseGravityTimer = 0
+			gravityChanged = true
+		}
+	}
+	if passActive {
+		passTimer -= dt
+		if passTimer <= 0 {
+			passActive = false
+			passTimer = 0
+		}
+	}
+	if dualBallsTimer > 0 {
+		dualBallsTimer -= dt
+		if dualBallsTimer <= 0 {
+			dualBallsTimer = 0
+			secondBallActive = false
+		}
+	}
+	if magnetPowerActive {
+		magnetPowerTimer -= dt
+		if magnetPowerTimer <= 0 {
+			magnetPowerActive = false
+			magnetPowerTimer = 0
+		}
+	}
+	if zapperPowerActive {
+		zapperPowerTimer -= dt
+		if zapperPowerTimer <= 0 {
+			zapperPowerActive = false
+			zapperPowerTimer = 0
+			zapperTargetIndex = -1
+			zapperHitTimer = 0
+			secondZapperTargetIndex = -1
+			secondZapperHitTimer = 0
+		}
+	}
+	if bigPaddleActive {
+		bigPaddleTimer -= dt
+		if bigPaddleTimer <= 0 {
+			bigPaddleActive = false
+			bigPaddleTimer = 0
+			setPaddleSize(paddleWidth, paddleHeight)
 		}
 	}
 
@@ -2598,11 +2687,10 @@ func update(dt float64) {
 		blackHoleTimer -= dt
 		if blackHoleTimer <= 0 {
 			blackHoleActive = false
+			blackHoleTimer = 0
 			blackHoleDirection = 0
 			blackHoleSpeed = 0
-			if activePowerUp != POWER_LOW_GRAVITY && activePowerUp != POWER_REVERSE_GRAVITY {
-				currentGravity = baseGravity
-			}
+			gravityChanged = true
 		}
 	}
 
@@ -2612,6 +2700,10 @@ func update(dt float64) {
 			influencerActive = false
 			influencerTimer = 0
 		}
+	}
+
+	if gravityChanged {
+		refreshCurrentGravity()
 	}
 
 	updateZapper(dt)
