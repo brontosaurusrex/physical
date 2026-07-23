@@ -35,7 +35,7 @@ const (
 	// Keyboard and two-thumb controls accelerate from a precise low speed
 	// to a faster cross-screen speed, then brake quickly when released.
 	defaultDigitalPaddleMaxSpeed     = 2800.0
-	defaultDigitalPaddleAcceleration = 7000.0 // 9000.0
+	defaultDigitalPaddleAcceleration = 9000.0 // 9000.0
 	defaultDigitalPaddleBraking      = 100000.0
 	defaultPaddleRadius              = 12.0
 	defaultBrickRadius               = 6.0
