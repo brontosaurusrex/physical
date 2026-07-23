@@ -25,7 +25,7 @@ ballVx=-2
 ballVy=-30
 
 stuckSpeedThreshold=250
-stuckDuration=0.9
+stuckDuration=0.1
 tiltUpSpeed=-2600
 tiltSideMin=280
 tiltSideMax=420
