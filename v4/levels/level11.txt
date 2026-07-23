@@ -24,6 +24,11 @@ ballY=7
 ballVx=-2
 ballVy=-30
 
+stuckSpeedThreshold=250
+stuckDuration=1.9
+tiltUpSpeed=-2600
+tiltSideMin=280
+tiltSideMax=420
 ---
       oe          oe    
     .@XX        .@XX    
