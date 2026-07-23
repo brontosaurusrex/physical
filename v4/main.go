@@ -277,7 +277,6 @@ var (
 	passTimer            float64
 	reverseGravityActive bool
 	reverseGravityTimer  float64
-	dualBallsTimer       float64
 	magnetPowerActive    bool
 	magnetPowerTimer     float64
 	zapperPowerActive    bool
@@ -1189,7 +1188,6 @@ func clearTimedPowerUps() {
 	passTimer = 0
 	reverseGravityActive = false
 	reverseGravityTimer = 0
-	dualBallsTimer = 0
 	magnetPowerActive = false
 	magnetPowerTimer = 0
 	zapperPowerActive = false
@@ -1277,7 +1275,6 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 		showStatus("Reverse Gravity!", powerUpDuration)
 		playPowerup()
 	case POWER_DUAL_BALLS:
-		dualBallsTimer = powerUpDuration
 		if !secondBallActive {
 			secondBallActive = true
 			secondBall.x = ball.x
@@ -1572,7 +1569,6 @@ func startLevel(index int) {
 	passTimer = 0
 	reverseGravityActive = false
 	reverseGravityTimer = 0
-	dualBallsTimer = 0
 	magnetPowerActive = false
 	magnetPowerTimer = 0
 	zapperPowerActive = false
@@ -2633,13 +2629,6 @@ func update(dt float64) {
 		if passTimer <= 0 {
 			passActive = false
 			passTimer = 0
-		}
-	}
-	if dualBallsTimer > 0 {
-		dualBallsTimer -= dt
-		if dualBallsTimer <= 0 {
-			dualBallsTimer = 0
-			secondBallActive = false
 		}
 	}
 	if magnetPowerActive {
