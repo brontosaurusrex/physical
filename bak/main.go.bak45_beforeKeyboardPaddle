@@ -13,48 +13,42 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	defaultCanvasWidth    = 1800.0
-	defaultCanvasHeight   = 900.0
-	defaultGravity        = 300.0
-	defaultRestitution    = 0.85
-	defaultFrictionCoeff  = 0.1 //0.1
-	defaultPaddleWidth    = 220.0
-	defaultPaddleHeight   = 30.0
-	defaultBallRadius     = 8.0
-	defaultBrickRows      = 10
-	defaultBrickCols      = 18
-	defaultBrickWidth     = 60.0
-	defaultBrickHeight    = 20.0
-	defaultBrickPadding   = 20.0
-	defaultBrickOffsetTop = -1.0
-	defaultPaddleBoost    = 700.0
-	defaultBrickBoost     = 100.0
-	defaultMaxSpeed       = 1000.0
-	defaultMaxSpin        = 30.0
-
-	// Keyboard and two-thumb controls accelerate from a precise low speed
-	// to a faster cross-screen speed, then brake quickly when released.
-	defaultDigitalPaddleMaxSpeed     = 2800.0
-	defaultDigitalPaddleAcceleration = 7000.0 // 9000.0
-	defaultDigitalPaddleBraking      = 100000.0
-	defaultPaddleRadius              = 12.0
-	defaultBrickRadius               = 6.0
-	defaultUnbreakableChance         = 0.15
-	defaultMagicChance               = 0.3
-	defaultPowerUpDuration           = 10.0
-	defaultBlackHoleStrength         = 800.0
-	defaultBlackHoleRange            = 200.0
-	defaultMagnetStrength            = 600.0
-	defaultMagnetRange               = 300.0
-	defaultInfluencerMultiplier      = 5.0
-	defaultLives                     = 7
-	defaultStuckSpeedThreshold       = 85.0
-	defaultStuckDuration             = 10.0
-	defaultTiltUpSpeed               = 520.0
-	defaultTiltSideMin               = 180.0
-	defaultTiltSideMax               = 340.0
-	defaultZapperHitTime             = 0.1
-	defaultZapperRange               = 320.0
+	defaultCanvasWidth          = 1800.0
+	defaultCanvasHeight         = 900.0
+	defaultGravity              = 300.0
+	defaultRestitution          = 0.85
+	defaultFrictionCoeff        = 0.1 //0.1
+	defaultPaddleWidth          = 220.0
+	defaultPaddleHeight         = 30.0
+	defaultBallRadius           = 8.0
+	defaultBrickRows            = 10
+	defaultBrickCols            = 18
+	defaultBrickWidth           = 60.0
+	defaultBrickHeight          = 20.0
+	defaultBrickPadding         = 20.0
+	defaultBrickOffsetTop       = -1.0
+	defaultPaddleBoost          = 700.0
+	defaultBrickBoost           = 100.0
+	defaultMaxSpeed             = 1000.0
+	defaultMaxSpin              = 30.0
+	defaultPaddleRadius         = 12.0
+	defaultBrickRadius          = 6.0
+	defaultUnbreakableChance    = 0.15
+	defaultMagicChance          = 0.3
+	defaultPowerUpDuration      = 10.0
+	defaultBlackHoleStrength    = 800.0
+	defaultBlackHoleRange       = 200.0
+	defaultMagnetStrength       = 600.0
+	defaultMagnetRange          = 300.0
+	defaultInfluencerMultiplier = 5.0
+	defaultLives                = 7
+	defaultStuckSpeedThreshold  = 85.0
+	defaultStuckDuration        = 10.0
+	defaultTiltUpSpeed          = 520.0
+	defaultTiltSideMin          = 180.0
+	defaultTiltSideMax          = 340.0
+	defaultZapperHitTime        = 0.1
+	defaultZapperRange          = 320.0
 
 	defaultPhoneTiltDeadZone  = 1.0
 	defaultPhoneTiltMaxAngle  = 10.0
@@ -374,16 +368,6 @@ func abs(x int) int {
 		return -x
 	}
 	return x
-}
-
-func moveToward(current, target, maxDelta float64) float64 {
-	if current < target {
-		return math.Min(current+maxDelta, target)
-	}
-	if current > target {
-		return math.Max(current-maxDelta, target)
-	}
-	return target
 }
 
 func showStatus(text string, duration float64) {
@@ -2573,41 +2557,29 @@ func update(dt float64) {
 		return
 	}
 
-	// Keyboard and two-thumb controls use acceleration rather than jumping
-	// immediately to one fixed speed. Short taps make small corrections;
-	// holding a direction quickly reaches the higher cross-screen speed.
-	digitalControl := false
-	digitalDirection := 0.0
+	const keyboardPaddleSpeed = 1500.0
+	const twoThumbPaddleSpeed = 1500.0
 
-	if leftPressed || rightPressed {
-		digitalControl = true
-		if leftPressed && !rightPressed {
-			digitalDirection = -1
-		} else if rightPressed && !leftPressed {
-			digitalDirection = 1
-		}
-	} else if mobileControlsEnabled && mobileControlMode == "two-thumb" {
-		digitalControl = true
-		if mobileLeftHeld && !mobileRightHeld {
-			digitalDirection = -1
-		} else if mobileRightHeld && !mobileLeftHeld {
-			digitalDirection = 1
-		}
-	}
-
-	if digitalControl {
-		targetSpeed := digitalDirection * defaultDigitalPaddleMaxSpeed
-		changeRate := defaultDigitalPaddleAcceleration
-		if digitalDirection == 0 {
-			changeRate = defaultDigitalPaddleBraking
-		}
-		paddle.vx = moveToward(paddle.vx, targetSpeed, changeRate*dt)
+	if leftPressed && !rightPressed {
+		paddle.vx = -keyboardPaddleSpeed
+		paddle.x += paddle.vx * dt
+	} else if rightPressed && !leftPressed {
+		paddle.vx = keyboardPaddleSpeed
 		paddle.x += paddle.vx * dt
 	} else if mobileControlsEnabled {
 		switch mobileControlMode {
 		case "vertical", "follow":
-			// These modes position the paddle directly from pointer events.
 			if !touchControlActive {
+				paddle.vx = 0
+			}
+		case "two-thumb":
+			if mobileLeftHeld && !mobileRightHeld {
+				paddle.vx = -twoThumbPaddleSpeed
+				paddle.x += paddle.vx * dt
+			} else if mobileRightHeld && !mobileLeftHeld {
+				paddle.vx = twoThumbPaddleSpeed
+				paddle.x += paddle.vx * dt
+			} else {
 				paddle.vx = 0
 			}
 		case "tilt":
@@ -2618,9 +2590,7 @@ func update(dt float64) {
 			paddle.vx = 0
 		}
 	} else {
-		// Brake keyboard movement quickly after the key is released.
-		paddle.vx = moveToward(paddle.vx, 0, defaultDigitalPaddleBraking*dt)
-		paddle.x += paddle.vx * dt
+		paddle.vx = 0
 	}
 	if paddle.x < 0 {
 		paddle.x = 0
