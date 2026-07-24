@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall/js"
@@ -13,42 +14,50 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	defaultCanvasWidth          = 1800.0
-	defaultCanvasHeight         = 900.0
-	defaultGravity              = 300.0
-	defaultRestitution          = 0.85
-	defaultFrictionCoeff        = 0.1 //0.1
-	defaultPaddleWidth          = 220.0
-	defaultPaddleHeight         = 30.0
-	defaultBallRadius           = 8.0
-	defaultBrickRows            = 10
-	defaultBrickCols            = 18
-	defaultBrickWidth           = 60.0
-	defaultBrickHeight          = 20.0
-	defaultBrickPadding         = 20.0
-	defaultBrickOffsetTop       = -1.0
-	defaultPaddleBoost          = 700.0
-	defaultBrickBoost           = 100.0
-	defaultMaxSpeed             = 1000.0
-	defaultMaxSpin              = 30.0
-	defaultPaddleRadius         = 12.0
-	defaultBrickRadius          = 6.0
-	defaultUnbreakableChance    = 0.15
-	defaultMagicChance          = 0.3
-	defaultPowerUpDuration      = 10.0
-	defaultBlackHoleStrength    = 800.0
-	defaultBlackHoleRange       = 200.0
-	defaultMagnetStrength       = 600.0
-	defaultMagnetRange          = 300.0
-	defaultInfluencerMultiplier = 5.0
-	defaultLives                = 7
-	defaultStuckSpeedThreshold  = 85.0
-	defaultStuckDuration        = 10.0
-	defaultTiltUpSpeed          = 520.0
-	defaultTiltSideMin          = 180.0
-	defaultTiltSideMax          = 340.0
-	defaultZapperHitTime        = 0.1
-	defaultZapperRange          = 320.0
+	buildID = "20260724-cc71cc0ce8"
+
+	defaultCanvasWidth    = 1800.0
+	defaultCanvasHeight   = 900.0
+	defaultGravity        = 300.0
+	defaultRestitution    = 0.85
+	defaultFrictionCoeff  = 0.1 //0.1
+	defaultPaddleWidth    = 220.0
+	defaultPaddleHeight   = 30.0
+	defaultBallRadius     = 8.0
+	defaultBrickRows      = 10
+	defaultBrickCols      = 18
+	defaultBrickWidth     = 60.0
+	defaultBrickHeight    = 20.0
+	defaultBrickPadding   = 20.0
+	defaultBrickOffsetTop = -1.0
+	defaultPaddleBoost    = 700.0
+	defaultBrickBoost     = 100.0
+	defaultMaxSpeed       = 1000.0
+	defaultMaxSpin        = 30.0
+
+	// Keyboard and two-thumb controls accelerate from a precise low speed
+	// to a faster cross-screen speed, then brake quickly when released.
+	defaultDigitalPaddleMaxSpeed     = 2800.0
+	defaultDigitalPaddleAcceleration = 9000.0
+	defaultDigitalPaddleBraking      = 40000.0
+	defaultPaddleRadius              = 12.0
+	defaultBrickRadius               = 6.0
+	defaultUnbreakableChance         = 0.15
+	defaultMagicChance               = 0.3
+	defaultPowerUpDuration           = 10.0
+	defaultBlackHoleStrength         = 800.0
+	defaultBlackHoleRange            = 200.0
+	defaultMagnetStrength            = 600.0
+	defaultMagnetRange               = 300.0
+	defaultInfluencerMultiplier      = 5.0
+	defaultLives                     = 7
+	defaultStuckSpeedThreshold       = 85.0
+	defaultStuckDuration             = 10.0
+	defaultTiltUpSpeed               = 520.0
+	defaultTiltSideMin               = 180.0
+	defaultTiltSideMax               = 340.0
+	defaultZapperHitTime             = 0.1
+	defaultZapperRange               = 320.0
 
 	defaultPhoneTiltDeadZone  = 1.0
 	defaultPhoneTiltMaxAngle  = 10.0
@@ -326,7 +335,11 @@ var (
 	// ---- Level system ----
 	currentLevelIndex    int
 	highestUnlockedLevel int
+	unlockFrontier       int // Highest level index made available; may equal len(levels) after finishing all current levels.
 	levels               []levelData
+
+	devAllLevelsUnlocked bool
+	debugOverlayVisible  bool
 
 	// ---- Audio ----
 	audioCtx         js.Value
@@ -368,6 +381,16 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+func moveToward(current, target, maxDelta float64) float64 {
+	if current < target {
+		return math.Min(current+maxDelta, target)
+	}
+	if current > target {
+		return math.Max(current-maxDelta, target)
+	}
+	return target
 }
 
 func showStatus(text string, duration float64) {
@@ -738,7 +761,14 @@ func resetGlobals() {
 
 // ---- Apply config overrides from map ----
 func applyConfig(config map[string]string) {
-	for key, val := range config {
+	keys := make([]string, 0, len(config))
+	for key := range config {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		val := config[key]
 		switch key {
 		case "backgroundColor":
 			palette[0] = val
@@ -1412,66 +1442,135 @@ func loadLevels() {
 // ---- Remember progression in browser storage ----
 const (
 	savedLevelKey           = "breakout.currentLevel"
-	highestUnlockedLevelKey = "breakout.highestUnlockedLevel"
+	highestUnlockedLevelKey = "breakout.highestUnlockedLevel" // Legacy key.
+	unlockFrontierKey       = "breakout.unlockFrontier"
 )
 
-func saveCurrentLevel() {
-	defer func() {
-		if r := recover(); r != nil {
-			js.Global().Get("console").Call("warn", "Could not save current level:", fmt.Sprint(r))
-		}
-	}()
-
-	storage := js.Global().Get("localStorage")
-	if storage.IsUndefined() || storage.IsNull() {
-		return
-	}
-	storage.Call("setItem", savedLevelKey, strconv.Itoa(currentLevelIndex))
-}
-
-func saveHighestUnlockedLevel() {
-	defer func() { _ = recover() }()
-	storage := js.Global().Get("localStorage")
-	if storage.IsUndefined() || storage.IsNull() {
-		return
-	}
-	storage.Call("setItem", highestUnlockedLevelKey, strconv.Itoa(highestUnlockedLevel))
-}
-
-func loadHighestUnlockedLevel() int {
-	if len(levels) == 0 {
-		return 0
-	}
-	unlocked := 0
+func readStoredInt(key string) (int, bool) {
+	value := 0
+	found := false
 	func() {
 		defer func() { _ = recover() }()
 		storage := js.Global().Get("localStorage")
 		if storage.IsUndefined() || storage.IsNull() {
 			return
 		}
-		value := storage.Call("getItem", highestUnlockedLevelKey)
-		if value.IsUndefined() || value.IsNull() {
+		stored := storage.Call("getItem", key)
+		if stored.IsUndefined() || stored.IsNull() {
 			return
 		}
-		if index, err := strconv.Atoi(value.String()); err == nil {
-			unlocked = index
+		parsed, err := strconv.Atoi(stored.String())
+		if err != nil {
+			return
+		}
+		value = parsed
+		found = true
+	}()
+	return value, found
+}
+
+func writeStoredInt(key string, value int) {
+	defer func() {
+		if r := recover(); r != nil {
+			js.Global().Get("console").Call("warn", "Could not save progression:", fmt.Sprint(r))
 		}
 	}()
-	if unlocked < 0 {
+	storage := js.Global().Get("localStorage")
+	if storage.IsUndefined() || storage.IsNull() {
+		return
+	}
+	storage.Call("setItem", key, strconv.Itoa(value))
+}
+
+func saveCurrentLevel() {
+	writeStoredInt(savedLevelKey, currentLevelIndex)
+}
+
+func permanentUnlockedLimit() int {
+	if len(levels) == 0 {
 		return 0
 	}
-	if unlocked >= len(levels) {
+	limit := unlockFrontier
+	if limit < 0 {
+		limit = 0
+	}
+	if limit >= len(levels) {
+		limit = len(levels) - 1
+	}
+	return limit
+}
+
+func activeUnlockedLimit() int {
+	if len(levels) == 0 {
+		return 0
+	}
+	if devAllLevelsUnlocked {
 		return len(levels) - 1
 	}
-	return unlocked
+	return permanentUnlockedLimit()
+}
+
+func refreshHighestUnlockedLevel() {
+	highestUnlockedLevel = permanentUnlockedLimit()
+}
+
+func saveUnlockFrontier() {
+	writeStoredInt(unlockFrontierKey, unlockFrontier)
+	// Keep the old key updated so older builds still see sensible progress.
+	writeStoredInt(highestUnlockedLevelKey, permanentUnlockedLimit())
+}
+
+func loadUnlockFrontier() int {
+	if len(levels) == 0 {
+		return 0
+	}
+
+	if frontier, ok := readStoredInt(unlockFrontierKey); ok {
+		if frontier < 0 {
+			return 0
+		}
+		return frontier
+	}
+
+	legacyHighest, legacyFound := readStoredInt(highestUnlockedLevelKey)
+	if !legacyFound {
+		return 0
+	}
+	if legacyHighest < 0 {
+		legacyHighest = 0
+	}
+
+	frontier := legacyHighest
+
+	// Legacy builds could not store one-past-the-final-level. When more levels
+	// were later added, both stored values still pointed at the old final level,
+	// forcing it to be replayed. Treat that exact legacy state as completed.
+	if saved, ok := readStoredInt(savedLevelKey); ok &&
+		saved == legacyHighest && legacyHighest < len(levels)-1 {
+		frontier = legacyHighest + 1
+		log("Migrated legacy final-level progress to level " + strconv.Itoa(frontier+1))
+	}
+
+	unlockFrontier = frontier
+	saveUnlockFrontier()
+	return frontier
 }
 
 func unlockNextLevel() {
+	// Visiting a locked level through the temporary developer toggle must not
+	// permanently skip normal progression.
+	if devAllLevelsUnlocked && currentLevelIndex > permanentUnlockedLimit() {
+		return
+	}
+
 	next := currentLevelIndex + 1
-	if next < len(levels) && next > highestUnlockedLevel {
-		highestUnlockedLevel = next
-		saveHighestUnlockedLevel()
-		showStatus("Level "+strconv.Itoa(next+1)+" unlocked!", 3.0)
+	if next > unlockFrontier {
+		unlockFrontier = next
+		refreshHighestUnlockedLevel()
+		saveUnlockFrontier()
+		if next < len(levels) {
+			showStatus("Level "+strconv.Itoa(next+1)+" unlocked!", 3.0)
+		}
 	}
 }
 
@@ -1480,38 +1579,22 @@ func loadSavedLevel() int {
 		return 0
 	}
 
-	savedIndex := 0
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				js.Global().Get("console").Call("warn", "Could not load saved level:", fmt.Sprint(r))
-			}
-		}()
-
-		storage := js.Global().Get("localStorage")
-		if storage.IsUndefined() || storage.IsNull() {
-			return
-		}
-
-		value := storage.Call("getItem", savedLevelKey)
-		if value.IsUndefined() || value.IsNull() {
-			return
-		}
-
-		index, err := strconv.Atoi(value.String())
-		if err == nil {
-			savedIndex = index
-		}
-	}()
-
+	savedIndex, ok := readStoredInt(savedLevelKey)
+	if !ok {
+		savedIndex = 0
+	}
 	if savedIndex < 0 {
-		return 0
+		savedIndex = 0
 	}
 	if savedIndex >= len(levels) {
 		savedIndex = len(levels) - 1
 	}
-	if savedIndex > highestUnlockedLevel {
-		savedIndex = highestUnlockedLevel
+
+	// Resume the last level actually played. Progression is stored separately
+	// in unlockFrontier; clamp only if the saved level is no longer available
+	// under normal progression (for example, it was visited with the U toggle).
+	if savedIndex > permanentUnlockedLimit() {
+		savedIndex = permanentUnlockedLimit()
 	}
 	return savedIndex
 }
@@ -1610,7 +1693,7 @@ func jumpToLevel(index int) {
 	if index >= len(levels) {
 		index = len(levels) - 1
 	}
-	if index > highestUnlockedLevel {
+	if index > activeUnlockedLimit() {
 		showStatus("Level locked", 2.0)
 		return
 	}
@@ -1632,7 +1715,8 @@ func resetGame() {
 	paused = false
 	leftPressed = false
 	rightPressed = false
-	highestUnlockedLevel = loadHighestUnlockedLevel()
+	unlockFrontier = loadUnlockFrontier()
+	refreshHighestUnlockedLevel()
 	startLevel(loadSavedLevel())
 }
 
@@ -2557,29 +2641,41 @@ func update(dt float64) {
 		return
 	}
 
-	const keyboardPaddleSpeed = 1500.0
-	const twoThumbPaddleSpeed = 1500.0
+	// Keyboard and two-thumb controls use acceleration rather than jumping
+	// immediately to one fixed speed. Short taps make small corrections;
+	// holding a direction quickly reaches the higher cross-screen speed.
+	digitalControl := false
+	digitalDirection := 0.0
 
-	if leftPressed && !rightPressed {
-		paddle.vx = -keyboardPaddleSpeed
-		paddle.x += paddle.vx * dt
-	} else if rightPressed && !leftPressed {
-		paddle.vx = keyboardPaddleSpeed
+	if leftPressed || rightPressed {
+		digitalControl = true
+		if leftPressed && !rightPressed {
+			digitalDirection = -1
+		} else if rightPressed && !leftPressed {
+			digitalDirection = 1
+		}
+	} else if mobileControlsEnabled && mobileControlMode == "two-thumb" {
+		digitalControl = true
+		if mobileLeftHeld && !mobileRightHeld {
+			digitalDirection = -1
+		} else if mobileRightHeld && !mobileLeftHeld {
+			digitalDirection = 1
+		}
+	}
+
+	if digitalControl {
+		targetSpeed := digitalDirection * defaultDigitalPaddleMaxSpeed
+		changeRate := defaultDigitalPaddleAcceleration
+		if digitalDirection == 0 {
+			changeRate = defaultDigitalPaddleBraking
+		}
+		paddle.vx = moveToward(paddle.vx, targetSpeed, changeRate*dt)
 		paddle.x += paddle.vx * dt
 	} else if mobileControlsEnabled {
 		switch mobileControlMode {
 		case "vertical", "follow":
+			// These modes position the paddle directly from pointer events.
 			if !touchControlActive {
-				paddle.vx = 0
-			}
-		case "two-thumb":
-			if mobileLeftHeld && !mobileRightHeld {
-				paddle.vx = -twoThumbPaddleSpeed
-				paddle.x += paddle.vx * dt
-			} else if mobileRightHeld && !mobileLeftHeld {
-				paddle.vx = twoThumbPaddleSpeed
-				paddle.x += paddle.vx * dt
-			} else {
 				paddle.vx = 0
 			}
 		case "tilt":
@@ -2590,7 +2686,9 @@ func update(dt float64) {
 			paddle.vx = 0
 		}
 	} else {
-		paddle.vx = 0
+		// Brake keyboard movement quickly after the key is released.
+		paddle.vx = moveToward(paddle.vx, 0, defaultDigitalPaddleBraking*dt)
+		paddle.x += paddle.vx * dt
 	}
 	if paddle.x < 0 {
 		paddle.x = 0
@@ -2732,6 +2830,7 @@ func update(dt float64) {
 	}
 	// Hold the cleared level on screen for three seconds.
 	if !gameOver && !levelAdvancePending && remainingBreakableBricks == 0 {
+		lives++
 		unlockNextLevel()
 		levelAdvancePending = true
 		levelCompleteTimer = 3.0
@@ -2744,7 +2843,7 @@ func update(dt float64) {
 		secondZapperTargetIndex = -1
 		secondZapperHitTimer = 0
 		playLevelComplete()
-		showStatus("Level complete!", 3.0)
+		showStatus("Level complete! +1 life", 3.0)
 	}
 }
 
@@ -2900,6 +2999,340 @@ func drawZapperBolts() {
 	}
 }
 
+func configState(key string) (effective, defaultValue, kind string, ok bool) {
+	switch key {
+	case "backgroundColor":
+		return palette[0], defaultPalette[0], "string", true
+	case "paddleColor":
+		return palette[1], defaultPalette[1], "string", true
+	case "brickColor":
+		return palette[2], defaultPalette[2], "string", true
+	case "ballColor":
+		return palette[3], defaultPalette[3], "string", true
+	case "textColor":
+		return palette[4], defaultPalette[4], "string", true
+	case "spinColor":
+		return palette[5], defaultPalette[5], "string", true
+	case "unbreakableColor":
+		return palette[6], defaultPalette[6], "string", true
+	case "secondBallColor":
+		return palette[7], defaultPalette[7], "string", true
+	case "secondBallSpinColor":
+		return palette[8], defaultPalette[8], "string", true
+	case "magicColor":
+		return magicColor, defaultMagicColor, "string", true
+	case "magicStrokeColor":
+		return magicStrokeColor, defaultMagicStrokeColor, "string", true
+	case "unbreakableStrokeColor":
+		return unbreakableStrokeColor, defaultUnbreakableStrokeColor, "string", true
+	case "brickStrokeColor":
+		return brickStrokeColor, defaultBrickStrokeColor, "string", true
+	case "gravity":
+		return formatConfigFloat(baseGravity), formatConfigFloat(defaultGravity), "float", true
+	case "restitution":
+		return formatConfigFloat(restitution), formatConfigFloat(defaultRestitution), "float", true
+	case "frictionCoeff":
+		return formatConfigFloat(frictionCoeff), formatConfigFloat(defaultFrictionCoeff), "float", true
+	case "maxSpin":
+		return formatConfigFloat(maxSpin), formatConfigFloat(defaultMaxSpin), "float", true
+	case "paddleBoost":
+		return formatConfigFloat(paddleBoost), formatConfigFloat(defaultPaddleBoost), "float", true
+	case "brickBoost":
+		return formatConfigFloat(brickBoost), formatConfigFloat(defaultBrickBoost), "float", true
+	case "maxSpeed":
+		return formatConfigFloat(maxSpeed), formatConfigFloat(defaultMaxSpeed), "float", true
+	case "stuckSpeedThreshold":
+		return formatConfigFloat(stuckSpeedThreshold), formatConfigFloat(defaultStuckSpeedThreshold), "float", true
+	case "stuckDuration":
+		return formatConfigFloat(stuckDuration), formatConfigFloat(defaultStuckDuration), "float", true
+	case "tiltUpSpeed":
+		return formatConfigFloat(tiltUpSpeed), formatConfigFloat(defaultTiltUpSpeed), "float", true
+	case "tiltSideMin":
+		return formatConfigFloat(tiltSideMin), formatConfigFloat(defaultTiltSideMin), "float", true
+	case "tiltSideMax":
+		return formatConfigFloat(tiltSideMax), formatConfigFloat(defaultTiltSideMax), "float", true
+	case "powerUpDuration":
+		return formatConfigFloat(powerUpDuration), formatConfigFloat(defaultPowerUpDuration), "float", true
+	case "magnet":
+		return strconv.FormatBool(levelMagnetActive), "false", "bool", true
+	case "zapper":
+		return strconv.FormatBool(levelZapperActive), "false", "bool", true
+	case "magnetStrength":
+		return formatConfigFloat(magnetStrength), formatConfigFloat(defaultMagnetStrength), "float", true
+	case "magnetRange":
+		return formatConfigFloat(magnetRange), formatConfigFloat(defaultMagnetRange), "float", true
+	case "influencerMultiplier":
+		return formatConfigFloat(influencerMultiplier), formatConfigFloat(defaultInfluencerMultiplier), "float", true
+	case "zapperRange":
+		return formatConfigFloat(zapperRange), formatConfigFloat(defaultZapperRange), "float", true
+	case "brickOffsetTop":
+		return formatConfigFloat(brickOffsetTop), formatConfigFloat(defaultBrickOffsetTop), "float", true
+	case "brickWidth", "defaultBrickWidth":
+		return formatConfigFloat(brickWidth), formatConfigFloat(defaultBrickWidth), "float", true
+	case "brickHeight", "defaultBrickHeight":
+		return formatConfigFloat(brickHeight), formatConfigFloat(defaultBrickHeight), "float", true
+	case "brickPadding", "defaultBrickPadding":
+		return formatConfigFloat(brickPadding), formatConfigFloat(defaultBrickPadding), "float", true
+	case "brickRows":
+		return strconv.Itoa(brickRows), strconv.Itoa(defaultBrickRows), "int", true
+	case "brickCols":
+		return strconv.Itoa(brickCols), strconv.Itoa(defaultBrickCols), "int", true
+	case "ballX":
+		return formatConfigFloat(startBallX), formatConfigFloat(defaultStartBallX), "float", true
+	case "ballY":
+		return formatConfigFloat(startBallY), formatConfigFloat(defaultStartBallY), "float", true
+	case "ballVx":
+		return formatConfigFloat(startBallVx), formatConfigFloat(defaultStartBallVx), "float", true
+	case "ballVy":
+		return formatConfigFloat(startBallVy), formatConfigFloat(defaultStartBallVy), "float", true
+	case "ballRadius":
+		return formatConfigFloat(ballRadius), formatConfigFloat(defaultBallRadius), "float", true
+	case "enableLowGravity":
+		return strconv.FormatBool(enableLowGravity), strconv.FormatBool(defaultEnableLowGravity), "bool", true
+	case "enablePassThrough":
+		return strconv.FormatBool(enablePassThrough), strconv.FormatBool(defaultEnablePassThrough), "bool", true
+	case "enableNuke":
+		return strconv.FormatBool(enableNuke), strconv.FormatBool(defaultEnableNuke), "bool", true
+	case "enableReverseGravity":
+		return strconv.FormatBool(enableReverseGravity), strconv.FormatBool(defaultEnableReverseGravity), "bool", true
+	case "enableDualBalls":
+		return strconv.FormatBool(enableDualBalls), strconv.FormatBool(defaultEnableDualBalls), "bool", true
+	case "enableBlackHole":
+		return strconv.FormatBool(enableBlackHole), strconv.FormatBool(defaultEnableBlackHole), "bool", true
+	case "enableMagnet":
+		return strconv.FormatBool(enableMagnet), strconv.FormatBool(defaultEnableMagnet), "bool", true
+	case "enableInfluencer":
+		return strconv.FormatBool(enableInfluencer), strconv.FormatBool(defaultEnableInfluencer), "bool", true
+	case "enableZapper":
+		return strconv.FormatBool(enableZapper), strconv.FormatBool(defaultEnableZapper), "bool", true
+	case "enableBreakUnbreakable":
+		return strconv.FormatBool(enableBreakUnbreakable), strconv.FormatBool(defaultEnableBreakUnbreakable), "bool", true
+	case "enableBigPaddle":
+		return strconv.FormatBool(enableBigPaddle), strconv.FormatBool(defaultEnableBigPaddle), "bool", true
+	case "paddleWidth":
+		return formatConfigFloat(paddleWidth), formatConfigFloat(defaultPaddleWidth), "float", true
+	case "paddleHeight":
+		return formatConfigFloat(paddleHeight), formatConfigFloat(defaultPaddleHeight), "float", true
+	default:
+		return "", "", "", false
+	}
+}
+
+func formatConfigFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func configValuesEqual(kind, a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	switch kind {
+	case "float":
+		af, errA := strconv.ParseFloat(a, 64)
+		bf, errB := strconv.ParseFloat(b, 64)
+		return errA == nil && errB == nil && math.Abs(af-bf) <= 1e-9
+	case "int":
+		ai, errA := strconv.Atoi(a)
+		bi, errB := strconv.Atoi(b)
+		return errA == nil && errB == nil && ai == bi
+	case "bool":
+		ab, errA := strconv.ParseBool(a)
+		bb, errB := strconv.ParseBool(b)
+		return errA == nil && errB == nil && ab == bb
+	default:
+		return a == b
+	}
+}
+
+func isPaletteConfigKey(key string) bool {
+	return strings.HasSuffix(key, "Color")
+}
+
+func currentLevelOverrideSections() (otherLines, paletteLines []string) {
+	if currentLevelIndex < 0 || currentLevelIndex >= len(levels) {
+		return nil, nil
+	}
+	config := levels[currentLevelIndex].config
+	keys := make([]string, 0, len(config))
+	for key := range config {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		effective, defaultValue, kind, accepted := configState(key)
+		if !accepted {
+			continue
+		}
+		// Only list values that were successfully applied and differ from the
+		// corresponding built-in default.
+		if !configValuesEqual(kind, config[key], effective) {
+			continue
+		}
+		if configValuesEqual(kind, effective, defaultValue) {
+			continue
+		}
+
+		line := key + "=" + effective
+		if isPaletteConfigKey(key) {
+			paletteLines = append(paletteLines, line)
+		} else {
+			otherLines = append(otherLines, line)
+		}
+	}
+	return otherLines, paletteLines
+}
+
+func debugOverlayLines() []string {
+	devState := "OFF"
+	if devAllLevelsUnlocked {
+		devState = "ON"
+	}
+
+	lines := []string{
+		"BUILD " + buildID,
+		"LEVEL " + strconv.Itoa(currentLevelIndex+1) + "/" + strconv.Itoa(len(levels)),
+		"UNLOCKED THROUGH " + strconv.Itoa(highestUnlockedLevel+1),
+		"DEV ALL LEVELS " + devState,
+		"LEVEL OVERRIDES:",
+	}
+
+	otherLines, paletteLines := currentLevelOverrideSections()
+	if len(otherLines) == 0 && len(paletteLines) == 0 {
+		return append(lines, "(none)")
+	}
+
+	lines = append(lines, otherLines...)
+	if len(paletteLines) > 0 {
+		lines = append(lines, "", "PALETTE / COLORS:")
+		lines = append(lines, paletteLines...)
+	}
+	return lines
+}
+
+func debugOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
+	const lineHeight = 18.0
+	const padding = 12.0
+	const columnWidth = 420.0
+
+	maxRows = int((canvasHeight - padding*4) / lineHeight)
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	columns := (lineCount + maxRows - 1) / maxRows
+	if columns < 1 {
+		columns = 1
+	}
+	panelWidth = float64(columns)*columnWidth + padding*2
+	rows := lineCount
+	if rows > maxRows {
+		rows = maxRows
+	}
+	panelHeight = float64(rows)*lineHeight + padding*2
+	panelX = canvasWidth - panelWidth - 10
+	panelY = canvasHeight - panelHeight - 10
+	if panelX < 10 {
+		panelX = 10
+	}
+	if panelY < 10 {
+		panelY = 10
+	}
+	return panelX, panelY, panelWidth, panelHeight, maxRows
+}
+
+func debugOverlayReport() string {
+	return strings.Join(debugOverlayLines(), "\n")
+}
+
+func pointerCanvasPosition(e js.Value) (x, y float64, ok bool) {
+	rect := canvas.Call("getBoundingClientRect")
+	width := rect.Get("width").Float()
+	height := rect.Get("height").Float()
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+
+	x = (e.Get("clientX").Float() - rect.Get("left").Float()) * canvasWidth / width
+	y = (e.Get("clientY").Float() - rect.Get("top").Float()) * canvasHeight / height
+	return x, y, true
+}
+
+func pointerInsideDebugOverlay(e js.Value) bool {
+	if !debugOverlayVisible {
+		return false
+	}
+	x, y, ok := pointerCanvasPosition(e)
+	if !ok {
+		return false
+	}
+	panelX, panelY, panelWidth, panelHeight, _ := debugOverlayGeometry(len(debugOverlayLines()))
+	return x >= panelX && x <= panelX+panelWidth &&
+		y >= panelY && y <= panelY+panelHeight
+}
+
+func copyTextToClipboard(text string) bool {
+	navigator := js.Global().Get("navigator")
+	if !navigator.IsUndefined() && !navigator.IsNull() {
+		clipboard := navigator.Get("clipboard")
+		if !clipboard.IsUndefined() && !clipboard.IsNull() {
+			clipboard.Call("writeText", text)
+			return true
+		}
+	}
+
+	// Fallback for older browsers and non-secure local-network pages.
+	document := js.Global().Get("document")
+	body := document.Get("body")
+	if body.IsUndefined() || body.IsNull() {
+		return false
+	}
+	textarea := document.Call("createElement", "textarea")
+	textarea.Set("value", text)
+	textarea.Call("setAttribute", "readonly", "")
+	style := textarea.Get("style")
+	style.Set("position", "fixed")
+	style.Set("left", "-9999px")
+	style.Set("top", "0")
+	style.Set("opacity", "0")
+	body.Call("appendChild", textarea)
+	textarea.Call("focus")
+	textarea.Call("select")
+	success := document.Call("execCommand", "copy").Bool()
+	body.Call("removeChild", textarea)
+	return success
+}
+
+func drawDebugOverlay() {
+	if !debugOverlayVisible {
+		return
+	}
+
+	lines := debugOverlayLines()
+	panelX, panelY, panelWidth, panelHeight, maxRows := debugOverlayGeometry(len(lines))
+
+	const lineHeight = 18.0
+	const padding = 12.0
+	const columnWidth = 420.0
+
+	ctx.Call("save")
+	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.82)")
+	ctx.Call("fillRect", panelX, panelY, panelWidth, panelHeight)
+	ctx.Set("strokeStyle", "rgba(255, 255, 255, 0.35)")
+	ctx.Set("lineWidth", 1)
+	ctx.Call("strokeRect", panelX, panelY, panelWidth, panelHeight)
+	ctx.Set("fillStyle", "#ffffff")
+	ctx.Set("font", "14px GameFont, monospace")
+	ctx.Set("textAlign", "left")
+
+	for i, line := range lines {
+		column := i / maxRows
+		row := i % maxRows
+		x := panelX + padding + float64(column)*columnWidth
+		y := panelY + padding + lineHeight*float64(row+1) - 3
+		ctx.Call("fillText", line, x, y)
+	}
+	ctx.Call("restore")
+}
+
 func drawCenteredOverlay() {
 	ctx.Call("save")
 	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.5)")
@@ -3011,6 +3444,8 @@ func draw() {
 
 		ctx.Set("textAlign", "start")
 	}
+
+	drawDebugOverlay()
 }
 
 func drawBall(x, y, radius, angle float64, fillColor, strokeColor string) {
@@ -3141,6 +3576,27 @@ func setupInput() {
 		key := e.Get("key").String()
 		code := e.Get("code").String()
 
+		// Temporary development unlock. It is deliberately not stored.
+		if (key == "u" || key == "U") && !e.Get("repeat").Bool() {
+			devAllLevelsUnlocked = !devAllLevelsUnlocked
+			if devAllLevelsUnlocked {
+				showStatus("Developer level unlock ON", 2.0)
+			} else {
+				permanentLimit := permanentUnlockedLimit()
+				if currentLevelIndex > permanentLimit {
+					jumpToLevel(permanentLimit)
+				}
+				showStatus("Developer level unlock OFF", 2.0)
+			}
+			return nil
+		}
+
+		// Toggle the build/config debug panel.
+		if (key == "i" || key == "I") && !e.Get("repeat").Bool() {
+			debugOverlayVisible = !debugOverlayVisible
+			return nil
+		}
+
 		// Start a new game after winning. N/P remain level-navigation cheats.
 		if gameOver && win {
 			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
@@ -3152,9 +3608,10 @@ func setupInput() {
 		// Cheat keys must work even while waiting to launch, paused, or on
 		// a game-over/win screen.
 		if (key == "n" || key == "N") && !e.Get("repeat").Bool() {
-			if currentLevelIndex < highestUnlockedLevel {
+			limit := activeUnlockedLimit()
+			if currentLevelIndex < limit {
 				jumpToLevel(currentLevelIndex + 1)
-			} else if highestUnlockedLevel == len(levels)-1 {
+			} else if limit == len(levels)-1 {
 				jumpToLevel(0)
 			} else {
 				showStatus("Finish this level to unlock the next", 2.0)
@@ -3162,10 +3619,11 @@ func setupInput() {
 			return nil
 		}
 		if (key == "p" || key == "P") && !e.Get("repeat").Bool() {
+			limit := activeUnlockedLimit()
 			if currentLevelIndex > 0 {
 				jumpToLevel(currentLevelIndex - 1)
-			} else if highestUnlockedLevel > 0 {
-				jumpToLevel(highestUnlockedLevel)
+			} else if limit > 0 {
+				jumpToLevel(limit)
 			}
 			return nil
 		}
@@ -3315,6 +3773,17 @@ func setupInput() {
 
 		e := args[0]
 		e.Call("preventDefault")
+
+		// Clicking or tapping the visible debug panel copies its complete text.
+		// Consume the event so it does not also launch, unpause, or move the paddle.
+		if pointerInsideDebugOverlay(e) {
+			if copyTextToClipboard(debugOverlayReport()) {
+				showStatus("Debug info copied", 1.5)
+			} else {
+				showStatus("Clipboard unavailable", 1.5)
+			}
+			return nil
+		}
 
 		if !audioInitialized {
 			initAudio()
@@ -3540,17 +4009,19 @@ func setupInput() {
 	})
 
 	bindMobileButton("previousLevelButton", func() {
+		limit := activeUnlockedLimit()
 		if currentLevelIndex > 0 {
 			jumpToLevel(currentLevelIndex - 1)
-		} else if highestUnlockedLevel > 0 {
-			jumpToLevel(highestUnlockedLevel)
+		} else if limit > 0 {
+			jumpToLevel(limit)
 		}
 	})
 
 	bindMobileButton("nextLevelButton", func() {
-		if currentLevelIndex < highestUnlockedLevel {
+		limit := activeUnlockedLimit()
+		if currentLevelIndex < limit {
 			jumpToLevel(currentLevelIndex + 1)
-		} else if highestUnlockedLevel == len(levels)-1 {
+		} else if limit == len(levels)-1 {
 			jumpToLevel(0)
 		} else {
 			showStatus("Finish this level to unlock the next", 2.0)
