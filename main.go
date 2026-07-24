@@ -14,7 +14,7 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260724-4746aebd2b"
+	buildID = "20260724-cc71cc0ce8"
 
 	defaultCanvasWidth    = 1800.0
 	defaultCanvasHeight   = 900.0
@@ -3143,9 +3143,13 @@ func configValuesEqual(kind, a, b string) bool {
 	}
 }
 
-func currentLevelOverrideLines() []string {
+func isPaletteConfigKey(key string) bool {
+	return strings.HasSuffix(key, "Color")
+}
+
+func currentLevelOverrideSections() (otherLines, paletteLines []string) {
 	if currentLevelIndex < 0 || currentLevelIndex >= len(levels) {
-		return nil
+		return nil, nil
 	}
 	config := levels[currentLevelIndex].config
 	keys := make([]string, 0, len(config))
@@ -3154,7 +3158,6 @@ func currentLevelOverrideLines() []string {
 	}
 	sort.Strings(keys)
 
-	lines := make([]string, 0, len(keys))
 	for _, key := range keys {
 		effective, defaultValue, kind, accepted := configState(key)
 		if !accepted {
@@ -3168,20 +3171,23 @@ func currentLevelOverrideLines() []string {
 		if configValuesEqual(kind, effective, defaultValue) {
 			continue
 		}
-		lines = append(lines, key+"="+effective)
+
+		line := key + "=" + effective
+		if isPaletteConfigKey(key) {
+			paletteLines = append(paletteLines, line)
+		} else {
+			otherLines = append(otherLines, line)
+		}
 	}
-	return lines
+	return otherLines, paletteLines
 }
 
-func drawDebugOverlay() {
-	if !debugOverlayVisible {
-		return
-	}
-
+func debugOverlayLines() []string {
 	devState := "OFF"
 	if devAllLevelsUnlocked {
 		devState = "ON"
 	}
+
 	lines := []string{
 		"BUILD " + buildID,
 		"LEVEL " + strconv.Itoa(currentLevelIndex+1) + "/" + strconv.Itoa(len(levels)),
@@ -3189,35 +3195,123 @@ func drawDebugOverlay() {
 		"DEV ALL LEVELS " + devState,
 		"LEVEL OVERRIDES:",
 	}
-	overrides := currentLevelOverrideLines()
-	if len(overrides) == 0 {
-		lines = append(lines, "(none)")
-	} else {
-		lines = append(lines, overrides...)
+
+	otherLines, paletteLines := currentLevelOverrideSections()
+	if len(otherLines) == 0 && len(paletteLines) == 0 {
+		return append(lines, "(none)")
 	}
 
+	lines = append(lines, otherLines...)
+	if len(paletteLines) > 0 {
+		lines = append(lines, "", "PALETTE / COLORS:")
+		lines = append(lines, paletteLines...)
+	}
+	return lines
+}
+
+func debugOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
 	const lineHeight = 18.0
 	const padding = 12.0
 	const columnWidth = 420.0
-	maxRows := int((canvasHeight - padding*4) / lineHeight)
+
+	maxRows = int((canvasHeight - padding*4) / lineHeight)
 	if maxRows < 1 {
 		maxRows = 1
 	}
-	columns := (len(lines) + maxRows - 1) / maxRows
-	panelWidth := float64(columns)*columnWidth + padding*2
-	rows := len(lines)
+	columns := (lineCount + maxRows - 1) / maxRows
+	if columns < 1 {
+		columns = 1
+	}
+	panelWidth = float64(columns)*columnWidth + padding*2
+	rows := lineCount
 	if rows > maxRows {
 		rows = maxRows
 	}
-	panelHeight := float64(rows)*lineHeight + padding*2
-	panelX := canvasWidth - panelWidth - 10
-	panelY := canvasHeight - panelHeight - 10
+	panelHeight = float64(rows)*lineHeight + padding*2
+	panelX = canvasWidth - panelWidth - 10
+	panelY = canvasHeight - panelHeight - 10
 	if panelX < 10 {
 		panelX = 10
 	}
 	if panelY < 10 {
 		panelY = 10
 	}
+	return panelX, panelY, panelWidth, panelHeight, maxRows
+}
+
+func debugOverlayReport() string {
+	return strings.Join(debugOverlayLines(), "\n")
+}
+
+func pointerCanvasPosition(e js.Value) (x, y float64, ok bool) {
+	rect := canvas.Call("getBoundingClientRect")
+	width := rect.Get("width").Float()
+	height := rect.Get("height").Float()
+	if width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+
+	x = (e.Get("clientX").Float() - rect.Get("left").Float()) * canvasWidth / width
+	y = (e.Get("clientY").Float() - rect.Get("top").Float()) * canvasHeight / height
+	return x, y, true
+}
+
+func pointerInsideDebugOverlay(e js.Value) bool {
+	if !debugOverlayVisible {
+		return false
+	}
+	x, y, ok := pointerCanvasPosition(e)
+	if !ok {
+		return false
+	}
+	panelX, panelY, panelWidth, panelHeight, _ := debugOverlayGeometry(len(debugOverlayLines()))
+	return x >= panelX && x <= panelX+panelWidth &&
+		y >= panelY && y <= panelY+panelHeight
+}
+
+func copyTextToClipboard(text string) bool {
+	navigator := js.Global().Get("navigator")
+	if !navigator.IsUndefined() && !navigator.IsNull() {
+		clipboard := navigator.Get("clipboard")
+		if !clipboard.IsUndefined() && !clipboard.IsNull() {
+			clipboard.Call("writeText", text)
+			return true
+		}
+	}
+
+	// Fallback for older browsers and non-secure local-network pages.
+	document := js.Global().Get("document")
+	body := document.Get("body")
+	if body.IsUndefined() || body.IsNull() {
+		return false
+	}
+	textarea := document.Call("createElement", "textarea")
+	textarea.Set("value", text)
+	textarea.Call("setAttribute", "readonly", "")
+	style := textarea.Get("style")
+	style.Set("position", "fixed")
+	style.Set("left", "-9999px")
+	style.Set("top", "0")
+	style.Set("opacity", "0")
+	body.Call("appendChild", textarea)
+	textarea.Call("focus")
+	textarea.Call("select")
+	success := document.Call("execCommand", "copy").Bool()
+	body.Call("removeChild", textarea)
+	return success
+}
+
+func drawDebugOverlay() {
+	if !debugOverlayVisible {
+		return
+	}
+
+	lines := debugOverlayLines()
+	panelX, panelY, panelWidth, panelHeight, maxRows := debugOverlayGeometry(len(lines))
+
+	const lineHeight = 18.0
+	const padding = 12.0
+	const columnWidth = 420.0
 
 	ctx.Call("save")
 	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.82)")
@@ -3679,6 +3773,17 @@ func setupInput() {
 
 		e := args[0]
 		e.Call("preventDefault")
+
+		// Clicking or tapping the visible debug panel copies its complete text.
+		// Consume the event so it does not also launch, unpause, or move the paddle.
+		if pointerInsideDebugOverlay(e) {
+			if copyTextToClipboard(debugOverlayReport()) {
+				showStatus("Debug info copied", 1.5)
+			} else {
+				showStatus("Clipboard unavailable", 1.5)
+			}
+			return nil
+		}
 
 		if !audioInitialized {
 			initAudio()
