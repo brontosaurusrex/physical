@@ -14,7 +14,7 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260724-25f661a29c"
+	buildID = "20260724-4746aebd2b"
 
 	defaultCanvasWidth    = 1800.0
 	defaultCanvasHeight   = 900.0
@@ -1590,14 +1590,11 @@ func loadSavedLevel() int {
 		savedIndex = len(levels) - 1
 	}
 
-	// Resume at the newest permanently unlocked level. This is what allows a
-	// newly appended level to become the next level instead of replaying the
-	// previously completed final level.
-	if savedIndex < highestUnlockedLevel {
-		savedIndex = highestUnlockedLevel
-	}
-	if savedIndex > highestUnlockedLevel {
-		savedIndex = highestUnlockedLevel
+	// Resume the last level actually played. Progression is stored separately
+	// in unlockFrontier; clamp only if the saved level is no longer available
+	// under normal progression (for example, it was visited with the U toggle).
+	if savedIndex > permanentUnlockedLimit() {
+		savedIndex = permanentUnlockedLimit()
 	}
 	return savedIndex
 }
