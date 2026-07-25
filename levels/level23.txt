@@ -12,19 +12,19 @@ ballVx=330
 ballVy=-520
 ballRadius=10
 powerUpDuration=6
-backgroundColor=#2c6e49
-paddleColor=#ffc9b9
-brickColor=#4c956c
-ballColor=#d68c45
-textColor=#ffc9b9
-spinColor=#d68c45
-unbreakableColor=#2c6e49
-secondBallColor=#d68c45
-secondBallSpinColor=#d68c45
 
-magicStrokeColor=#ffd700
-unbreakableStrokeColor=#e76f51
-brickStrokeColor=#4c956c
+backgroundColor=#12151c
+paddleColor=#2e1440
+brickColor=#4d586b
+brickStrokeColor=#4d586b
+ballColor=#0ebdaf
+textColor=#0ebdaf
+spinColor=#0ebdaf
+secondBallColor=#0ebdaf
+secondBallSpinColor=#0ebdaf
+magicColor=#503c81
+magicStrokeColor=#503c81
+//unbreakableStrokeColor=#e76f51
 ---
 
 MMM  MMM=#MM .*M% M MM- M MMMMMMMMMM M MM=M M MM MM.M=.M
