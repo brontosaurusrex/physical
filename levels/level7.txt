@@ -3,17 +3,20 @@ brickWidth=30
 brickHeight=30
 brickPadding=30
 ballRadius=10.0
-backgroundColor=#3b3b3b
-paddleColor=#0061ac
-brickColor=#ff0000
-brickStrokeColor=#ff0000
-unbreakableColor=#e2e2e2
-unbreakableStrokeColor=#e2e2e2
-ballColor=#e2e2e2
-spinColor=#e2e2e2
-secondBallColor=#e2e2e2
-secondBallSpinColor=#e2e2e2
-textColor=#e2e2e2
+backgroundColor=#1f1a3a
+paddleColor=#4b3879
+brickColor=#4b3879
+brickStrokeColor=#ffcc00
+ballColor=#00ffff
+textColor=#00ffff
+spinColor=#00ffff
+
+secondBallColor=#00ffff
+secondBallSpinColor=#00ffff
+
+magicStrokeColor=#ffd700
+unbreakableColor=#ff3366
+unbreakableStrokeColor=#ff3366
 ---
 U # U # M # M
  U # U # M # M

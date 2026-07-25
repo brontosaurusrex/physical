@@ -1,22 +1,19 @@
 # Level 25: Hourglass
 # Zero gravity and an unbreakable diagonal frame create two mirrored chambers.
 gravity=300
-restitution=0.98
-frictionCoeff=0
-maxSpin=90
 paddleBoost=1200
-brickBoost=0
+//brickBoost=0
 maxSpeed=900
 brickWidth=42
 brickHeight=18
-brickPadding=6
+brickPadding=20
 brickOffsetTop=95
 paddleWidth=240
 ballX=900
 ballY=760
 ballVx=300
 ballVy=-300
-ballRadius=9
+//ballRadius=22
 powerUpDuration=12
 backgroundColor=#10002b
 paddleColor=#e0aaff
@@ -52,4 +49,9 @@ textColor=#e0aaff
    UXXXXX         XXXXXU
   UXXXXX           XXXXXU
  UXXMXX             XXMXXU
+
+
+
+
+
 
