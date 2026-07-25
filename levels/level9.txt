@@ -57,7 +57,7 @@ magicStrokeColor=#F1e3d3
 ballColor=#f2d0a9
 spinColor=#f2d0a9
 secondBallColor=#f2d0a9
-textColor=#f2d0a9
+textColor=#8e7dbe
 secondBallSpinColor=#f2d0a9
 ---
            UU           
