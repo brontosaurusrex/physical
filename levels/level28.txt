@@ -1,0 +1,63 @@
+# Level 29: The Vault
+# Every magic brick grants Break Unbreakable; open the shell to reach the core.
+gravity=260
+stuckSpeedThreshold=250
+stuckDuration=0.4
+tiltUpSpeed=-6600
+tiltSideMin=280
+tiltSideMax=420
+restitution=0.90
+frictionCoeff=0.06
+maxSpin=55
+paddleBoost=950
+brickBoost=70
+maxSpeed=1100
+brickWidth=46
+brickHeight=24
+brickPadding=8
+brickOffsetTop=55
+paddleWidth=230
+ballX=900
+ballY=30
+ballVx=310
+ballVy=-410
+ballRadius=10
+powerUpDuration=8
+backgroundColor=#191308
+paddleColor=#e9c46a
+brickColor=#c77d00
+brickStrokeColor=#ffb703
+unbreakableColor=#3d405b
+unbreakableStrokeColor=#8d99ae
+magicColor=#fefae0
+magicStrokeColor=#ffd166
+ballColor=#ffd166
+spinColor=#ffd166
+secondBallColor=#90e0ef
+secondBallSpinColor=#90e0ef
+textColor=#fefae0
+---
+M M M M M M M M M M M M M
+
+M  UUUUUUUU   UUUUUUUU  M
+   U                 U
+M  U ############### U  M
+   U #             # U
+M  U # M#########M # U  M
+   U # #         # # U
+M    # # ####### # #    M
+     # # ##MMM## # #  
+M    # # ##M#M## # #    M
+   U # # ##MMM## # # U
+M  U # # ####### # # U  M
+   U # #         # # U
+M  U # M#########M # U  M
+   U #             # U
+M  U ############### U  M
+   U                 U
+M  UUUUUUUU   UUUUUUUU  M
+
+M M M M M M M M M M M M M
+
+
+

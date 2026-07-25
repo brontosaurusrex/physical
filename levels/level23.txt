@@ -1,0 +1,48 @@
+# Level 27: Ceiling Garden
+# Negative gravity pulls the ball upward into a hanging canopy.
+//gravity=-180
+restitution=0.93
+frictionCoeff=0.04
+maxSpin=70
+paddleBoost=1050
+brickBoost=45
+maxSpeed=1150
+brickWidth=42
+brickHeight=24
+brickPadding=10
+brickOffsetTop=35
+paddleWidth=250
+ballX=900
+ballY=700
+ballVx=330
+ballVy=-520
+ballRadius=10
+powerUpDuration=12
+backgroundColor=#2c6e49
+paddleColor=#ffc9b9
+brickColor=#4c956c
+ballColor=#d68c45
+textColor=#ffc9b9
+spinColor=#d68c45
+unbreakableColor=#2c6e49
+secondBallColor=#d68c45
+secondBallSpinColor=#d68c45
+
+magicStrokeColor=#ffd700
+unbreakableStrokeColor=#e76f51
+brickStrokeColor=#4c956c
+---
+
+
+UUUUUUUUUUUUU    UUUUUUUUUUUUUU
+U###M#######M#######M#######M#U
+U#############################U
+  ###   #####   ###   #####
+   #     ###     #     ###
+   M      #      M      #
+   #             #
+   #      M      #      M
+          #             #
+      M   #   M     M   #   M
+          #             #
+          M             M
