@@ -2,18 +2,18 @@
 # Tall separated drops, strong gravity, and a fast paddle produce a vertical chase.
 gravity=700
 restitution=0.86
-frictionCoeff=0.08
+frictionCoeff=0.15
 maxSpin=55
 paddleBoost=1450
-brickBoost=150
-maxSpeed=1500
+brickBoost=450
+maxSpeed=1200
 brickWidth=34
 brickHeight=38
 brickPadding=18
 brickOffsetTop=35
 paddleWidth=250
 ballX=900
-ballY=730
+ballY=20
 ballVx=-420
 ballVy=-260
 ballRadius=11
@@ -28,27 +28,39 @@ brickColor=#52b788
 brickStrokeColor=#95d5b2
 unbreakableColor=#1b4332
 unbreakableStrokeColor=#74c69d
-magicColor=#ffb703
-magicStrokeColor=#fb8500
+magicColor=#99dd88
+magicStrokeColor=#99dd88
 ballColor=#ffffff
 spinColor=#ffffff
 secondBallColor=#90e0ef
 secondBallSpinColor=#90e0ef
 textColor=#d8f3dc
 ---
-U   U   U   U   U   U   U
-#   #   #   #   #   #   #
-#       #   M   #       #
-M   #       #       #   M
-    #   #       #   #
-#       M   #   M       #
-  #   #   #   #   #   #
-    M       #       M
- #     #    #     #     #
-   #     M     M     #
-     #      #      #
-       M        M
-            M
+
+ ..   M  .  ..         M * .   M * :. .  ..- . -* .
+. -. .*.*-.=.= . -:.. .# # - .:  * -- -  : = -:* .=
+-**: :=.*- : = ..- -. .# #....-M *--MMM .==== -*. =
+: .: : . -.---   : - :.*.*    = **.=* * .  -M.--*..
+=..- -=.##:  .   ..- . :::    *  M M# #..==* =: .. 
+. =- -** *: -.   ........     =  M.-*..:.- M:. -*.:
+ = M-=   *-*.M   : -... .    .-M = .* * :MM=   *. =
+ - = -M.*-M. M   = M :.. .   . * = .M.M.-  .   * .=
+ - ***... M *=   = M  .. .   .-  M..=== - -.   *.*-
+ : * M:  .-==.   ==M...: :   .=* =  *.* ...    * ..
+ . MMM-.:.:-..   M M ..: :   .   -  *.M  ...   * *-
+  :.  - .:: -.  .*.M:.:: :   M*.=:  =.M. . .   *...
+.- ...:=.-:::   . :=: :: :   = * :  :- . : :   *.#M
+  :: ..  :...   .*.M:::...   ==.::   ... . .   *  =
+ : :..:==:. .   :* *          -MM:   : : :::   #::=
+ - -  .  -...   : .*   :::    - .M  .  :.: :   * :.
+ : :  -*.-: :   :MM-...=.=    -* *  : - := :   * * 
+ :::  = *-- -       . .# #    .*.*  = =.-  :   *.* 
+      *..-= =       : :* *    :  -  M M -.*-   * . 
+      =  -= =       - -MMM    : *=  M M :* =   M.. 
+ ...  :==:- -       : :M M    .= -  - -  M.M   :-- 
+ . .  === ---       ...*.*     ---  ...  M.M   =   
+ ...  M #MM M          M M    ...   : :  - -   *.* 
+      -. -- -          :::          . .  ...   = = 
 
 
 
