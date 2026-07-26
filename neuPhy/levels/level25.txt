@@ -1,6 +1,6 @@
 # Level 25: Hourglass
 # Zero gravity and an unbreakable diagonal frame create two mirrored chambers.
-gravity=300
+gravity=100
 paddleBoost=1200
 //brickBoost=0
 //maxSpeed=900

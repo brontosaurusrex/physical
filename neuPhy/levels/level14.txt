@@ -13,20 +13,18 @@ secondBallColor=#c7cbd1
 textColor=#e7e9ec
 secondBallSpinColor=#8d939b
 
-gravity=120.0
+gravity=150.0
 restitution=0.99
-frictionCoeff=0.01
+//frictionCoeff=0.01
 maxSpeed=1000
 paddleBoost=1800
 brickBoost=0
 
-enableCornerPhysics=false
-
-stuckSpeedThreshold=250
-stuckDuration=0.1
+stuckSpeedThreshold=350
+stuckDuration=0.2
 tiltUpSpeed=-2600
 tiltSideMin=280
-tiltSideMax=420
+tiltSideMax=1420
 
 ballX=120
 ballY=60

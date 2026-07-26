@@ -14,13 +14,10 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260726-c16d4a0e6b"
+	buildID = "20260726-a2476d8e31"
 
 	defaultCanvasWidth        = 1800.0
 	defaultCanvasHeight       = 900.0
-	defaultGravity            = 300.0
-	defaultRestitution        = 0.85
-	defaultFrictionCoeff      = 0.1 //0.1
 	defaultPaddleWidth        = 220.0
 	defaultPaddleHeight       = 30.0
 	defaultBallRadius         = 8.0
@@ -30,10 +27,6 @@ const (
 	defaultBrickHeight        = 20.0
 	defaultBrickPadding       = 20.0
 	defaultBrickOffsetTop     = -1.0
-	defaultPaddleBoost        = 700.0
-	defaultBrickBoost         = 100.0
-	defaultMaxSpeed           = 1100.0 // was 1000 for original physics
-	defaultMaxSpin            = 530.0
 	defaultUseImprovedPhysics = true
 
 	// Keyboard and two-thumb controls accelerate from a precise low speed
@@ -52,29 +45,61 @@ const (
 	defaultMagnetRange               = 300.0
 	defaultInfluencerMultiplier      = 5.0
 	defaultLives                     = 7
-	defaultStuckSpeedThreshold       = 85.0
-	defaultStuckDuration             = 10.0
-	defaultTiltUpSpeed               = 520.0
-	defaultTiltSideMin               = 180.0
-	defaultTiltSideMax               = 340.0
 	defaultZapperHitTime             = 0.1
 	defaultZapperRange               = 320.0
 
-	// Improved-mode tuning. Original physics does not read these values.
-	improvedMagnusCoefficient       = 0.015 // 0.0015
-	improvedMagnusAccelerationScale = 0.30
-	improvedSpinDrag                = 0.10
-	improvedAirDrag                 = 0.010
-	improvedWallFrictionScale       = 1.00
-	improvedBrickFrictionScale      = 1.40
-	improvedPaddleFrictionScale     = 1.35 // 1.35
-	improvedPaddleSpinTransfer      = 2.25 // 1.25
-	improvedCollisionSpinCoupling   = 2.50
-	improvedMinimumCollisionGrip    = 0.18
-	improvedMinimumPaddleGrip       = 0.25
-	improvedCollisionSlop           = 0.05
+	// Original physics defaults. These are intentionally independent from
+	// Improved mode so tuning one model cannot silently change the other.
+	originalDefaultGravity             = 300.0
+	originalDefaultRestitution         = 0.85
+	originalDefaultFrictionCoeff       = 0.10
+	originalDefaultPaddleBoost         = 700.0
+	originalDefaultBrickBoost          = 100.0
+	originalDefaultMaxSpeed            = 1000.0
+	originalDefaultMaxSpin             = 30.0
+	originalDefaultStuckSpeedThreshold = 85.0
+	originalDefaultStuckDuration       = 10.0
+	originalDefaultTiltUpSpeed         = 520.0
+	originalDefaultTiltSideMin         = 180.0
+	originalDefaultTiltSideMax         = 340.0
 
-	enableHighSpinMessage   = true
+	// Improved physics defaults. These can be tuned without touching Original.
+	improvedDefaultGravity             = 300.0
+	improvedDefaultRestitution         = 0.90
+	improvedDefaultFrictionCoeff       = 0.10
+	improvedDefaultPaddleBoost         = 900.0
+	improvedDefaultBrickBoost          = 100.0
+	improvedDefaultMaxSpeed            = 1170.0
+	improvedDefaultMaxSpin             = 530.0
+	improvedDefaultStuckSpeedThreshold = 85.0
+	improvedDefaultStuckDuration       = 3.0
+	improvedDefaultTiltUpSpeed         = 520.0
+	improvedDefaultTiltSideMin         = 180.0
+	improvedDefaultTiltSideMax         = 340.0
+
+	// Improved-only contact/flight tuning.
+	improvedMagnusCoefficient        = 0.0015
+	improvedMagnusAccelerationScale  = 0.30
+	improvedSpinDrag                 = 0.10
+	improvedAirDrag                  = 0.010
+	improvedWallFrictionScale        = 0.60
+	improvedBrickFrictionScale       = 1.00
+	improvedUnbreakableFrictionScale = 0.35
+	improvedPaddleFrictionScale      = 1.35
+	improvedPaddleSpinTransfer       = 2.25
+	improvedCollisionSpinCoupling    = 2.50
+	improvedMinimumCollisionGrip     = 0.08
+	improvedMinimumPaddleGrip        = 0.25
+	improvedCollisionSlop            = 0.05
+
+	// Every brick receives a stable, tiny rotation in Improved mode. The same
+	// angle is used for drawing and collision normals, breaking exact vertical
+	// loops without changing the brick grid or consuming gameplay randomness.
+	improvedBrickTiltMinDegrees = 0.002
+	improvedBrickTiltMaxDegrees = 90.0 // 1.0
+	improvedDrawBrickTilt       = true
+
+	enableHighSpinMessage   = false
 	highSpinThreshold       = 100.0 // 100.0
 	highSpinMessageDuration = 1.5
 
@@ -102,13 +127,107 @@ const (
 	showBlackHole = false // Set true to draw the moving black hole.
 )
 
+// physicsSettings contains only values that belong to a physics model. The
+// Original and Improved instances are reset and overridden independently.
+type physicsSettings struct {
+	gravity             float64
+	restitution         float64
+	frictionCoeff       float64
+	paddleBoost         float64
+	brickBoost          float64
+	maxSpeed            float64
+	maxSpin             float64
+	stuckSpeedThreshold float64
+	stuckDuration       float64
+	tiltUpSpeed         float64
+	tiltSideMin         float64
+	tiltSideMax         float64
+}
+
+func originalPhysicsDefaults() physicsSettings {
+	return physicsSettings{
+		gravity: originalDefaultGravity, restitution: originalDefaultRestitution,
+		frictionCoeff: originalDefaultFrictionCoeff, paddleBoost: originalDefaultPaddleBoost,
+		brickBoost: originalDefaultBrickBoost, maxSpeed: originalDefaultMaxSpeed,
+		maxSpin: originalDefaultMaxSpin, stuckSpeedThreshold: originalDefaultStuckSpeedThreshold,
+		stuckDuration: originalDefaultStuckDuration, tiltUpSpeed: originalDefaultTiltUpSpeed,
+		tiltSideMin: originalDefaultTiltSideMin, tiltSideMax: originalDefaultTiltSideMax,
+	}
+}
+
+func improvedPhysicsDefaults() physicsSettings {
+	return physicsSettings{
+		gravity: improvedDefaultGravity, restitution: improvedDefaultRestitution,
+		frictionCoeff: improvedDefaultFrictionCoeff, paddleBoost: improvedDefaultPaddleBoost,
+		brickBoost: improvedDefaultBrickBoost, maxSpeed: improvedDefaultMaxSpeed,
+		maxSpin: improvedDefaultMaxSpin, stuckSpeedThreshold: improvedDefaultStuckSpeedThreshold,
+		stuckDuration: improvedDefaultStuckDuration, tiltUpSpeed: improvedDefaultTiltUpSpeed,
+		tiltSideMin: improvedDefaultTiltSideMin, tiltSideMax: improvedDefaultTiltSideMax,
+	}
+}
+
+var (
+	originalPhysicsSettings = originalPhysicsDefaults()
+	improvedPhysicsSettings = improvedPhysicsDefaults()
+)
+
+func physicsSettingsForMode(improved bool) *physicsSettings {
+	if improved {
+		return &improvedPhysicsSettings
+	}
+	return &originalPhysicsSettings
+}
+
+func activePhysicsSettings() *physicsSettings {
+	return physicsSettingsForMode(useImprovedPhysics)
+}
+
+func setPhysicsSetting(settings *physicsSettings, key string, value float64) {
+	switch key {
+	case "gravity":
+		settings.gravity = value
+	case "restitution":
+		settings.restitution = value
+	case "frictionCoeff":
+		settings.frictionCoeff = value
+	case "paddleBoost":
+		settings.paddleBoost = value
+	case "brickBoost":
+		settings.brickBoost = value
+	case "maxSpeed":
+		settings.maxSpeed = value
+	case "maxSpin":
+		settings.maxSpin = value
+	case "stuckSpeedThreshold":
+		settings.stuckSpeedThreshold = value
+	case "stuckDuration":
+		settings.stuckDuration = value
+	case "tiltUpSpeed":
+		settings.tiltUpSpeed = value
+	case "tiltSideMin":
+		settings.tiltSideMin = value
+	case "tiltSideMax":
+		settings.tiltSideMax = value
+	}
+}
+
+func applyPhysicsOverride(mode, key string, value float64) {
+	switch mode {
+	case "original":
+		setPhysicsSetting(&originalPhysicsSettings, key, value)
+	case "improved":
+		setPhysicsSetting(&improvedPhysicsSettings, key, value)
+	default:
+		// Legacy level keys remain compatible by applying to both profiles.
+		setPhysicsSetting(&originalPhysicsSettings, key, value)
+		setPhysicsSetting(&improvedPhysicsSettings, key, value)
+	}
+}
+
 // ---- These are variables, reset each level ----
 var (
 	canvasWidth    = defaultCanvasWidth
 	canvasHeight   = defaultCanvasHeight
-	baseGravity    = defaultGravity
-	restitution    = defaultRestitution
-	frictionCoeff  = defaultFrictionCoeff
 	paddleWidth    = defaultPaddleWidth
 	paddleHeight   = defaultPaddleHeight
 	ballRadius     = defaultBallRadius
@@ -118,11 +237,6 @@ var (
 	brickHeight    = defaultBrickHeight
 	brickPadding   = defaultBrickPadding
 	brickOffsetTop = defaultBrickOffsetTop
-
-	paddleBoost = defaultPaddleBoost
-	brickBoost  = defaultBrickBoost
-	maxSpeed    = defaultMaxSpeed
-	maxSpin     = defaultMaxSpin
 
 	paddleRadius = defaultPaddleRadius
 	brickRadius  = defaultBrickRadius
@@ -142,12 +256,6 @@ var (
 	startBallY  = defaultStartBallY
 	startBallVx = defaultStartBallVx
 	startBallVy = defaultStartBallVy
-
-	stuckSpeedThreshold = defaultStuckSpeedThreshold
-	stuckDuration       = defaultStuckDuration
-	tiltUpSpeed         = defaultTiltUpSpeed
-	tiltSideMin         = defaultTiltSideMin
-	tiltSideMax         = defaultTiltSideMax
 
 	enableLowGravity       = defaultEnableLowGravity
 	enablePassThrough      = defaultEnablePassThrough
@@ -394,6 +502,7 @@ var (
 type brick struct {
 	x, y, w, h  float64
 	row, col    int
+	tiltRadians float64
 	alive       bool
 	unbreakable bool
 	magic       bool
@@ -418,6 +527,34 @@ func sign(x float64) float64 {
 		return -1
 	}
 	return 0
+}
+
+// brickMicroTiltRadians returns a deterministic random-looking angle. It does
+// not use math/rand, so brick construction cannot disturb power-up or gameplay
+// randomness. Re-entering the same level produces the same brick angles.
+func brickMicroTiltRadians(levelIndex, row, col int) float64 {
+	hash := uint32(levelIndex+1)*0x9e3779b9 ^
+		uint32(row+1)*0x85ebca6b ^
+		uint32(col+1)*0xc2b2ae35
+	hash ^= hash >> 16
+	hash *= 0x7feb352d
+	hash ^= hash >> 15
+	hash *= 0x846ca68b
+	hash ^= hash >> 16
+
+	unit := float64(hash&0x00ffffff) / float64(0x00ffffff)
+	magnitudeDegrees := improvedBrickTiltMinDegrees +
+		unit*(improvedBrickTiltMaxDegrees-improvedBrickTiltMinDegrees)
+	if hash&0x80000000 != 0 {
+		magnitudeDegrees = -magnitudeDegrees
+	}
+	return magnitudeDegrees * math.Pi / 180.0
+}
+
+func rotateVector(x, y, angle float64) (float64, float64) {
+	cosAngle := math.Cos(angle)
+	sinAngle := math.Sin(angle)
+	return x*cosAngle - y*sinAngle, x*sinAngle + y*cosAngle
 }
 
 // preventVerticalLock is used only by improved physics. It preserves total
@@ -874,11 +1011,10 @@ func playLevelComplete() {
 
 // ---- Reset globals to defaults ----
 func resetGlobals() {
+	originalPhysicsSettings = originalPhysicsDefaults()
+	improvedPhysicsSettings = improvedPhysicsDefaults()
 	canvasWidth = defaultCanvasWidth
 	canvasHeight = defaultCanvasHeight
-	baseGravity = defaultGravity
-	restitution = defaultRestitution
-	frictionCoeff = defaultFrictionCoeff
 	paddleWidth = defaultPaddleWidth
 	paddleHeight = defaultPaddleHeight
 	ballRadius = defaultBallRadius
@@ -888,10 +1024,6 @@ func resetGlobals() {
 	brickHeight = defaultBrickHeight
 	brickPadding = defaultBrickPadding
 	brickOffsetTop = defaultBrickOffsetTop
-	paddleBoost = defaultPaddleBoost
-	brickBoost = defaultBrickBoost
-	maxSpeed = defaultMaxSpeed
-	maxSpin = defaultMaxSpin
 	paddleRadius = defaultPaddleRadius
 	brickRadius = defaultBrickRadius
 	unbreakableChance = defaultUnbreakableChance
@@ -907,11 +1039,6 @@ func resetGlobals() {
 	startBallY = defaultStartBallY
 	startBallVx = defaultStartBallVx
 	startBallVy = defaultStartBallVy
-	stuckSpeedThreshold = defaultStuckSpeedThreshold
-	stuckDuration = defaultStuckDuration
-	tiltUpSpeed = defaultTiltUpSpeed
-	tiltSideMin = defaultTiltSideMin
-	tiltSideMax = defaultTiltSideMax
 	enableLowGravity = defaultEnableLowGravity
 	enablePassThrough = defaultEnablePassThrough
 	enableNuke = defaultEnableNuke
@@ -936,7 +1063,14 @@ func applyConfig(config map[string]string) {
 	for key := range config {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	sort.SliceStable(keys, func(i, j int) bool {
+		specificI := strings.HasPrefix(keys[i], "original") || strings.HasPrefix(keys[i], "improved")
+		specificJ := strings.HasPrefix(keys[j], "original") || strings.HasPrefix(keys[j], "improved")
+		if specificI != specificJ {
+			return !specificI
+		}
+		return keys[i] < keys[j]
+	})
 
 	for _, key := range keys {
 		val := config[key]
@@ -967,53 +1101,137 @@ func applyConfig(config map[string]string) {
 			unbreakableStrokeColor = val
 		case "brickStrokeColor":
 			brickStrokeColor = val
-		case "gravity":
+		case "gravity", "originalGravity", "improvedGravity":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				baseGravity = f
+				mode := ""
+				if key == "originalGravity" {
+					mode = "original"
+				}
+				if key == "improvedGravity" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "gravity", f)
 			}
-		case "restitution":
+		case "restitution", "originalRestitution", "improvedRestitution":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
-				restitution = f
+				mode := ""
+				if key == "originalRestitution" {
+					mode = "original"
+				}
+				if key == "improvedRestitution" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "restitution", f)
 			}
-		case "frictionCoeff":
+		case "frictionCoeff", "originalFrictionCoeff", "improvedFrictionCoeff":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				frictionCoeff = f
+				mode := ""
+				if key == "originalFrictionCoeff" {
+					mode = "original"
+				}
+				if key == "improvedFrictionCoeff" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "frictionCoeff", f)
 			}
-		case "maxSpin":
+		case "maxSpin", "originalMaxSpin", "improvedMaxSpin":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
-				maxSpin = f
+				mode := ""
+				if key == "originalMaxSpin" {
+					mode = "original"
+				}
+				if key == "improvedMaxSpin" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "maxSpin", f)
 			}
-		case "paddleBoost":
+		case "paddleBoost", "originalPaddleBoost", "improvedPaddleBoost":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				paddleBoost = f
+				mode := ""
+				if key == "originalPaddleBoost" {
+					mode = "original"
+				}
+				if key == "improvedPaddleBoost" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "paddleBoost", f)
 			}
-		case "brickBoost":
+		case "brickBoost", "originalBrickBoost", "improvedBrickBoost":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				brickBoost = f
+				mode := ""
+				if key == "originalBrickBoost" {
+					mode = "original"
+				}
+				if key == "improvedBrickBoost" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "brickBoost", f)
 			}
-		case "maxSpeed":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				maxSpeed = f
+		case "maxSpeed", "originalMaxSpeed", "improvedMaxSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				mode := ""
+				if key == "originalMaxSpeed" {
+					mode = "original"
+				}
+				if key == "improvedMaxSpeed" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "maxSpeed", f)
 			}
-		case "stuckSpeedThreshold":
+		case "stuckSpeedThreshold", "originalStuckSpeedThreshold", "improvedStuckSpeedThreshold":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				stuckSpeedThreshold = f
+				mode := ""
+				if key == "originalStuckSpeedThreshold" {
+					mode = "original"
+				}
+				if key == "improvedStuckSpeedThreshold" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "stuckSpeedThreshold", f)
 			}
-		case "stuckDuration":
+		case "stuckDuration", "originalStuckDuration", "improvedStuckDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				stuckDuration = f
+				mode := ""
+				if key == "originalStuckDuration" {
+					mode = "original"
+				}
+				if key == "improvedStuckDuration" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "stuckDuration", f)
 			}
-		case "tiltUpSpeed":
+		case "tiltUpSpeed", "originalTiltUpSpeed", "improvedTiltUpSpeed":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				tiltUpSpeed = f
+				mode := ""
+				if key == "originalTiltUpSpeed" {
+					mode = "original"
+				}
+				if key == "improvedTiltUpSpeed" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "tiltUpSpeed", f)
 			}
-		case "tiltSideMin":
+		case "tiltSideMin", "originalTiltSideMin", "improvedTiltSideMin":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				tiltSideMin = f
+				mode := ""
+				if key == "originalTiltSideMin" {
+					mode = "original"
+				}
+				if key == "improvedTiltSideMin" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "tiltSideMin", f)
 			}
-		case "tiltSideMax":
+		case "tiltSideMax", "originalTiltSideMax", "improvedTiltSideMax":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				tiltSideMax = f
+				mode := ""
+				if key == "originalTiltSideMax" {
+					mode = "original"
+				}
+				if key == "improvedTiltSideMax" {
+					mode = "improved"
+				}
+				applyPhysicsOverride(mode, "tiltSideMax", f)
 			}
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
@@ -1147,6 +1365,7 @@ func applyConfig(config map[string]string) {
 
 // ---- Physics ----
 func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
+	physics := &originalPhysicsSettings
 	cx := b.x + nx*b.r
 	cy := b.y + ny*b.r
 	contactVx := b.vx - b.omega*(cy-b.y)
@@ -1158,9 +1377,9 @@ func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
 	if vn >= 0 {
 		return
 	}
-	vnNew := -restitution * vn
+	vnNew := -physics.restitution * vn
 	deltaVn := vnNew - vn
-	maxFriction := frictionCoeff * math.Abs(deltaVn)
+	maxFriction := physics.frictionCoeff * math.Abs(deltaVn)
 	var deltaVt float64
 	if math.Abs(vt) < 0.001 {
 		deltaVt = -vt
@@ -1178,6 +1397,7 @@ func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
 // resolveCollisionBallImproved uses the actual contact point and a solid-disk
 // tangential impulse. It is used only while improved physics is selected.
 func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale float64) (float64, bool) {
+	physics := &improvedPhysicsSettings
 	// nx,ny point from the surface toward the ball, so the contact point is
 	// on the opposite side of the ball centre.
 	cx := b.x - nx*b.r
@@ -1198,14 +1418,14 @@ func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale
 		return 0, false
 	}
 
-	vnNew := -restitution * vn
+	vnNew := -physics.restitution * vn
 	deltaVn := vnNew - vn
 
 	// For a solid disk, no-slip correction is -vt/3 because tangential
 	// impulse changes both translation and rotation. Different surfaces use
 	// different friction scales: paddle strongest, bricks medium, walls weak.
 	effectiveFriction := math.Max(
-		frictionCoeff*frictionScale,
+		physics.frictionCoeff*frictionScale,
 		improvedMinimumCollisionGrip,
 	)
 	maxFriction := effectiveFriction * math.Abs(deltaVn)
@@ -1215,9 +1435,8 @@ func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale
 	b.vx += deltaVn*nx + deltaVt*tx
 	b.vy += deltaVn*ny + deltaVt*ty
 	b.omega -= 2 * deltaVt / b.r
-	b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
+	b.omega = clampFloat(b.omega, -physics.maxSpin, physics.maxSpin)
 
-	preventVerticalLock(b, deltaVt*tx+b.omega)
 	return deltaVt, true
 }
 
@@ -1286,13 +1505,13 @@ func resolveSelectedCollisionDebug(
 }
 
 // ---- Build bricks from level layout (with auto-scaling) ----
-func buildBricksFromLevel(lvl levelData) {
+func buildBricksFromLevel(lvl levelData, levelIndex int) {
 	bricks = nil
 	brickGrid = make(map[int][]int)
 	remainingBreakableBricks = 0
 	lastBrickSoundPlayed = false
 	if len(lvl.layout) == 0 {
-		initBricksDefault()
+		initBricksDefault(levelIndex)
 		return
 	}
 
@@ -1305,7 +1524,7 @@ func buildBricksFromLevel(lvl levelData) {
 		}
 	}
 	if rows == 0 || cols == 0 {
-		initBricksDefault()
+		initBricksDefault(levelIndex)
 		return
 	}
 
@@ -1359,13 +1578,14 @@ func buildBricksFromLevel(lvl levelData) {
 				continue
 			}
 			br := brick{
-				x:     gridOffsetLeft + float64(col)*gridCellWidth,
-				y:     gridOffsetTop + float64(row)*gridCellHeight,
-				w:     scaledWidth,
-				h:     scaledHeight,
-				row:   row,
-				col:   col,
-				alive: true,
+				x:           gridOffsetLeft + float64(col)*gridCellWidth,
+				y:           gridOffsetTop + float64(row)*gridCellHeight,
+				w:           scaledWidth,
+				h:           scaledHeight,
+				row:         row,
+				col:         col,
+				tiltRadians: brickMicroTiltRadians(levelIndex, row, col),
+				alive:       true,
 			}
 			br.unbreakable = ch == 'U'
 			br.magic = ch == 'M'
@@ -1378,7 +1598,7 @@ func buildBricksFromLevel(lvl levelData) {
 }
 
 // ---- Fallback default bricks (also scaled) ----
-func initBricksDefault() {
+func initBricksDefault(levelIndex int) {
 	bricks = nil
 	brickGrid = make(map[int][]int)
 	remainingBreakableBricks = 0
@@ -1425,8 +1645,9 @@ func initBricksDefault() {
 				x: gridOffsetLeft + float64(col)*gridCellWidth,
 				y: gridOffsetTop + float64(row)*gridCellHeight,
 				w: scaledWidth, h: scaledHeight,
-				row: row, col: col, alive: true,
-				unbreakable: unbreakable, magic: magic,
+				row: row, col: col,
+				tiltRadians: brickMicroTiltRadians(levelIndex, row, col),
+				alive:       true, unbreakable: unbreakable, magic: magic,
 			})
 			registerBrick(len(bricks) - 1)
 		}
@@ -1481,14 +1702,15 @@ func setPaddleSize(width, height float64) {
 // Gravity effects coexist. Black hole overrides both; otherwise reverse
 // gravity has priority over low gravity.
 func refreshCurrentGravity() {
+	gravity := activePhysicsSettings().gravity
 	if blackHoleActive {
 		currentGravity = 0
 	} else if reverseGravityActive {
-		currentGravity = -baseGravity
+		currentGravity = -gravity
 	} else if lowGravityActive {
-		currentGravity = baseGravity / 3
+		currentGravity = gravity / 3
 	} else {
-		currentGravity = baseGravity
+		currentGravity = gravity
 	}
 }
 
@@ -1947,7 +2169,7 @@ func startLevel(index int) {
 	blackHoleY = canvasHeight / 2
 	blackHoleDirection = 0
 	blackHoleSpeed = 0
-	currentGravity = baseGravity
+	refreshCurrentGravity()
 	influencerActive = false
 	influencerTimer = 0
 	zapperTargetIndex = -1
@@ -1962,7 +2184,7 @@ func startLevel(index int) {
 		showStatus("Zapper enabled by level", 2.0)
 	}
 
-	buildBricksFromLevel(levels[index])
+	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
 	saveCurrentLevel()
 	log("Level " + strconv.Itoa(index+1) + " started")
@@ -2115,8 +2337,9 @@ func playTilt() {
 	scheduleTone("sine", varyFreq(70, 0.04), varyFreq(115, 0.04), 0.18, 0.08, 0.02)
 }
 
-func applyTilt(b *Ball) {
-	sideMin, sideMax := tiltSideMin, tiltSideMax
+func applyTilt(b *Ball, improved bool) {
+	physics := physicsSettingsForMode(improved)
+	sideMin, sideMax := physics.tiltSideMin, physics.tiltSideMax
 	if sideMax < sideMin {
 		sideMin, sideMax = sideMax, sideMin
 	}
@@ -2130,7 +2353,7 @@ func applyTilt(b *Ball) {
 	}
 
 	b.vx = sideSpeed
-	b.vy = -tiltUpSpeed
+	b.vy = -physics.tiltUpSpeed
 	b.omega += (rand.Float64()*2 - 1) * 8
 	b.stuckTimer = 0
 
@@ -2138,7 +2361,8 @@ func applyTilt(b *Ball) {
 	playTilt()
 }
 
-func updateStuckDetector(b *Ball, dt float64) {
+func updateStuckDetector(b *Ball, dt float64, improved bool) {
+	physics := physicsSettingsForMode(improved)
 	if b.y+b.r > canvasHeight {
 		b.stuckTimer = 0
 		return
@@ -2146,10 +2370,10 @@ func updateStuckDetector(b *Ball, dt float64) {
 
 	speed := math.Sqrt(b.vx*b.vx + b.vy*b.vy)
 
-	if speed < stuckSpeedThreshold {
+	if speed < physics.stuckSpeedThreshold {
 		b.stuckTimer += dt
-		if b.stuckTimer >= stuckDuration {
-			applyTilt(b)
+		if b.stuckTimer >= physics.stuckDuration {
+			applyTilt(b, improved)
 		}
 	} else {
 		b.stuckTimer = 0
@@ -2271,13 +2495,72 @@ func updateZapper(dt float64) {
 // normal, but group simultaneous overlaps so adjacent bricks do not bounce the
 // ball multiple times in one substep.
 type improvedBrickContact struct {
-	index       int
-	nx, ny      float64
-	penetration float64
-	impact      float64
+	index          int
+	nx, ny         float64
+	axisNX, axisNY float64
+	penetration    float64
+	impact         float64
+	swept          bool
+	time           float64
 }
 
-func findImprovedBrickContacts(b *Ball) []improvedBrickContact {
+func sweptPointAABB(
+	previousX, previousY, currentX, currentY,
+	minX, minY, maxX, maxY float64,
+) (bool, float64, float64, float64) {
+	dx := currentX - previousX
+	dy := currentY - previousY
+
+	axisTimes := func(position, delta, minimum, maximum float64) (float64, float64) {
+		if delta > 0 {
+			return (minimum - position) / delta, (maximum - position) / delta
+		}
+		if delta < 0 {
+			return (maximum - position) / delta, (minimum - position) / delta
+		}
+		if position < minimum || position > maximum {
+			return math.Inf(1), math.Inf(-1)
+		}
+		return math.Inf(-1), math.Inf(1)
+	}
+
+	xEntry, xExit := axisTimes(previousX, dx, minX, maxX)
+	yEntry, yExit := axisTimes(previousY, dy, minY, maxY)
+	entry := math.Max(xEntry, yEntry)
+	exit := math.Min(xExit, yExit)
+	if entry > exit || exit < 0 || entry < 0 || entry > 1 {
+		return false, 0, 0, 0
+	}
+
+	nx, ny := 0.0, 0.0
+	if math.Abs(xEntry-yEntry) <= 0.000001 {
+		if math.Abs(dy) >= math.Abs(dx) {
+			ny = -sign(dy)
+		} else {
+			nx = -sign(dx)
+		}
+	} else if xEntry > yEntry {
+		nx = -sign(dx)
+	} else {
+		ny = -sign(dy)
+	}
+	return true, nx, ny, entry
+}
+
+func penetrationForBrickNormal(b *Ball, br *brick, nx, ny float64) float64 {
+	switch {
+	case nx < 0:
+		return math.Max(0, b.x-(br.x-b.r))
+	case nx > 0:
+		return math.Max(0, br.x+br.w+b.r-b.x)
+	case ny < 0:
+		return math.Max(0, b.y-(br.y-b.r))
+	default:
+		return math.Max(0, br.y+br.h+b.r-b.y)
+	}
+}
+
+func findImprovedBrickContacts(b *Ball, previousX, previousY float64) []improvedBrickContact {
 	contacts := make([]improvedBrickContact, 0, 4)
 	for _, i := range candidateBrickIndices(b) {
 		br := &bricks[i]
@@ -2292,34 +2575,57 @@ func findImprovedBrickContacts(b *Ball) []improvedBrickContact {
 		topPenetration := b.y + b.r - br.y
 		bottomPenetration := br.y + br.h - (b.y - b.r)
 
-		nx, ny := -1.0, 0.0
+		axisNX, axisNY := -1.0, 0.0
 		penetration := leftPenetration
 		if rightPenetration < penetration {
-			nx, ny = 1, 0
+			axisNX, axisNY = 1, 0
 			penetration = rightPenetration
 		}
 		if topPenetration < penetration {
-			nx, ny = 0, -1
+			axisNX, axisNY = 0, -1
 			penetration = topPenetration
 		}
 		if bottomPenetration < penetration {
-			nx, ny = 0, 1
+			axisNX, axisNY = 0, 1
 			penetration = bottomPenetration
+		}
+
+		swept, sweptNX, sweptNY, hitTime := sweptPointAABB(
+			previousX, previousY, b.x, b.y,
+			br.x-b.r, br.y-b.r, br.x+br.w+b.r, br.y+br.h+b.r,
+		)
+		if swept {
+			axisNX, axisNY = sweptNX, sweptNY
+			penetration = penetrationForBrickNormal(b, br, axisNX, axisNY)
+		}
+
+		// The broad-phase geometry remains the existing axis-aligned brick, but
+		// the actual collision response follows the brick's tiny visual angle.
+		// Correct penetration by the normal's axis component so separation still
+		// fully clears the original brick boundary.
+		nx, ny := rotateVector(axisNX, axisNY, br.tiltRadians)
+		axisComponent := math.Abs(nx*axisNX + ny*axisNY)
+		if axisComponent > 0.000001 {
+			penetration /= axisComponent
 		}
 
 		contacts = append(contacts, improvedBrickContact{
 			index:       i,
 			nx:          nx,
 			ny:          ny,
+			axisNX:      axisNX,
+			axisNY:      axisNY,
 			penetration: math.Max(0, penetration),
 			impact:      math.Max(0, -(b.vx*nx + b.vy*ny)),
+			swept:       swept,
+			time:        hitTime,
 		})
 	}
 	return contacts
 }
 
-func handleImprovedBrickCollisions(b *Ball, isPrimary bool) {
-	contacts := findImprovedBrickContacts(b)
+func handleImprovedBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64) {
+	contacts := findImprovedBrickContacts(b, previousX, previousY)
 	if len(contacts) == 0 {
 		return
 	}
@@ -2337,19 +2643,50 @@ func handleImprovedBrickCollisions(b *Ball, isPrimary bool) {
 		return
 	}
 
-	// Prefer the contact the ball is moving into most strongly. Penetration is
-	// a stable tie-breaker. This produces one axis response for the whole group.
-	best := contacts[0]
-	for _, contact := range contacts[1:] {
-		if contact.impact > best.impact+0.001 ||
-			(math.Abs(contact.impact-best.impact) <= 0.001 && contact.penetration > best.penetration) {
-			best = contact
+	// Swept entry normals win over overlap-only normals. This prevents a ball
+	// approaching a flat row from above or below from mistaking the internal
+	// seam between two adjacent bricks for alternating left/right walls.
+	bestIndex := -1
+	for i, contact := range contacts {
+		if !contact.swept {
+			continue
+		}
+		if bestIndex < 0 || contact.time < contacts[bestIndex].time-0.000001 ||
+			(math.Abs(contact.time-contacts[bestIndex].time) <= 0.000001 && contact.impact > contacts[bestIndex].impact) {
+			bestIndex = i
 		}
 	}
 
+	if bestIndex < 0 {
+		hasLeft, hasRight, hasVertical := false, false, false
+		for _, contact := range contacts {
+			hasLeft = hasLeft || contact.axisNX < 0
+			hasRight = hasRight || contact.axisNX > 0
+			hasVertical = hasVertical || contact.axisNY != 0
+		}
+		ignoreInternalHorizontalSeam := hasLeft && hasRight && hasVertical
+		for i, contact := range contacts {
+			if ignoreInternalHorizontalSeam && contact.axisNX != 0 {
+				continue
+			}
+			if bestIndex < 0 || contact.impact > contacts[bestIndex].impact+0.001 ||
+				(math.Abs(contact.impact-contacts[bestIndex].impact) <= 0.001 && contact.penetration > contacts[bestIndex].penetration) {
+				bestIndex = i
+			}
+		}
+	}
+	if bestIndex < 0 {
+		bestIndex = 0
+	}
+	best := contacts[bestIndex]
+
 	b.x += best.nx * (best.penetration + improvedCollisionSlop)
 	b.y += best.ny * (best.penetration + improvedCollisionSlop)
-	resolveSelectedCollisionDebug(b, best.nx, best.ny, 0, 0, true, improvedBrickFrictionScale, "BRICK", isPrimary)
+	frictionScale := improvedBrickFrictionScale
+	if bricks[best.index].unbreakable {
+		frictionScale = improvedUnbreakableFrictionScale
+	}
+	resolveSelectedCollisionDebug(b, best.nx, best.ny, 0, 0, true, frictionScale, "BRICK", isPrimary)
 
 	hitUnbreakable := false
 	destroyedNormal := false
@@ -2386,19 +2723,20 @@ func handleImprovedBrickCollisions(b *Ball, isPrimary bool) {
 	if hitUnbreakable {
 		playImpactSound(b, best.impact, playUnbreakable)
 	}
-	if destroyedNormal && brickBoost != 0 {
-		b.vy -= brickBoost
-		if math.Abs(b.vy) > maxSpeed {
-			b.vy = math.Copysign(maxSpeed, b.vy)
+	if destroyedNormal && improvedPhysicsSettings.brickBoost != 0 {
+		b.vy -= improvedPhysicsSettings.brickBoost
+		if math.Abs(b.vy) > improvedPhysicsSettings.maxSpeed {
+			b.vy = math.Copysign(improvedPhysicsSettings.maxSpeed, b.vy)
 		}
-		if math.Abs(b.vx) > maxSpeed {
-			b.vx = math.Copysign(maxSpeed, b.vx)
+		if math.Abs(b.vx) > improvedPhysicsSettings.maxSpeed {
+			b.vx = math.Copysign(improvedPhysicsSettings.maxSpeed, b.vx)
 		}
 	}
 }
 
 // ---- Update a single ball ----
 func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
+	physics := physicsSettingsForMode(improved)
 	if b.soundCooldown > 0 {
 		b.soundCooldown = math.Max(0, b.soundCooldown-dt)
 	}
@@ -2427,7 +2765,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 		magnusAx := -b.vy * b.omega * improvedMagnusCoefficient
 		magnusAy := b.vx * b.omega * improvedMagnusCoefficient
 		magnusMagnitude := math.Hypot(magnusAx, magnusAy)
-		maxMagnusAcceleration := math.Max(100.0, maxSpeed*improvedMagnusAccelerationScale)
+		maxMagnusAcceleration := math.Max(100.0, physics.maxSpeed*improvedMagnusAccelerationScale)
 		if magnusMagnitude > maxMagnusAcceleration {
 			scale := maxMagnusAcceleration / magnusMagnitude
 			magnusAx *= scale
@@ -2445,22 +2783,23 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 		b.omega *= spinDamping
 	}
 
+	previousX, previousY := b.x, b.y
 	b.x += b.vx * dt
 	b.y += b.vy * dt
 	b.angle += b.omega * dt
 
-	if improved && math.Abs(b.vx) >= 60 {
-		b.stuckTimer = 0
-	}
-
 	// Walls
+	wallFrictionScale := 1.0
+	if improved {
+		wallFrictionScale = improvedWallFrictionScale
+	}
 	if b.x-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vx)
 		b.x = b.r
 		if improved {
 			b.x += improvedCollisionSlop
 		}
-		resolveSelectedCollisionDebug(b, 1, 0, 0, 0, improved, improvedWallFrictionScale, "WALL LEFT", isPrimary)
+		resolveSelectedCollisionDebug(b, 1, 0, 0, 0, improved, wallFrictionScale, "WALL LEFT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.x+b.r > canvasWidth {
@@ -2469,7 +2808,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 		if improved {
 			b.x -= improvedCollisionSlop
 		}
-		resolveSelectedCollisionDebug(b, -1, 0, 0, 0, improved, improvedWallFrictionScale, "WALL RIGHT", isPrimary)
+		resolveSelectedCollisionDebug(b, -1, 0, 0, 0, improved, wallFrictionScale, "WALL RIGHT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y-b.r < 0 {
@@ -2478,7 +2817,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 		if improved {
 			b.y += improvedCollisionSlop
 		}
-		resolveSelectedCollisionDebug(b, 0, 1, 0, 0, improved, improvedWallFrictionScale, "WALL TOP", isPrimary)
+		resolveSelectedCollisionDebug(b, 0, 1, 0, 0, improved, wallFrictionScale, "WALL TOP", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y+b.r > canvasHeight {
@@ -2516,9 +2855,9 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 		if improved {
 			// Retain incoming energy according to restitution, then add the
 			// paddle's configured boost.
-			speed = speed*restitution + paddleBoost
-			if speed > maxSpeed {
-				speed = maxSpeed
+			speed = speed*physics.restitution + physics.paddleBoost
+			if speed > physics.maxSpeed {
+				speed = physics.maxSpeed
 			}
 
 			incomingVx := b.vx
@@ -2534,7 +2873,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			relativeSlip := b.vx - b.omega*b.r - paddle.vx
 			normalDeltaSpeed := math.Abs(b.vy - incomingVy)
 			effectivePaddleFriction := math.Max(
-				frictionCoeff*improvedPaddleFrictionScale,
+				physics.frictionCoeff*improvedPaddleFrictionScale,
 				improvedMinimumPaddleGrip,
 			)
 			maxFrictionDelta := effectivePaddleFriction * normalDeltaSpeed
@@ -2563,8 +2902,8 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			noSpinPaddle.vx += noSpinDeltaVx
 			preventVerticalLock(&noSpinPaddle, preferredDirection)
 			noSpinSpeed := math.Hypot(noSpinPaddle.vx, noSpinPaddle.vy)
-			if noSpinSpeed > maxSpeed {
-				scale := maxSpeed / noSpinSpeed
+			if noSpinSpeed > physics.maxSpeed {
+				scale := physics.maxSpeed / noSpinSpeed
 				noSpinPaddle.vx *= scale
 				noSpinPaddle.vy *= scale
 			}
@@ -2572,12 +2911,12 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			preventVerticalLock(b, preferredDirection)
 
 			postCollisionSpeed := math.Hypot(b.vx, b.vy)
-			if postCollisionSpeed > maxSpeed {
-				scale := maxSpeed / postCollisionSpeed
+			if postCollisionSpeed > physics.maxSpeed {
+				scale := physics.maxSpeed / postCollisionSpeed
 				b.vx *= scale
 				b.vy *= scale
 			}
-			b.omega = clampFloat(b.omega, -maxSpin, maxSpin)
+			b.omega = clampFloat(b.omega, -physics.maxSpin, physics.maxSpin)
 			maybeShowHighSpin(spinBeforePaddle, b.omega)
 			if isPrimary {
 				recordLastPaddleSpinDebug(true, spinBeforePaddle, b.omega)
@@ -2596,15 +2935,15 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			playImpactSound(b, math.Abs(incomingVy), playPaddleHit)
 		} else {
 			// Original paddle response, deliberately preserved unchanged.
-			speed += paddleBoost
-			if speed > maxSpeed {
-				speed = maxSpeed
+			speed += physics.paddleBoost
+			if speed > physics.maxSpeed {
+				speed = physics.maxSpeed
 			}
 			b.vx = speed * math.Sin(angle)
 			b.vy = -speed * math.Cos(angle)
 			b.omega += paddle.vx * 0.1 * (hitPos - 0.5)
-			if math.Abs(b.omega) > maxSpin {
-				b.omega = math.Copysign(maxSpin, b.omega)
+			if math.Abs(b.omega) > physics.maxSpin {
+				b.omega = math.Copysign(physics.maxSpin, b.omega)
 			}
 			maybeShowHighSpin(spinBeforePaddle, b.omega)
 			if isPrimary {
@@ -2626,7 +2965,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 	}
 
 	if improved {
-		handleImprovedBrickCollisions(b, isPrimary)
+		handleImprovedBrickCollisions(b, isPrimary, previousX, previousY)
 	} else {
 		// Original brick response, deliberately preserved unchanged.
 		for _, i := range candidateBrickIndices(b) {
@@ -2680,7 +3019,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 				}
 
 				impactSpeed := math.Max(0, -(b.vx*nx + b.vy*ny))
-				resolveSelectedCollisionDebug(b, nx, ny, 0, 0, false, improvedBrickFrictionScale, "BRICK", isPrimary)
+				resolveSelectedCollisionDebug(b, nx, ny, 0, 0, false, 1.0, "BRICK", isPrimary)
 
 				if brickPtr.unbreakable {
 					playImpactSound(b, impactSpeed, playUnbreakable)
@@ -2699,13 +3038,13 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 					continue
 				}
 
-				if brickBoost != 0 {
-					b.vy -= brickBoost
-					if math.Abs(b.vy) > maxSpeed {
-						b.vy = math.Copysign(maxSpeed, b.vy)
+				if physics.brickBoost != 0 {
+					b.vy -= physics.brickBoost
+					if math.Abs(b.vy) > physics.maxSpeed {
+						b.vy = math.Copysign(physics.maxSpeed, b.vy)
 					}
-					if math.Abs(b.vx) > maxSpeed {
-						b.vx = math.Copysign(maxSpeed, b.vx)
+					if math.Abs(b.vx) > physics.maxSpeed {
+						b.vx = math.Copysign(physics.maxSpeed, b.vx)
 					}
 				}
 				if destroyBrick(brickPtr) {
@@ -2717,7 +3056,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			}
 		}
 	}
-	updateStuckDetector(b, dt)
+	updateStuckDetector(b, dt, improved)
 }
 
 // Improved mode subdivides fast movement so a ball cannot skip through thin
@@ -3483,10 +3822,20 @@ func drawBrickGroup(target js.Value, kind int) {
 		if !matches {
 			continue
 		}
+		target.Call("save")
 		target.Call("beginPath")
-		target.Call("roundRect", br.x, br.y, br.w, br.h, brickRadius)
+		if useImprovedPhysics && improvedDrawBrickTilt {
+			centerX := br.x + br.w/2
+			centerY := br.y + br.h/2
+			target.Call("translate", centerX, centerY)
+			target.Call("rotate", br.tiltRadians)
+			target.Call("roundRect", -br.w/2, -br.h/2, br.w, br.h, brickRadius)
+		} else {
+			target.Call("roundRect", br.x, br.y, br.w, br.h, brickRadius)
+		}
 		target.Call("fill")
 		target.Call("stroke")
+		target.Call("restore")
 	}
 	target.Call("setLineDash", []interface{}{})
 }
@@ -3578,7 +3927,76 @@ func drawZapperBolts() {
 	}
 }
 
+func physicsSettingValue(settings *physicsSettings, key string) float64 {
+	switch key {
+	case "gravity":
+		return settings.gravity
+	case "restitution":
+		return settings.restitution
+	case "frictionCoeff":
+		return settings.frictionCoeff
+	case "paddleBoost":
+		return settings.paddleBoost
+	case "brickBoost":
+		return settings.brickBoost
+	case "maxSpeed":
+		return settings.maxSpeed
+	case "maxSpin":
+		return settings.maxSpin
+	case "stuckSpeedThreshold":
+		return settings.stuckSpeedThreshold
+	case "stuckDuration":
+		return settings.stuckDuration
+	case "tiltUpSpeed":
+		return settings.tiltUpSpeed
+	case "tiltSideMin":
+		return settings.tiltSideMin
+	case "tiltSideMax":
+		return settings.tiltSideMax
+	}
+	return 0
+}
+
+func parsePhysicsConfigKey(key string) (mode, field string, ok bool) {
+	fields := []string{
+		"gravity", "restitution", "frictionCoeff", "paddleBoost", "brickBoost",
+		"maxSpeed", "maxSpin", "stuckSpeedThreshold", "stuckDuration",
+		"tiltUpSpeed", "tiltSideMin", "tiltSideMax",
+	}
+	for _, candidate := range fields {
+		if key == candidate {
+			return "active", candidate, true
+		}
+		suffix := strings.ToUpper(candidate[:1]) + candidate[1:]
+		if key == "original"+suffix {
+			return "original", candidate, true
+		}
+		if key == "improved"+suffix {
+			return "improved", candidate, true
+		}
+	}
+	return "", "", false
+}
+
 func configState(key string) (effective, defaultValue, kind string, ok bool) {
+	if mode, field, physicsKey := parsePhysicsConfigKey(key); physicsKey {
+		settings := activePhysicsSettings()
+		defaults := originalPhysicsDefaults()
+		if useImprovedPhysics {
+			defaults = improvedPhysicsDefaults()
+		}
+		switch mode {
+		case "original":
+			settings = &originalPhysicsSettings
+			defaults = originalPhysicsDefaults()
+		case "improved":
+			settings = &improvedPhysicsSettings
+			defaults = improvedPhysicsDefaults()
+		}
+		return formatConfigFloat(physicsSettingValue(settings, field)),
+			formatConfigFloat(physicsSettingValue(&defaults, field)), "float", true
+	}
+
 	switch key {
 	case "backgroundColor":
 		return palette[0], defaultPalette[0], "string", true
@@ -3606,30 +4024,6 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return unbreakableStrokeColor, defaultUnbreakableStrokeColor, "string", true
 	case "brickStrokeColor":
 		return brickStrokeColor, defaultBrickStrokeColor, "string", true
-	case "gravity":
-		return formatConfigFloat(baseGravity), formatConfigFloat(defaultGravity), "float", true
-	case "restitution":
-		return formatConfigFloat(restitution), formatConfigFloat(defaultRestitution), "float", true
-	case "frictionCoeff":
-		return formatConfigFloat(frictionCoeff), formatConfigFloat(defaultFrictionCoeff), "float", true
-	case "maxSpin":
-		return formatConfigFloat(maxSpin), formatConfigFloat(defaultMaxSpin), "float", true
-	case "paddleBoost":
-		return formatConfigFloat(paddleBoost), formatConfigFloat(defaultPaddleBoost), "float", true
-	case "brickBoost":
-		return formatConfigFloat(brickBoost), formatConfigFloat(defaultBrickBoost), "float", true
-	case "maxSpeed":
-		return formatConfigFloat(maxSpeed), formatConfigFloat(defaultMaxSpeed), "float", true
-	case "stuckSpeedThreshold":
-		return formatConfigFloat(stuckSpeedThreshold), formatConfigFloat(defaultStuckSpeedThreshold), "float", true
-	case "stuckDuration":
-		return formatConfigFloat(stuckDuration), formatConfigFloat(defaultStuckDuration), "float", true
-	case "tiltUpSpeed":
-		return formatConfigFloat(tiltUpSpeed), formatConfigFloat(defaultTiltUpSpeed), "float", true
-	case "tiltSideMin":
-		return formatConfigFloat(tiltSideMin), formatConfigFloat(defaultTiltSideMin), "float", true
-	case "tiltSideMax":
-		return formatConfigFloat(tiltSideMax), formatConfigFloat(defaultTiltSideMax), "float", true
 	case "powerUpDuration":
 		return formatConfigFloat(powerUpDuration), formatConfigFloat(defaultPowerUpDuration), "float", true
 	case "magnet":
@@ -4139,6 +4533,16 @@ func clampFloat(x, min, max float64) float64 {
 	return x
 }
 
+func clampBallToPhysicsSettings(b *Ball, settings *physicsSettings) {
+	speed := math.Hypot(b.vx, b.vy)
+	if speed > settings.maxSpeed && speed > 0 {
+		scale := settings.maxSpeed / speed
+		b.vx *= scale
+		b.vy *= scale
+	}
+	b.omega = clampFloat(b.omega, -settings.maxSpin, settings.maxSpin)
+}
+
 func verticalDragToHorizontalDelta(deltaY float64) float64 {
 	// Finger down moves paddle right; finger up moves paddle left.
 	rect := canvas.Call("getBoundingClientRect")
@@ -4238,10 +4642,17 @@ func setupInput() {
 		// Runtime A/B physics switch. Startup mode is controlled by defaultUseImprovedPhysics.
 		if (key == "f" || key == "F") && !e.Get("repeat").Bool() {
 			useImprovedPhysics = !useImprovedPhysics
+			settings := activePhysicsSettings()
+			clampBallToPhysicsSettings(&ball, settings)
+			if secondBallActive {
+				clampBallToPhysicsSettings(&secondBall, settings)
+			}
+			refreshCurrentGravity()
 			ball.stuckTimer = 0
 			clearLastPaddleSpinDebug()
 			clearLastCollisionDebug()
 			secondBall.stuckTimer = 0
+			bricksDirty = true
 			if useImprovedPhysics {
 				showStatus("Physics: improved", 2.0)
 			} else {
