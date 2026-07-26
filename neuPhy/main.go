@@ -14,7 +14,7 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260726-a2476d8e31"
+	buildID = "20260727-c2029813c0"
 
 	defaultCanvasWidth        = 1800.0
 	defaultCanvasHeight       = 900.0
@@ -82,10 +82,10 @@ const (
 	improvedMagnusAccelerationScale  = 0.30
 	improvedSpinDrag                 = 0.10
 	improvedAirDrag                  = 0.010
-	improvedWallFrictionScale        = 0.60
-	improvedBrickFrictionScale       = 1.00
-	improvedUnbreakableFrictionScale = 0.35
-	improvedPaddleFrictionScale      = 1.35
+	improvedWallFrictionScale        = 0.60 //0.60
+	improvedBrickFrictionScale       = 1.00 //1.00
+	improvedUnbreakableFrictionScale = 0.95 //0.35
+	improvedPaddleFrictionScale      = 2.35 //1.35
 	improvedPaddleSpinTransfer       = 2.25
 	improvedCollisionSpinCoupling    = 2.50
 	improvedMinimumCollisionGrip     = 0.08
@@ -95,11 +95,28 @@ const (
 	// Every brick receives a stable, tiny rotation in Improved mode. The same
 	// angle is used for drawing and collision normals, breaking exact vertical
 	// loops without changing the brick grid or consuming gameplay randomness.
-	improvedBrickTiltMinDegrees = 0.002
-	improvedBrickTiltMaxDegrees = 90.0 // 1.0
+	improvedBrickTiltMinDegrees = 0.2
+	improvedBrickTiltMaxDegrees = 2.0 // 1.0
 	improvedDrawBrickTilt       = true
 
-	enableHighSpinMessage   = false
+	// Improved-only detector for fast, nearly axis-aligned loops involving
+	// unbreakable bricks. It preserves total speed and holds one escape direction
+	// briefly so repeated collisions cannot alternate the correction sign.
+	improvedOrbitMinimumSpeed         = 300.0
+	improvedOrbitMinimumHitSpeed      = 80.0
+	improvedOrbitMinorSpeedRatio      = 0.08
+	improvedOrbitMinorSpeedFloor      = 45.0
+	improvedOrbitRequiredHits         = 3
+	improvedOrbitDetectionWindow      = 4.0
+	improvedOrbitMaximumMinorProgress = 40.0
+	improvedOrbitHitCooldown          = 0.08
+	improvedOrbitEscapeSpeed          = 110.0
+	improvedOrbitEscapeDuration       = 0.90
+	improvedOrbitMessageDuration      = 1.5
+
+	statusMessageLimit = 10
+
+	enableHighSpinMessage   = true
 	highSpinThreshold       = 100.0 // 100.0
 	highSpinMessageDuration = 1.5
 
@@ -350,6 +367,15 @@ type Ball struct {
 	omega, angle  float64
 	stuckTimer    float64
 	soundCooldown float64
+
+	orbitCandidateAxis   int
+	orbitCandidateHits   int
+	orbitCandidateTimer  float64
+	orbitAnchorMinor     float64
+	orbitHitCooldown     float64
+	orbitEscapeAxis      int
+	orbitEscapeDirection float64
+	orbitEscapeTimer     float64
 }
 
 type statusMessage struct {
@@ -557,6 +583,173 @@ func rotateVector(x, y, angle float64) (float64, float64) {
 	return x*cosAngle - y*sinAngle, x*sinAngle + y*cosAngle
 }
 
+const (
+	orbitAxisNone = iota
+	orbitAxisVertical
+	orbitAxisHorizontal
+)
+
+func resetFastOrbitCandidate(b *Ball) {
+	b.orbitCandidateAxis = orbitAxisNone
+	b.orbitCandidateHits = 0
+	b.orbitCandidateTimer = 0
+	b.orbitAnchorMinor = 0
+}
+
+func resetFastOrbitState(b *Ball) {
+	resetFastOrbitCandidate(b)
+	b.orbitHitCooldown = 0
+	b.orbitEscapeAxis = orbitAxisNone
+	b.orbitEscapeDirection = 0
+	b.orbitEscapeTimer = 0
+}
+
+func fastOrbitAxis(b *Ball) int {
+	speed := math.Hypot(b.vx, b.vy)
+	if speed < improvedOrbitMinimumSpeed {
+		return orbitAxisNone
+	}
+
+	minorLimit := math.Max(improvedOrbitMinorSpeedFloor, speed*improvedOrbitMinorSpeedRatio)
+	nearVertical := math.Abs(b.vx) <= minorLimit
+	nearHorizontal := math.Abs(b.vy) <= minorLimit
+	if nearVertical && !nearHorizontal {
+		return orbitAxisVertical
+	}
+	if nearHorizontal && !nearVertical {
+		return orbitAxisHorizontal
+	}
+	return orbitAxisNone
+}
+
+func orbitMinorPosition(b *Ball, axis int) float64 {
+	if axis == orbitAxisVertical {
+		return b.x
+	}
+	return b.y
+}
+
+func chooseOrbitEscapeDirection(b *Ball, axis int) float64 {
+	minorVelocity := b.vy
+	if axis == orbitAxisVertical {
+		minorVelocity = b.vx
+	}
+	if math.Abs(minorVelocity) >= 1 {
+		return sign(minorVelocity)
+	}
+	if math.Abs(b.omega) >= 0.01 {
+		return sign(b.omega)
+	}
+	if axis == orbitAxisVertical {
+		direction := sign(canvasWidth/2 - b.x)
+		if direction != 0 {
+			return direction
+		}
+	} else {
+		direction := sign(canvasHeight/2 - b.y)
+		if direction != 0 {
+			return direction
+		}
+	}
+	return 1
+}
+
+func enforceFastOrbitEscape(b *Ball) {
+	if b.orbitEscapeTimer <= 0 || b.orbitEscapeAxis == orbitAxisNone {
+		return
+	}
+
+	speed := math.Hypot(b.vx, b.vy)
+	if speed <= 0 {
+		return
+	}
+	minorSpeed := math.Min(improvedOrbitEscapeSpeed, speed*0.35)
+	majorSpeed := math.Sqrt(math.Max(0, speed*speed-minorSpeed*minorSpeed))
+
+	if b.orbitEscapeAxis == orbitAxisVertical {
+		majorDirection := sign(b.vy)
+		if majorDirection == 0 {
+			majorDirection = -1
+		}
+		b.vx = b.orbitEscapeDirection * minorSpeed
+		b.vy = majorDirection * majorSpeed
+		return
+	}
+
+	majorDirection := sign(b.vx)
+	if majorDirection == 0 {
+		majorDirection = 1
+	}
+	b.vx = majorDirection * majorSpeed
+	b.vy = b.orbitEscapeDirection * minorSpeed
+}
+
+func activateFastOrbitEscape(b *Ball, axis int) {
+	b.orbitEscapeAxis = axis
+	b.orbitEscapeDirection = chooseOrbitEscapeDirection(b, axis)
+	b.orbitEscapeTimer = improvedOrbitEscapeDuration
+	resetFastOrbitCandidate(b)
+	enforceFastOrbitEscape(b)
+	showStatusUnique("Orbital tilt!", improvedOrbitMessageDuration)
+}
+
+func recordUnbreakableOrbitHit(b *Ball) {
+	if !useImprovedPhysics || b.orbitHitCooldown > 0 || b.orbitEscapeTimer > 0 {
+		return
+	}
+
+	axis := fastOrbitAxis(b)
+	if axis == orbitAxisNone {
+		resetFastOrbitCandidate(b)
+		return
+	}
+
+	minorPosition := orbitMinorPosition(b, axis)
+	newCandidate := b.orbitCandidateAxis != axis ||
+		b.orbitCandidateHits == 0 ||
+		b.orbitCandidateTimer > improvedOrbitDetectionWindow ||
+		math.Abs(minorPosition-b.orbitAnchorMinor) > improvedOrbitMaximumMinorProgress
+
+	if newCandidate {
+		b.orbitCandidateAxis = axis
+		b.orbitCandidateHits = 1
+		b.orbitCandidateTimer = 0
+		b.orbitAnchorMinor = minorPosition
+	} else {
+		b.orbitCandidateHits++
+	}
+	b.orbitHitCooldown = improvedOrbitHitCooldown
+
+	if b.orbitCandidateHits >= improvedOrbitRequiredHits {
+		activateFastOrbitEscape(b, axis)
+	}
+}
+
+func updateFastOrbitDetector(b *Ball, dt float64, improved bool) {
+	if !improved {
+		resetFastOrbitState(b)
+		return
+	}
+
+	if b.orbitHitCooldown > 0 {
+		b.orbitHitCooldown = math.Max(0, b.orbitHitCooldown-dt)
+	}
+	if b.orbitCandidateHits > 0 {
+		b.orbitCandidateTimer += dt
+		if b.orbitCandidateTimer > improvedOrbitDetectionWindow {
+			resetFastOrbitCandidate(b)
+		}
+	}
+	if b.orbitEscapeTimer > 0 {
+		b.orbitEscapeTimer = math.Max(0, b.orbitEscapeTimer-dt)
+		enforceFastOrbitEscape(b)
+		if b.orbitEscapeTimer == 0 {
+			b.orbitEscapeAxis = orbitAxisNone
+			b.orbitEscapeDirection = 0
+		}
+	}
+}
+
 // preventVerticalLock is used only by improved physics. It preserves total
 // speed while giving nearly vertical trajectories a small deterministic
 // horizontal component.
@@ -679,9 +872,19 @@ func moveToward(current, target, maxDelta float64) float64 {
 
 func showStatus(text string, duration float64) {
 	statusMessages = append(statusMessages, statusMessage{text: text, timer: duration})
-	if len(statusMessages) > 3 {
-		statusMessages = statusMessages[len(statusMessages)-3:]
+	if len(statusMessages) > statusMessageLimit {
+		statusMessages = statusMessages[len(statusMessages)-statusMessageLimit:]
 	}
+}
+
+func showStatusUnique(text string, duration float64) {
+	for i := range statusMessages {
+		if statusMessages[i].text == text {
+			statusMessages[i].timer = duration
+			return
+		}
+	}
+	showStatus(text, duration)
 }
 
 // Keep a single High spin! entry in the existing top-left status stack.
@@ -691,14 +894,7 @@ func showHighSpinStatus() {
 		return
 	}
 
-	for i := range statusMessages {
-		if statusMessages[i].text == "High spin!" {
-			statusMessages[i].timer = highSpinMessageDuration
-			return
-		}
-	}
-
-	showStatus("High spin!", highSpinMessageDuration)
+	showStatusUnique("High spin!", highSpinMessageDuration)
 }
 
 func maybeShowHighSpin(before, after float64) {
@@ -1818,6 +2014,7 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 			secondBall.angle = ball.angle
 			secondBall.stuckTimer = 0
 			secondBall.r = ball.r
+			resetFastOrbitState(&secondBall)
 			showStatus("Dual Balls!", 2.0)
 			playPowerup()
 		} else {
@@ -2143,6 +2340,8 @@ func startLevel(index int) {
 	ball.stuckTimer = 0
 	ball.soundCooldown = 0
 	ball.r = ballRadius
+	resetFastOrbitState(&ball)
+	resetFastOrbitState(&secondBall)
 	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.y = canvasHeight - 40
@@ -2682,11 +2881,15 @@ func handleImprovedBrickCollisions(b *Ball, isPrimary bool, previousX, previousY
 
 	b.x += best.nx * (best.penetration + improvedCollisionSlop)
 	b.y += best.ny * (best.penetration + improvedCollisionSlop)
+	bestWasUnbreakable := bricks[best.index].unbreakable
 	frictionScale := improvedBrickFrictionScale
-	if bricks[best.index].unbreakable {
+	if bestWasUnbreakable {
 		frictionScale = improvedUnbreakableFrictionScale
 	}
 	resolveSelectedCollisionDebug(b, best.nx, best.ny, 0, 0, true, frictionScale, "BRICK", isPrimary)
+	if bestWasUnbreakable && best.impact >= improvedOrbitMinimumHitSpeed {
+		recordUnbreakableOrbitHit(b)
+	}
 
 	hitUnbreakable := false
 	destroyedNormal := false
@@ -2835,6 +3038,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 		if improved {
 			b.y -= improvedCollisionSlop
 		}
+		resetFastOrbitState(b)
 
 		spinBeforePaddle := b.omega
 		incomingPaddleAngle := velocityAngleDegrees(b.vx, b.vy)
@@ -3056,6 +3260,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			}
 		}
 	}
+	updateFastOrbitDetector(b, dt, improved)
 	updateStuckDetector(b, dt, improved)
 }
 
@@ -3772,6 +3977,8 @@ func resetBalls() {
 	ball.soundCooldown = 0
 	secondBall.stuckTimer = 0
 	secondBall.soundCooldown = 0
+	resetFastOrbitState(&ball)
+	resetFastOrbitState(&secondBall)
 	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
@@ -4649,6 +4856,8 @@ func setupInput() {
 			}
 			refreshCurrentGravity()
 			ball.stuckTimer = 0
+			resetFastOrbitState(&ball)
+			resetFastOrbitState(&secondBall)
 			clearLastPaddleSpinDebug()
 			clearLastCollisionDebug()
 			secondBall.stuckTimer = 0
@@ -4768,6 +4977,7 @@ func setupInput() {
 					secondBall.x = ball.x - secondBall.r*2
 				}
 				secondBall.stuckTimer = 0
+				resetFastOrbitState(&secondBall)
 			}
 			return nil
 		}
