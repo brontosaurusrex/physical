@@ -18,7 +18,7 @@ tiltSideMax=420
 //enableZapper=true
 //powerUpDuration=25
 
-gravity=100
+gravity=200
 brickBoost=6
 maxSpeed=900
 frictionCoeff=0.25

@@ -14,7 +14,7 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260727-c2029813c0"
+	buildID = "20260727-d4fe6e7bea"
 
 	defaultCanvasWidth        = 1800.0
 	defaultCanvasHeight       = 900.0
@@ -65,12 +65,12 @@ const (
 
 	// Improved physics defaults. These can be tuned without touching Original.
 	improvedDefaultGravity             = 300.0
-	improvedDefaultRestitution         = 0.90
-	improvedDefaultFrictionCoeff       = 0.14 // 0.10
-	improvedDefaultPaddleBoost         = 900.0
-	improvedDefaultBrickBoost          = 100.0
-	improvedDefaultMaxSpeed            = 1250.0 // 1170.0
-	improvedDefaultMaxSpin             = 1530.0
+	improvedDefaultRestitution         = 0.86   // was 0.90
+	improvedDefaultFrictionCoeff       = 0.16   // was 0.10
+	improvedDefaultPaddleBoost         = 800.0  // was 900.0
+	improvedDefaultBrickBoost          = 0.0    // was 100.0
+	improvedDefaultMaxSpeed            = 1050.0 // was 1170.0
+	improvedDefaultMaxSpin             = 240.0  // was 1530.0
 	improvedDefaultStuckSpeedThreshold = 85.0
 	improvedDefaultStuckDuration       = 3.0
 	improvedDefaultTiltUpSpeed         = 520.0
@@ -78,19 +78,20 @@ const (
 	improvedDefaultTiltSideMax         = 340.0
 
 	// Improved-only contact/flight tuning.
-	improvedMagnusCoefficient        = 0.0030 //0.0015
-	improvedMagnusAccelerationScale  = 0.25
-	improvedSpinDrag                 = 0.04 // 0.10
-	improvedAirDrag                  = 0.010
-	improvedWallFrictionScale        = 0.35 //0.60
-	improvedBrickFrictionScale       = 1.00 //1.00
-	improvedUnbreakableFrictionScale = 0.80 //0.35
-	improvedPaddleFrictionScale      = 2.60 //2.35
-	improvedPaddleSpinTransfer       = 2.80 //2.25
-	improvedCollisionSpinCoupling    = 2.00 //2.50
-	improvedMinimumCollisionGrip     = 0.08
-	improvedMinimumPaddleGrip        = 0.45 // 0.25
+	improvedMagnusCoefficient        = 0.00035 // was 0.015
+	improvedMagnusAccelerationScale  = 0.12    // was 0.30
+	improvedSpinDrag                 = 0.08    // was 0.10
+	improvedAirDrag                  = 0.035   // was 0.010
+	improvedWallFrictionScale        = 0.25    // was 0.60
+	improvedBrickFrictionScale       = 1.25    // was 1.00
+	improvedUnbreakableFrictionScale = 1.35    // was 0.95
+	improvedPaddleFrictionScale      = 3.00    // was 2.35
+	improvedPaddleSpinTransfer       = 1.80    // was 2.25
+	improvedCollisionSpinCoupling    = 1.40    // was 2.50
+	improvedMinimumCollisionGrip     = 0.04    // was 0.08
+	improvedMinimumPaddleGrip        = 0.35    // was 0.25
 	improvedCollisionSlop            = 0.05
+	improvedPaddleMaxAngleDegrees    = 55.0 // was 80.0
 
 	// Every brick receives a stable, tiny rotation in Improved mode. The same
 	// angle is used for drawing and collision normals, breaking exact vertical
@@ -3050,7 +3051,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 			hitPos = 1
 		}
 
-		angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
+		angle := (hitPos - 0.5) * 2.0 * (improvedPaddleMaxAngleDegrees * math.Pi / 180.0)
 		speed := math.Hypot(b.vx, b.vy)
 		if speed < 100 {
 			speed = 100
