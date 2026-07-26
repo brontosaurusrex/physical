@@ -70,7 +70,7 @@ const (
 	improvedDefaultPaddleBoost         = 900.0
 	improvedDefaultBrickBoost          = 100.0
 	improvedDefaultMaxSpeed            = 1170.0
-	improvedDefaultMaxSpin             = 530.0
+	improvedDefaultMaxSpin             = 1530.0
 	improvedDefaultStuckSpeedThreshold = 85.0
 	improvedDefaultStuckDuration       = 3.0
 	improvedDefaultTiltUpSpeed         = 520.0
@@ -118,7 +118,7 @@ const (
 
 	enableHighSpinMessage   = true
 	highSpinThreshold       = 100.0 // 100.0
-	highSpinMessageDuration = 1.5
+	highSpinMessageDuration = 3.5
 
 	defaultPhoneTiltDeadZone  = 1.0
 	defaultPhoneTiltMaxAngle  = 10.0
