@@ -13,10 +13,10 @@ secondBallColor=#c7cbd1
 textColor=#e7e9ec
 secondBallSpinColor=#8d939b
 
-gravity=0.0
+gravity=12.0
 restitution=0.99
-frictionCoeff=0
-maxSpeed=800
+frictionCoeff=0.02
+maxSpeed=900
 paddleBoost=1800
 brickBoost=0
 
