@@ -1,0 +1,37 @@
+
+brickWidth=30
+brickHeight=30
+brickPadding=30
+ballRadius=10.0
+backgroundColor=#1f1a3a
+paddleColor=#4b3879
+brickColor=#4b3879
+brickStrokeColor=#ffcc00
+ballColor=#00ffff
+textColor=#00ffff
+spinColor=#00ffff
+
+secondBallColor=#00ffff
+secondBallSpinColor=#00ffff
+
+magicStrokeColor=#ffd700
+unbreakableColor=#ff3366
+unbreakableStrokeColor=#ff3366
+---
+U # U # M # M
+ U # U # M # M
+  U # U # M # M
+   U # U # M # M
+    U # U # M # M
+     U # U # M # M
+      U # U # M # M
+       U # U # M # M
+        U # U # M # M
+         U # U # M # M
+          U # U # M # M
+           U # U # M # M
+
+
+
+
+

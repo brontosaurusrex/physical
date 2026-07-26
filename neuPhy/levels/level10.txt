@@ -1,0 +1,43 @@
+brickWidth=40
+brickHeight=20
+brickPadding=12
+brickOffsetTop=55
+ballX=900
+ballY=720
+ballVx=240
+ballVy=-380
+ballRadius=16
+powerUpDuration=45
+magnetStrength=700
+magnetRange=740
+paddleBoost=450
+magnet=true
+enableReverseGravity=false
+enableMagnet=false
+---
+
+UU  UU  UUU   UUU  UU  UU
+U#######################U
+M#                     #M
+U#  #################  #U
+M#  #               #  #M
+U#  #  ###########  #  #U
+M#  #  #         #  #  #M
+U#  #  #  #####  #  #  #U
+M#  #  #  #MMM#  #  #  #M
+U#  #  #  #M M#  #  #  #U
+M#  #  #  #MMM#  #  #  #M
+U#  #  #  #####  #  #  #U
+M#  #  #         #  #  #M
+U#  #  ###########  #  #U
+M#  #               #  #M
+U#  #################  #U
+M#                     #M
+U#######################U
+UMUUUUUUUUU   UUUUUUUUUMU
+
+
+
+
+
+
