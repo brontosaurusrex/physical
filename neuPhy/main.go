@@ -32,7 +32,7 @@ const (
 	defaultBrickOffsetTop     = -1.0
 	defaultPaddleBoost        = 700.0
 	defaultBrickBoost         = 100.0
-	defaultMaxSpeed           = 1200.0 // was 1000 for original physics
+	defaultMaxSpeed           = 1100.0 // was 1000 for original physics
 	defaultMaxSpin            = 530.0
 	defaultUseImprovedPhysics = true
 
