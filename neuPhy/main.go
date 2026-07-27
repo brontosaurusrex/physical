@@ -83,14 +83,14 @@ const (
 	physicsMagnusAccelerationScale  = 0.25
 	physicsSpinDrag                 = 0.04 // 0.10
 	physicsAirDrag                  = 0.010
-	physicsWallFrictionScale        = 0.35 //0.60
-	physicsBrickFrictionScale       = 1.00 //1.00
-	physicsUnbreakableFrictionScale = 0.80 //0.35
-	physicsPaddleFrictionScale      = 2.60 //2.35
+	physicsWallFrictionScale        = 1.65 //0.35
+	physicsBrickFrictionScale       = 2.00 //1.00
+	physicsUnbreakableFrictionScale = 1.80 //0.35
+	physicsPaddleFrictionScale      = 3.20 //2.60
 	physicsPaddleSpinTransfer       = 2.80 //2.25
-	physicsCollisionSpinCoupling    = 2.00 //2.50
+	physicsCollisionSpinCoupling    = 2.00 //2.00
 	physicsMinimumCollisionGrip     = 0.08
-	physicsMinimumPaddleGrip        = 0.45 // 0.25
+	physicsMinimumPaddleGrip        = 0.55 // 0.45
 	physicsCollisionSlop            = 0.05
 
 	// Every brick receives a stable, tiny rotation. The same
@@ -4717,7 +4717,7 @@ func setupInput() {
 		}
 
 		// Page Up / Page Down navigate levels even while paused or waiting.
-		if key == "PageUp" && !e.Get("repeat").Bool() {
+		if key == "PageDown" && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex < limit {
 				jumpToLevel(currentLevelIndex + 1)
@@ -4728,7 +4728,7 @@ func setupInput() {
 			}
 			return nil
 		}
-		if key == "PageDown" && !e.Get("repeat").Bool() {
+		if key == "PageUp" && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex > 0 {
 				jumpToLevel(currentLevelIndex - 1)
