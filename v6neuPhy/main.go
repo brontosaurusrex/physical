@@ -14,105 +14,106 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260727-c2029813c0"
+	buildID = "20260727-3e7840cf3f"
 
-	defaultCanvasWidth        = 1800.0
-	defaultCanvasHeight       = 900.0
-	defaultPaddleWidth        = 220.0
-	defaultPaddleHeight       = 30.0
-	defaultBallRadius         = 8.0
-	defaultBrickRows          = 10
-	defaultBrickCols          = 18
-	defaultBrickWidth         = 60.0
-	defaultBrickHeight        = 20.0
-	defaultBrickPadding       = 20.0
-	defaultBrickOffsetTop     = -1.0
-	defaultUseImprovedPhysics = true
+	// Rendering follows requestAnimationFrame, but simulation always advances in
+	// fixed 1/240-second steps. At maxSpeed=1250 this is about 5.2 px per tick.
+	physicsStepHz             = 240.0 // 240.0
+	physicsStepSeconds        = 1.0 / physicsStepHz
+	physicsMaxCatchUpSteps    = 32
+	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
+	physicsWarningHoldSeconds = 3.0
+
+	defaultCanvasWidth    = 1800.0
+	defaultCanvasHeight   = 900.0
+	defaultPaddleWidth    = 220.0
+	defaultPaddleHeight   = 30.0
+	defaultBallRadius     = 8.0
+	defaultBrickRows      = 10
+	defaultBrickCols      = 18
+	defaultBrickWidth     = 60.0
+	defaultBrickHeight    = 20.0
+	defaultBrickPadding   = 20.0
+	defaultBrickOffsetTop = -1.0
 
 	// Keyboard and two-thumb controls accelerate from a precise low speed
 	// to a faster cross-screen speed, then brake quickly when released.
 	defaultDigitalPaddleMaxSpeed     = 2800.0
 	defaultDigitalPaddleAcceleration = 9000.0
 	defaultDigitalPaddleBraking      = 40000.0
-	defaultPaddleRadius              = 12.0
-	defaultBrickRadius               = 6.0
-	defaultUnbreakableChance         = 0.15
-	defaultMagicChance               = 0.3
-	defaultPowerUpDuration           = 10.0
-	defaultBlackHoleStrength         = 800.0
-	defaultBlackHoleRange            = 200.0
-	defaultMagnetStrength            = 600.0
-	defaultMagnetRange               = 300.0
-	defaultInfluencerMultiplier      = 5.0
-	defaultLives                     = 7
-	defaultZapperHitTime             = 0.1
-	defaultZapperRange               = 320.0
 
-	// Original physics defaults. These are intentionally independent from
-	// Improved mode so tuning one model cannot silently change the other.
-	originalDefaultGravity             = 300.0
-	originalDefaultRestitution         = 0.85
-	originalDefaultFrictionCoeff       = 0.10
-	originalDefaultPaddleBoost         = 700.0
-	originalDefaultBrickBoost          = 100.0
-	originalDefaultMaxSpeed            = 1000.0
-	originalDefaultMaxSpin             = 30.0
-	originalDefaultStuckSpeedThreshold = 85.0
-	originalDefaultStuckDuration       = 10.0
-	originalDefaultTiltUpSpeed         = 520.0
-	originalDefaultTiltSideMin         = 180.0
-	originalDefaultTiltSideMax         = 340.0
+	// Mouse input supplies only a target. The fixed-step simulation owns the
+	// actual movement, using a stopping-distance controller so the paddle is
+	// responsive, does not overshoot, and produces refresh-independent spin.
+	defaultMousePaddleMaxSpeed     = 6000.0
+	defaultMousePaddleAcceleration = 50000.0
+	defaultMousePaddleBraking      = 70000.0
+	defaultMousePaddleSnapDistance = 0.35
 
-	// Improved physics defaults. These can be tuned without touching Original.
-	improvedDefaultGravity             = 300.0
-	improvedDefaultRestitution         = 0.90
-	improvedDefaultFrictionCoeff       = 0.14 // 0.10
-	improvedDefaultPaddleBoost         = 900.0
-	improvedDefaultBrickBoost          = 100.0
-	improvedDefaultMaxSpeed            = 1250.0 // 1170.0
-	improvedDefaultMaxSpin             = 1530.0
-	improvedDefaultStuckSpeedThreshold = 85.0
-	improvedDefaultStuckDuration       = 3.0
-	improvedDefaultTiltUpSpeed         = 520.0
-	improvedDefaultTiltSideMin         = 180.0
-	improvedDefaultTiltSideMax         = 340.0
+	defaultPaddleRadius         = 12.0
+	defaultBrickRadius          = 6.0
+	defaultUnbreakableChance    = 0.15
+	defaultMagicChance          = 0.3
+	defaultPowerUpDuration      = 10.0
+	defaultBlackHoleStrength    = 800.0
+	defaultBlackHoleRange       = 200.0
+	defaultMagnetStrength       = 600.0
+	defaultMagnetRange          = 300.0
+	defaultInfluencerMultiplier = 5.0
+	defaultLives                = 7
+	defaultZapperHitTime        = 0.1
+	defaultZapperRange          = 320.0
 
-	// Improved-only contact/flight tuning.
-	improvedMagnusCoefficient        = 0.0030 //0.0015
-	improvedMagnusAccelerationScale  = 0.25
-	improvedSpinDrag                 = 0.04 // 0.10
-	improvedAirDrag                  = 0.010
-	improvedWallFrictionScale        = 0.35 //0.60
-	improvedBrickFrictionScale       = 1.00 //1.00
-	improvedUnbreakableFrictionScale = 0.80 //0.35
-	improvedPaddleFrictionScale      = 2.60 //2.35
-	improvedPaddleSpinTransfer       = 2.80 //2.25
-	improvedCollisionSpinCoupling    = 2.00 //2.50
-	improvedMinimumCollisionGrip     = 0.08
-	improvedMinimumPaddleGrip        = 0.45 // 0.25
-	improvedCollisionSlop            = 0.05
+	// Physics defaults. These are the single runtime physics model.
+	defaultPhysicsGravity             = 300.0
+	defaultPhysicsRestitution         = 0.90
+	defaultPhysicsFrictionCoeff       = 0.14 // 0.10
+	defaultPhysicsPaddleBoost         = 900.0
+	defaultPhysicsBrickBoost          = 100.0
+	defaultPhysicsMaxSpeed            = 1000.0 // 1170.0
+	defaultPhysicsMaxSpin             = 1530.0
+	defaultPhysicsStuckSpeedThreshold = 85.0
+	defaultPhysicsStuckDuration       = 3.0
+	defaultPhysicsTiltUpSpeed         = 520.0
+	defaultPhysicsTiltSideMin         = 180.0
+	defaultPhysicsTiltSideMax         = 340.0
 
-	// Every brick receives a stable, tiny rotation in Improved mode. The same
+	// Contact and flight tuning.
+	physicsMagnusCoefficient        = 0.0030 //0.0015
+	physicsMagnusAccelerationScale  = 0.25
+	physicsSpinDrag                 = 0.04 // 0.10
+	physicsAirDrag                  = 0.010
+	physicsWallFrictionScale        = 1.65 //0.35
+	physicsBrickFrictionScale       = 2.00 //1.00
+	physicsUnbreakableFrictionScale = 1.80 //0.35
+	physicsPaddleFrictionScale      = 3.20 //2.60
+	physicsPaddleSpinTransfer       = 2.80 //2.25
+	physicsCollisionSpinCoupling    = 2.00 //2.00
+	physicsMinimumCollisionGrip     = 0.08
+	physicsMinimumPaddleGrip        = 0.55 // 0.45
+	physicsCollisionSlop            = 0.05
+
+	// Every brick receives a stable, tiny rotation. The same
 	// angle is used for drawing and collision normals, breaking exact vertical
 	// loops without changing the brick grid or consuming gameplay randomness.
-	improvedBrickTiltMinDegrees = 0.2
-	improvedBrickTiltMaxDegrees = 2.0 // 1.0
-	improvedDrawBrickTilt       = true
+	brickTiltMinDegrees = 0.2
+	brickTiltMaxDegrees = 2.0 // 1.0
+	drawBrickTilt       = true
 
-	// Improved-only detector for fast, nearly axis-aligned loops involving
+	// Detector for fast, nearly axis-aligned loops involving
 	// unbreakable bricks. It preserves total speed and holds one escape direction
 	// briefly so repeated collisions cannot alternate the correction sign.
-	improvedOrbitMinimumSpeed         = 300.0
-	improvedOrbitMinimumHitSpeed      = 80.0
-	improvedOrbitMinorSpeedRatio      = 0.08
-	improvedOrbitMinorSpeedFloor      = 45.0
-	improvedOrbitRequiredHits         = 3
-	improvedOrbitDetectionWindow      = 4.0
-	improvedOrbitMaximumMinorProgress = 40.0
-	improvedOrbitHitCooldown          = 0.08
-	improvedOrbitEscapeSpeed          = 110.0
-	improvedOrbitEscapeDuration       = 0.90
-	improvedOrbitMessageDuration      = 1.5
+	physicsOrbitMinimumSpeed         = 300.0
+	physicsOrbitMinimumHitSpeed      = 80.0
+	physicsOrbitMinorSpeedRatio      = 0.08
+	physicsOrbitMinorSpeedFloor      = 45.0
+	physicsOrbitRequiredHits         = 3
+	physicsOrbitDetectionWindow      = 4.0
+	physicsOrbitMaximumMinorProgress = 40.0
+	physicsOrbitHitCooldown          = 0.08
+	physicsOrbitEscapeSpeed          = 110.0
+	physicsOrbitEscapeDuration       = 0.90
+	physicsOrbitMessageDuration      = 1.5
 
 	statusMessageLimit = 10
 
@@ -144,8 +145,7 @@ const (
 	showBlackHole = false // Set true to draw the moving black hole.
 )
 
-// physicsSettings contains only values that belong to a physics model. The
-// Original and Improved instances are reset and overridden independently.
+// physicsSettings contains the level-overridable values for the single physics model.
 type physicsSettings struct {
 	gravity             float64
 	restitution         float64
@@ -161,43 +161,18 @@ type physicsSettings struct {
 	tiltSideMax         float64
 }
 
-func originalPhysicsDefaults() physicsSettings {
+func defaultPhysicsSettings() physicsSettings {
 	return physicsSettings{
-		gravity: originalDefaultGravity, restitution: originalDefaultRestitution,
-		frictionCoeff: originalDefaultFrictionCoeff, paddleBoost: originalDefaultPaddleBoost,
-		brickBoost: originalDefaultBrickBoost, maxSpeed: originalDefaultMaxSpeed,
-		maxSpin: originalDefaultMaxSpin, stuckSpeedThreshold: originalDefaultStuckSpeedThreshold,
-		stuckDuration: originalDefaultStuckDuration, tiltUpSpeed: originalDefaultTiltUpSpeed,
-		tiltSideMin: originalDefaultTiltSideMin, tiltSideMax: originalDefaultTiltSideMax,
+		gravity: defaultPhysicsGravity, restitution: defaultPhysicsRestitution,
+		frictionCoeff: defaultPhysicsFrictionCoeff, paddleBoost: defaultPhysicsPaddleBoost,
+		brickBoost: defaultPhysicsBrickBoost, maxSpeed: defaultPhysicsMaxSpeed,
+		maxSpin: defaultPhysicsMaxSpin, stuckSpeedThreshold: defaultPhysicsStuckSpeedThreshold,
+		stuckDuration: defaultPhysicsStuckDuration, tiltUpSpeed: defaultPhysicsTiltUpSpeed,
+		tiltSideMin: defaultPhysicsTiltSideMin, tiltSideMax: defaultPhysicsTiltSideMax,
 	}
 }
 
-func improvedPhysicsDefaults() physicsSettings {
-	return physicsSettings{
-		gravity: improvedDefaultGravity, restitution: improvedDefaultRestitution,
-		frictionCoeff: improvedDefaultFrictionCoeff, paddleBoost: improvedDefaultPaddleBoost,
-		brickBoost: improvedDefaultBrickBoost, maxSpeed: improvedDefaultMaxSpeed,
-		maxSpin: improvedDefaultMaxSpin, stuckSpeedThreshold: improvedDefaultStuckSpeedThreshold,
-		stuckDuration: improvedDefaultStuckDuration, tiltUpSpeed: improvedDefaultTiltUpSpeed,
-		tiltSideMin: improvedDefaultTiltSideMin, tiltSideMax: improvedDefaultTiltSideMax,
-	}
-}
-
-var (
-	originalPhysicsSettings = originalPhysicsDefaults()
-	improvedPhysicsSettings = improvedPhysicsDefaults()
-)
-
-func physicsSettingsForMode(improved bool) *physicsSettings {
-	if improved {
-		return &improvedPhysicsSettings
-	}
-	return &originalPhysicsSettings
-}
-
-func activePhysicsSettings() *physicsSettings {
-	return physicsSettingsForMode(useImprovedPhysics)
-}
+var physicsConfig = defaultPhysicsSettings()
 
 func setPhysicsSetting(settings *physicsSettings, key string, value float64) {
 	switch key {
@@ -225,19 +200,6 @@ func setPhysicsSetting(settings *physicsSettings, key string, value float64) {
 		settings.tiltSideMin = value
 	case "tiltSideMax":
 		settings.tiltSideMax = value
-	}
-}
-
-func applyPhysicsOverride(mode, key string, value float64) {
-	switch mode {
-	case "original":
-		setPhysicsSetting(&originalPhysicsSettings, key, value)
-	case "improved":
-		setPhysicsSetting(&improvedPhysicsSettings, key, value)
-	default:
-		// Legacy level keys remain compatible by applying to both profiles.
-		setPhysicsSetting(&originalPhysicsSettings, key, value)
-		setPhysicsSetting(&improvedPhysicsSettings, key, value)
 	}
 }
 
@@ -294,6 +256,9 @@ var (
 	touchControlActive bool
 	touchPointerID     int
 	touchLastY         float64
+
+	mouseControlActive bool
+	mousePaddleTargetX float64
 
 	mobileControlsEnabled  bool
 	mobileControlMode      = "vertical"
@@ -381,6 +346,17 @@ type Ball struct {
 type statusMessage struct {
 	text  string
 	timer float64
+}
+
+// renderSnapshot stores the last completed fixed-step state used for visual
+// interpolation. Physics remains authoritative; only drawing is smoothed.
+type renderSnapshot struct {
+	ballX, ballY, ballAngle                   float64
+	secondBallX, secondBallY, secondBallAngle float64
+	paddleX                                   float64
+	blackHoleX, blackHoleY                    float64
+	secondBallActive                          bool
+	blackHoleActive                           bool
 }
 
 // ---- Global state ----
@@ -495,9 +471,26 @@ var (
 	unlockFrontier       int // Highest level index made available; may equal len(levels) after finishing all current levels.
 	levels               []levelData
 
-	devAllLevelsUnlocked bool
-	debugOverlayVisible  bool
-	useImprovedPhysics   = defaultUseImprovedPhysics // Runtime A/B toggle; press F to switch modes.
+	devAllLevelsUnlocked  bool
+	debugOverlayVisible   bool
+	physicsOverlayVisible bool
+
+	physicsAccumulator       float64
+	physicsStepRateCurrent   float64
+	physicsRealtimePercent   float64
+	physicsComputeLoad       float64
+	physicsSampleElapsed     float64
+	physicsSampleSteps       int
+	physicsSampleComputeTime float64
+	physicsSampleDroppedTime float64
+	physicsDroppedTimeTotal  float64
+	physicsWarningTimer      float64
+	physicsLastFrameSteps    int
+	physicsPeakFrameSteps    int
+
+	previousRenderSnapshot   renderSnapshot
+	renderSnapshotReady      bool
+	renderInterpolationAlpha float64
 
 	lastPaddleSpinValid  bool
 	lastPaddleSpinBall   int
@@ -569,8 +562,8 @@ func brickMicroTiltRadians(levelIndex, row, col int) float64 {
 	hash ^= hash >> 16
 
 	unit := float64(hash&0x00ffffff) / float64(0x00ffffff)
-	magnitudeDegrees := improvedBrickTiltMinDegrees +
-		unit*(improvedBrickTiltMaxDegrees-improvedBrickTiltMinDegrees)
+	magnitudeDegrees := brickTiltMinDegrees +
+		unit*(brickTiltMaxDegrees-brickTiltMinDegrees)
 	if hash&0x80000000 != 0 {
 		magnitudeDegrees = -magnitudeDegrees
 	}
@@ -606,11 +599,11 @@ func resetFastOrbitState(b *Ball) {
 
 func fastOrbitAxis(b *Ball) int {
 	speed := math.Hypot(b.vx, b.vy)
-	if speed < improvedOrbitMinimumSpeed {
+	if speed < physicsOrbitMinimumSpeed {
 		return orbitAxisNone
 	}
 
-	minorLimit := math.Max(improvedOrbitMinorSpeedFloor, speed*improvedOrbitMinorSpeedRatio)
+	minorLimit := math.Max(physicsOrbitMinorSpeedFloor, speed*physicsOrbitMinorSpeedRatio)
 	nearVertical := math.Abs(b.vx) <= minorLimit
 	nearHorizontal := math.Abs(b.vy) <= minorLimit
 	if nearVertical && !nearHorizontal {
@@ -663,7 +656,7 @@ func enforceFastOrbitEscape(b *Ball) {
 	if speed <= 0 {
 		return
 	}
-	minorSpeed := math.Min(improvedOrbitEscapeSpeed, speed*0.35)
+	minorSpeed := math.Min(physicsOrbitEscapeSpeed, speed*0.35)
 	majorSpeed := math.Sqrt(math.Max(0, speed*speed-minorSpeed*minorSpeed))
 
 	if b.orbitEscapeAxis == orbitAxisVertical {
@@ -687,14 +680,14 @@ func enforceFastOrbitEscape(b *Ball) {
 func activateFastOrbitEscape(b *Ball, axis int) {
 	b.orbitEscapeAxis = axis
 	b.orbitEscapeDirection = chooseOrbitEscapeDirection(b, axis)
-	b.orbitEscapeTimer = improvedOrbitEscapeDuration
+	b.orbitEscapeTimer = physicsOrbitEscapeDuration
 	resetFastOrbitCandidate(b)
 	enforceFastOrbitEscape(b)
-	showStatusUnique("Orbital tilt!", improvedOrbitMessageDuration)
+	showStatusUnique("Orbital tilt!", physicsOrbitMessageDuration)
 }
 
 func recordUnbreakableOrbitHit(b *Ball) {
-	if !useImprovedPhysics || b.orbitHitCooldown > 0 || b.orbitEscapeTimer > 0 {
+	if b.orbitHitCooldown > 0 || b.orbitEscapeTimer > 0 {
 		return
 	}
 
@@ -707,8 +700,8 @@ func recordUnbreakableOrbitHit(b *Ball) {
 	minorPosition := orbitMinorPosition(b, axis)
 	newCandidate := b.orbitCandidateAxis != axis ||
 		b.orbitCandidateHits == 0 ||
-		b.orbitCandidateTimer > improvedOrbitDetectionWindow ||
-		math.Abs(minorPosition-b.orbitAnchorMinor) > improvedOrbitMaximumMinorProgress
+		b.orbitCandidateTimer > physicsOrbitDetectionWindow ||
+		math.Abs(minorPosition-b.orbitAnchorMinor) > physicsOrbitMaximumMinorProgress
 
 	if newCandidate {
 		b.orbitCandidateAxis = axis
@@ -718,25 +711,20 @@ func recordUnbreakableOrbitHit(b *Ball) {
 	} else {
 		b.orbitCandidateHits++
 	}
-	b.orbitHitCooldown = improvedOrbitHitCooldown
+	b.orbitHitCooldown = physicsOrbitHitCooldown
 
-	if b.orbitCandidateHits >= improvedOrbitRequiredHits {
+	if b.orbitCandidateHits >= physicsOrbitRequiredHits {
 		activateFastOrbitEscape(b, axis)
 	}
 }
 
-func updateFastOrbitDetector(b *Ball, dt float64, improved bool) {
-	if !improved {
-		resetFastOrbitState(b)
-		return
-	}
-
+func updateFastOrbitDetector(b *Ball, dt float64) {
 	if b.orbitHitCooldown > 0 {
 		b.orbitHitCooldown = math.Max(0, b.orbitHitCooldown-dt)
 	}
 	if b.orbitCandidateHits > 0 {
 		b.orbitCandidateTimer += dt
-		if b.orbitCandidateTimer > improvedOrbitDetectionWindow {
+		if b.orbitCandidateTimer > physicsOrbitDetectionWindow {
 			resetFastOrbitCandidate(b)
 		}
 	}
@@ -750,7 +738,7 @@ func updateFastOrbitDetector(b *Ball, dt float64, improved bool) {
 	}
 }
 
-// preventVerticalLock is used only by improved physics. It preserves total
+// preventVerticalLock preserves total
 // speed while giving nearly vertical trajectories a small deterministic
 // horizontal component.
 func preventVerticalLock(b *Ball, preferredDirection float64) {
@@ -1207,8 +1195,7 @@ func playLevelComplete() {
 
 // ---- Reset globals to defaults ----
 func resetGlobals() {
-	originalPhysicsSettings = originalPhysicsDefaults()
-	improvedPhysicsSettings = improvedPhysicsDefaults()
+	physicsConfig = defaultPhysicsSettings()
 	canvasWidth = defaultCanvasWidth
 	canvasHeight = defaultCanvasHeight
 	paddleWidth = defaultPaddleWidth
@@ -1259,14 +1246,7 @@ func applyConfig(config map[string]string) {
 	for key := range config {
 		keys = append(keys, key)
 	}
-	sort.SliceStable(keys, func(i, j int) bool {
-		specificI := strings.HasPrefix(keys[i], "original") || strings.HasPrefix(keys[i], "improved")
-		specificJ := strings.HasPrefix(keys[j], "original") || strings.HasPrefix(keys[j], "improved")
-		if specificI != specificJ {
-			return !specificI
-		}
-		return keys[i] < keys[j]
-	})
+	sort.Strings(keys)
 
 	for _, key := range keys {
 		val := config[key]
@@ -1297,137 +1277,23 @@ func applyConfig(config map[string]string) {
 			unbreakableStrokeColor = val
 		case "brickStrokeColor":
 			brickStrokeColor = val
-		case "gravity", "originalGravity", "improvedGravity":
+		case "gravity", "restitution", "frictionCoeff", "paddleBoost", "brickBoost",
+			"maxSpeed", "maxSpin", "stuckSpeedThreshold", "stuckDuration",
+			"tiltUpSpeed", "tiltSideMin", "tiltSideMax":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				mode := ""
-				if key == "originalGravity" {
-					mode = "original"
+				valid := true
+				switch key {
+				case "restitution":
+					valid = f >= 0 && f <= 1
+				case "frictionCoeff", "stuckSpeedThreshold", "stuckDuration",
+					"tiltUpSpeed", "tiltSideMin", "tiltSideMax":
+					valid = f >= 0
+				case "maxSpeed", "maxSpin":
+					valid = f > 0
 				}
-				if key == "improvedGravity" {
-					mode = "improved"
+				if valid {
+					setPhysicsSetting(&physicsConfig, key, f)
 				}
-				applyPhysicsOverride(mode, "gravity", f)
-			}
-		case "restitution", "originalRestitution", "improvedRestitution":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
-				mode := ""
-				if key == "originalRestitution" {
-					mode = "original"
-				}
-				if key == "improvedRestitution" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "restitution", f)
-			}
-		case "frictionCoeff", "originalFrictionCoeff", "improvedFrictionCoeff":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				mode := ""
-				if key == "originalFrictionCoeff" {
-					mode = "original"
-				}
-				if key == "improvedFrictionCoeff" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "frictionCoeff", f)
-			}
-		case "maxSpin", "originalMaxSpin", "improvedMaxSpin":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
-				mode := ""
-				if key == "originalMaxSpin" {
-					mode = "original"
-				}
-				if key == "improvedMaxSpin" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "maxSpin", f)
-			}
-		case "paddleBoost", "originalPaddleBoost", "improvedPaddleBoost":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				mode := ""
-				if key == "originalPaddleBoost" {
-					mode = "original"
-				}
-				if key == "improvedPaddleBoost" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "paddleBoost", f)
-			}
-		case "brickBoost", "originalBrickBoost", "improvedBrickBoost":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				mode := ""
-				if key == "originalBrickBoost" {
-					mode = "original"
-				}
-				if key == "improvedBrickBoost" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "brickBoost", f)
-			}
-		case "maxSpeed", "originalMaxSpeed", "improvedMaxSpeed":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
-				mode := ""
-				if key == "originalMaxSpeed" {
-					mode = "original"
-				}
-				if key == "improvedMaxSpeed" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "maxSpeed", f)
-			}
-		case "stuckSpeedThreshold", "originalStuckSpeedThreshold", "improvedStuckSpeedThreshold":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				mode := ""
-				if key == "originalStuckSpeedThreshold" {
-					mode = "original"
-				}
-				if key == "improvedStuckSpeedThreshold" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "stuckSpeedThreshold", f)
-			}
-		case "stuckDuration", "originalStuckDuration", "improvedStuckDuration":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				mode := ""
-				if key == "originalStuckDuration" {
-					mode = "original"
-				}
-				if key == "improvedStuckDuration" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "stuckDuration", f)
-			}
-		case "tiltUpSpeed", "originalTiltUpSpeed", "improvedTiltUpSpeed":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				mode := ""
-				if key == "originalTiltUpSpeed" {
-					mode = "original"
-				}
-				if key == "improvedTiltUpSpeed" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "tiltUpSpeed", f)
-			}
-		case "tiltSideMin", "originalTiltSideMin", "improvedTiltSideMin":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				mode := ""
-				if key == "originalTiltSideMin" {
-					mode = "original"
-				}
-				if key == "improvedTiltSideMin" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "tiltSideMin", f)
-			}
-		case "tiltSideMax", "originalTiltSideMax", "improvedTiltSideMax":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
-				mode := ""
-				if key == "originalTiltSideMax" {
-					mode = "original"
-				}
-				if key == "improvedTiltSideMax" {
-					mode = "improved"
-				}
-				applyPhysicsOverride(mode, "tiltSideMax", f)
 			}
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
@@ -1560,40 +1426,11 @@ func applyConfig(config map[string]string) {
 }
 
 // ---- Physics ----
-func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy float64) {
-	physics := &originalPhysicsSettings
-	cx := b.x + nx*b.r
-	cy := b.y + ny*b.r
-	contactVx := b.vx - b.omega*(cy-b.y)
-	contactVy := b.vy + b.omega*(cx-b.x)
-	relVx := contactVx - surfVx
-	relVy := contactVy - surfVy
-	vn := relVx*nx + relVy*ny
-	vt := relVx*(-ny) + relVy*nx
-	if vn >= 0 {
-		return
-	}
-	vnNew := -physics.restitution * vn
-	deltaVn := vnNew - vn
-	maxFriction := physics.frictionCoeff * math.Abs(deltaVn)
-	var deltaVt float64
-	if math.Abs(vt) < 0.001 {
-		deltaVt = -vt
-	} else {
-		friction := math.Min(math.Abs(vt), maxFriction)
-		deltaVt = -sign(vt) * friction
-	}
-	tx := -ny
-	ty := nx
-	b.vx += deltaVn*nx + deltaVt*tx
-	b.vy += deltaVn*ny + deltaVt*ty
-	b.omega -= 2 * deltaVt / b.r
-}
 
 // resolveCollisionBallImproved uses the actual contact point and a solid-disk
-// tangential impulse. It is used only while improved physics is selected.
-func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale float64) (float64, bool) {
-	physics := &improvedPhysicsSettings
+// tangential impulse. It is used only while physics is selected.
+func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy, frictionScale float64) (float64, bool) {
+	physics := &physicsConfig
 	// nx,ny point from the surface toward the ball, so the contact point is
 	// on the opposite side of the ball centre.
 	cx := b.x - nx*b.r
@@ -1609,7 +1446,7 @@ func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale
 	ty := nx
 	translationVt := (b.vx-surfVx)*tx + (b.vy-surfVy)*ty
 	spinSurfaceSpeed := -b.omega * b.r
-	vt := translationVt + spinSurfaceSpeed*improvedCollisionSpinCoupling
+	vt := translationVt + spinSurfaceSpeed*physicsCollisionSpinCoupling
 	if vn >= 0 {
 		return 0, false
 	}
@@ -1622,7 +1459,7 @@ func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale
 	// different friction scales: paddle strongest, bricks medium, walls weak.
 	effectiveFriction := math.Max(
 		physics.frictionCoeff*frictionScale,
-		improvedMinimumCollisionGrip,
+		physicsMinimumCollisionGrip,
 	)
 	maxFriction := effectiveFriction * math.Abs(deltaVn)
 	desiredDeltaVt := -vt / 3.0
@@ -1636,53 +1473,30 @@ func resolveCollisionBallImproved(b *Ball, nx, ny, surfVx, surfVy, frictionScale
 	return deltaVt, true
 }
 
-func resolveSelectedCollision(b *Ball, nx, ny, surfVx, surfVy float64, improved bool, frictionScale float64) {
-	if improved {
-		_, _ = resolveCollisionBallImproved(b, nx, ny, surfVx, surfVy, frictionScale)
-		return
-	}
-	resolveCollisionBall(b, nx, ny, surfVx, surfVy)
-}
-
 // Resolve one collision while measuring how much the ball's spin changed the
 // outgoing direction. Diagnostics are recorded only for Ball 1.
-func resolveSelectedCollisionDebug(
+func resolveCollisionDebug(
 	b *Ball,
 	nx, ny, surfVx, surfVy float64,
-	improved bool,
 	frictionScale float64,
 	surface string,
 	record bool,
 ) {
 	incomingAngle := velocityAngleDegrees(b.vx, b.vy)
 	spinBefore := b.omega
-	beforeVx, beforeVy := b.vx, b.vy
 
 	// A zero-spin clone gives a direct A/B measurement of the angle caused by
 	// spin at this exact collision, using the same incoming velocity and normal.
 	noSpin := *b
 	noSpin.omega = 0
 	noSpinImpulse := 0.0
-	if improved {
-		if impulse, collided := resolveCollisionBallImproved(&noSpin, nx, ny, surfVx, surfVy, frictionScale); collided {
-			noSpinImpulse = impulse
-		}
-	} else {
-		noSpinBeforeVx, noSpinBeforeVy := noSpin.vx, noSpin.vy
-		resolveCollisionBall(&noSpin, nx, ny, surfVx, surfVy)
-		tx, ty := -ny, nx
-		noSpinImpulse = (noSpin.vx-noSpinBeforeVx)*tx + (noSpin.vy-noSpinBeforeVy)*ty
+	if impulse, collided := resolveCollisionBall(&noSpin, nx, ny, surfVx, surfVy, frictionScale); collided {
+		noSpinImpulse = impulse
 	}
 
 	tangentialImpulse := 0.0
-	if improved {
-		if impulse, collided := resolveCollisionBallImproved(b, nx, ny, surfVx, surfVy, frictionScale); collided {
-			tangentialImpulse = impulse
-		}
-	} else {
-		resolveCollisionBall(b, nx, ny, surfVx, surfVy)
-		tx, ty := -ny, nx
-		tangentialImpulse = (b.vx-beforeVx)*tx + (b.vy-beforeVy)*ty
+	if impulse, collided := resolveCollisionBall(b, nx, ny, surfVx, surfVy, frictionScale); collided {
+		tangentialImpulse = impulse
 	}
 
 	if record {
@@ -1898,7 +1712,7 @@ func setPaddleSize(width, height float64) {
 // Gravity effects coexist. Black hole overrides both; otherwise reverse
 // gravity has priority over low gravity.
 func refreshCurrentGravity() {
-	gravity := activePhysicsSettings().gravity
+	gravity := physicsConfig.gravity
 	if blackHoleActive {
 		currentGravity = 0
 	} else if reverseGravityActive {
@@ -2313,6 +2127,8 @@ func startLevel(index int) {
 	leftPressed = false
 	rightPressed = false
 	touchControlActive = false
+	mouseControlActive = false
+	mousePaddleTargetX = 0
 	mobileLeftHeld = false
 	mobileRightHeld = false
 	mobileLeftPointerID = -1
@@ -2347,6 +2163,7 @@ func startLevel(index int) {
 	paddle.y = canvasHeight - 40
 	paddle.vx = 0
 	paddlePreviousX = paddle.x
+	mousePaddleTargetX = paddle.x
 	clearLastPaddleSpinDebug()
 	clearLastCollisionDebug()
 
@@ -2385,6 +2202,7 @@ func startLevel(index int) {
 
 	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
+	syncRenderInterpolation()
 	saveCurrentLevel()
 	log("Level " + strconv.Itoa(index+1) + " started")
 }
@@ -2536,8 +2354,8 @@ func playTilt() {
 	scheduleTone("sine", varyFreq(70, 0.04), varyFreq(115, 0.04), 0.18, 0.08, 0.02)
 }
 
-func applyTilt(b *Ball, improved bool) {
-	physics := physicsSettingsForMode(improved)
+func applyTilt(b *Ball) {
+	physics := &physicsConfig
 	sideMin, sideMax := physics.tiltSideMin, physics.tiltSideMax
 	if sideMax < sideMin {
 		sideMin, sideMax = sideMax, sideMin
@@ -2560,19 +2378,18 @@ func applyTilt(b *Ball, improved bool) {
 	playTilt()
 }
 
-func updateStuckDetector(b *Ball, dt float64, improved bool) {
-	physics := physicsSettingsForMode(improved)
+func updateStuckDetector(b *Ball, dt float64) {
+	physics := &physicsConfig
 	if b.y+b.r > canvasHeight {
 		b.stuckTimer = 0
 		return
 	}
 
-	speed := math.Sqrt(b.vx*b.vx + b.vy*b.vy)
-
+	speed := math.Hypot(b.vx, b.vy)
 	if speed < physics.stuckSpeedThreshold {
 		b.stuckTimer += dt
 		if b.stuckTimer >= physics.stuckDuration {
-			applyTilt(b, improved)
+			applyTilt(b)
 		}
 	} else {
 		b.stuckTimer = 0
@@ -2690,10 +2507,10 @@ func updateZapper(dt float64) {
 	)
 }
 
-// One improved-mode brick contact. We still choose a single classic axis
+// One brick contact. We still choose a single classic axis
 // normal, but group simultaneous overlaps so adjacent bricks do not bounce the
 // ball multiple times in one substep.
-type improvedBrickContact struct {
+type brickContact struct {
 	index          int
 	nx, ny         float64
 	axisNX, axisNY float64
@@ -2759,8 +2576,8 @@ func penetrationForBrickNormal(b *Ball, br *brick, nx, ny float64) float64 {
 	}
 }
 
-func findImprovedBrickContacts(b *Ball, previousX, previousY float64) []improvedBrickContact {
-	contacts := make([]improvedBrickContact, 0, 4)
+func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
+	contacts := make([]brickContact, 0, 4)
 	for _, i := range candidateBrickIndices(b) {
 		br := &bricks[i]
 		if !br.alive ||
@@ -2801,14 +2618,14 @@ func findImprovedBrickContacts(b *Ball, previousX, previousY float64) []improved
 		// The broad-phase geometry remains the existing axis-aligned brick, but
 		// the actual collision response follows the brick's tiny visual angle.
 		// Correct penetration by the normal's axis component so separation still
-		// fully clears the original brick boundary.
+		// fully clears the brick boundary.
 		nx, ny := rotateVector(axisNX, axisNY, br.tiltRadians)
 		axisComponent := math.Abs(nx*axisNX + ny*axisNY)
 		if axisComponent > 0.000001 {
 			penetration /= axisComponent
 		}
 
-		contacts = append(contacts, improvedBrickContact{
+		contacts = append(contacts, brickContact{
 			index:       i,
 			nx:          nx,
 			ny:          ny,
@@ -2823,8 +2640,8 @@ func findImprovedBrickContacts(b *Ball, previousX, previousY float64) []improved
 	return contacts
 }
 
-func handleImprovedBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64) {
-	contacts := findImprovedBrickContacts(b, previousX, previousY)
+func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64) {
+	contacts := findBrickContacts(b, previousX, previousY)
 	if len(contacts) == 0 {
 		return
 	}
@@ -2879,15 +2696,15 @@ func handleImprovedBrickCollisions(b *Ball, isPrimary bool, previousX, previousY
 	}
 	best := contacts[bestIndex]
 
-	b.x += best.nx * (best.penetration + improvedCollisionSlop)
-	b.y += best.ny * (best.penetration + improvedCollisionSlop)
+	b.x += best.nx * (best.penetration + physicsCollisionSlop)
+	b.y += best.ny * (best.penetration + physicsCollisionSlop)
 	bestWasUnbreakable := bricks[best.index].unbreakable
-	frictionScale := improvedBrickFrictionScale
+	frictionScale := physicsBrickFrictionScale
 	if bestWasUnbreakable {
-		frictionScale = improvedUnbreakableFrictionScale
+		frictionScale = physicsUnbreakableFrictionScale
 	}
-	resolveSelectedCollisionDebug(b, best.nx, best.ny, 0, 0, true, frictionScale, "BRICK", isPrimary)
-	if bestWasUnbreakable && best.impact >= improvedOrbitMinimumHitSpeed {
+	resolveCollisionDebug(b, best.nx, best.ny, 0, 0, frictionScale, "BRICK", isPrimary)
+	if bestWasUnbreakable && best.impact >= physicsOrbitMinimumHitSpeed {
 		recordUnbreakableOrbitHit(b)
 	}
 
@@ -2926,20 +2743,20 @@ func handleImprovedBrickCollisions(b *Ball, isPrimary bool, previousX, previousY
 	if hitUnbreakable {
 		playImpactSound(b, best.impact, playUnbreakable)
 	}
-	if destroyedNormal && improvedPhysicsSettings.brickBoost != 0 {
-		b.vy -= improvedPhysicsSettings.brickBoost
-		if math.Abs(b.vy) > improvedPhysicsSettings.maxSpeed {
-			b.vy = math.Copysign(improvedPhysicsSettings.maxSpeed, b.vy)
+	if destroyedNormal && physicsConfig.brickBoost != 0 {
+		b.vy -= physicsConfig.brickBoost
+		if math.Abs(b.vy) > physicsConfig.maxSpeed {
+			b.vy = math.Copysign(physicsConfig.maxSpeed, b.vy)
 		}
-		if math.Abs(b.vx) > improvedPhysicsSettings.maxSpeed {
-			b.vx = math.Copysign(improvedPhysicsSettings.maxSpeed, b.vx)
+		if math.Abs(b.vx) > physicsConfig.maxSpeed {
+			b.vx = math.Copysign(physicsConfig.maxSpeed, b.vx)
 		}
 	}
 }
 
 // ---- Update a single ball ----
-func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
-	physics := physicsSettingsForMode(improved)
+func updateBallStep(b *Ball, dt float64, isPrimary bool) {
+	physics := &physicsConfig
 	if b.soundCooldown > 0 {
 		b.soundCooldown = math.Max(0, b.soundCooldown-dt)
 	}
@@ -2950,322 +2767,137 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool, improved bool) {
 	if blackHoleActive {
 		dx := blackHoleX - b.x
 		dy := blackHoleY - b.y
-		dist := math.Sqrt(dx*dx + dy*dy)
+		dist := math.Hypot(dx, dy)
 		if dist > 1.0 {
-			accX := (dx / dist) * blackHoleStrength
-			accY := (dy / dist) * blackHoleStrength
-			b.vx += accX * dt
-			b.vy += accY * dt
+			b.vx += (dx / dist) * blackHoleStrength * dt
+			b.vy += (dy / dist) * blackHoleStrength * dt
 		} else {
 			b.vx += (rand.Float64() - 0.5) * 10.0
 			b.vy += (rand.Float64() - 0.5) * 10.0
 		}
 	}
 
-	if improved {
-		// Magnus effect: spin bends the flight path perpendicular to velocity.
-		// Cap it so high-spin custom levels cannot overwhelm ordinary play.
-		magnusAx := -b.vy * b.omega * improvedMagnusCoefficient
-		magnusAy := b.vx * b.omega * improvedMagnusCoefficient
-		magnusMagnitude := math.Hypot(magnusAx, magnusAy)
-		maxMagnusAcceleration := math.Max(100.0, physics.maxSpeed*improvedMagnusAccelerationScale)
-		if magnusMagnitude > maxMagnusAcceleration {
-			scale := maxMagnusAcceleration / magnusMagnitude
-			magnusAx *= scale
-			magnusAy *= scale
-		}
-		b.vx += magnusAx * dt
-		b.vy += magnusAy * dt
-
-		// Mild air resistance and angular damping keep energy and curve from
-		// accumulating forever after one strong paddle strike.
-		airDamping := math.Exp(-improvedAirDrag * dt)
-		spinDamping := math.Exp(-improvedSpinDrag * dt)
-		b.vx *= airDamping
-		b.vy *= airDamping
-		b.omega *= spinDamping
+	// Magnus effect: spin bends the flight path perpendicular to velocity.
+	magnusAx := -b.vy * b.omega * physicsMagnusCoefficient
+	magnusAy := b.vx * b.omega * physicsMagnusCoefficient
+	magnusMagnitude := math.Hypot(magnusAx, magnusAy)
+	maxMagnusAcceleration := math.Max(100.0, physics.maxSpeed*physicsMagnusAccelerationScale)
+	if magnusMagnitude > maxMagnusAcceleration {
+		scale := maxMagnusAcceleration / magnusMagnitude
+		magnusAx *= scale
+		magnusAy *= scale
 	}
+	b.vx += magnusAx * dt
+	b.vy += magnusAy * dt
+
+	airDamping := math.Exp(-physicsAirDrag * dt)
+	spinDamping := math.Exp(-physicsSpinDrag * dt)
+	b.vx *= airDamping
+	b.vy *= airDamping
+	b.omega *= spinDamping
 
 	previousX, previousY := b.x, b.y
 	b.x += b.vx * dt
 	b.y += b.vy * dt
 	b.angle += b.omega * dt
 
-	// Walls
-	wallFrictionScale := 1.0
-	if improved {
-		wallFrictionScale = improvedWallFrictionScale
-	}
+	// Walls.
 	if b.x-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vx)
-		b.x = b.r
-		if improved {
-			b.x += improvedCollisionSlop
-		}
-		resolveSelectedCollisionDebug(b, 1, 0, 0, 0, improved, wallFrictionScale, "WALL LEFT", isPrimary)
+		b.x = b.r + physicsCollisionSlop
+		resolveCollisionDebug(b, 1, 0, 0, 0, physicsWallFrictionScale, "WALL LEFT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.x+b.r > canvasWidth {
 		impactSpeed := math.Max(0, b.vx)
-		b.x = canvasWidth - b.r
-		if improved {
-			b.x -= improvedCollisionSlop
-		}
-		resolveSelectedCollisionDebug(b, -1, 0, 0, 0, improved, wallFrictionScale, "WALL RIGHT", isPrimary)
+		b.x = canvasWidth - b.r - physicsCollisionSlop
+		resolveCollisionDebug(b, -1, 0, 0, 0, physicsWallFrictionScale, "WALL RIGHT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vy)
-		b.y = b.r
-		if improved {
-			b.y += improvedCollisionSlop
-		}
-		resolveSelectedCollisionDebug(b, 0, 1, 0, 0, improved, wallFrictionScale, "WALL TOP", isPrimary)
+		b.y = b.r + physicsCollisionSlop
+		resolveCollisionDebug(b, 0, 1, 0, 0, physicsWallFrictionScale, "WALL TOP", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y+b.r > canvasHeight {
-		// Ball lost handled by caller.
 		return
 	}
 
-	// Paddle
+	// Paddle.
 	pLeft, pRight := paddle.x, paddle.x+paddle.w
 	pTop, pBottom := paddle.y, paddle.y+paddle.h
 	if b.vy > 0 &&
 		b.x+b.r > pLeft && b.x-b.r < pRight &&
 		b.y+b.r > pTop && b.y+b.r < pBottom {
-		b.y = pTop - b.r
-		if improved {
-			b.y -= improvedCollisionSlop
-		}
+		b.y = pTop - b.r - physicsCollisionSlop
 		resetFastOrbitState(b)
 
 		spinBeforePaddle := b.omega
 		incomingPaddleAngle := velocityAngleDegrees(b.vx, b.vy)
-		hitPos := (b.x - pLeft) / paddle.w
-		if hitPos < 0 {
-			hitPos = 0
-		}
-		if hitPos > 1 {
-			hitPos = 1
-		}
-
+		hitPos := clampFloat((b.x-pLeft)/paddle.w, 0, 1)
 		angle := (hitPos - 0.5) * 2.0 * (80.0 * math.Pi / 180.0)
-		speed := math.Hypot(b.vx, b.vy)
-		if speed < 100 {
-			speed = 100
+		speed := math.Max(100, math.Hypot(b.vx, b.vy))
+		speed = math.Min(speed*physics.restitution+physics.paddleBoost, physics.maxSpeed)
+
+		incomingVx := b.vx
+		incomingVy := b.vy
+		b.vx = speed*math.Sin(angle) + incomingVx*0.15
+		b.vy = -speed * math.Cos(angle)
+
+		relativeSlip := b.vx - b.omega*b.r - paddle.vx
+		normalDeltaSpeed := math.Abs(b.vy - incomingVy)
+		effectivePaddleFriction := math.Max(
+			physics.frictionCoeff*physicsPaddleFrictionScale,
+			physicsMinimumPaddleGrip,
+		)
+		maxFrictionDelta := effectivePaddleFriction * normalDeltaSpeed
+		desiredDeltaVx := -relativeSlip / 3.0
+		deltaVx := clampFloat(desiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
+		b.vx += deltaVx
+		b.omega -= 2 * deltaVx / b.r
+		b.omega += -paddle.vx * physicsPaddleSpinTransfer / math.Max(b.r, 1)
+
+		preferredDirection := incomingVx
+		if preferredDirection == 0 {
+			preferredDirection = paddle.vx
+		}
+		if preferredDirection == 0 {
+			preferredDirection = hitPos - 0.5
 		}
 
-		if improved {
-			// Retain incoming energy according to restitution, then add the
-			// paddle's configured boost.
-			speed = speed*physics.restitution + physics.paddleBoost
-			if speed > physics.maxSpeed {
-				speed = physics.maxSpeed
-			}
+		noSpinPaddle := *b
+		noSpinPaddle.omega = 0
+		noSpinPaddle.vx -= deltaVx
+		noSpinRelativeSlip := noSpinPaddle.vx - paddle.vx
+		noSpinDesiredDeltaVx := -noSpinRelativeSlip / 3.0
+		noSpinDeltaVx := clampFloat(noSpinDesiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
+		noSpinPaddle.vx += noSpinDeltaVx
+		preventVerticalLock(&noSpinPaddle, preferredDirection)
+		clampBallToPhysicsSettings(&noSpinPaddle, physics)
 
-			incomingVx := b.vx
-			incomingVy := b.vy
-			incomingAngle := incomingPaddleAngle
-			b.vx = speed*math.Sin(angle) + incomingVx*0.15
-			b.vy = -speed * math.Cos(angle)
-
-			// Paddle motion drags the ball's bottom contact point. A minimum grip
-			// keeps paddle-controlled spin useful even when a level sets ordinary
-			// surface friction very low. The direct paddle term makes spin clearly
-			// proportional to the player's actual paddle velocity at impact.
-			relativeSlip := b.vx - b.omega*b.r - paddle.vx
-			normalDeltaSpeed := math.Abs(b.vy - incomingVy)
-			effectivePaddleFriction := math.Max(
-				physics.frictionCoeff*improvedPaddleFrictionScale,
-				improvedMinimumPaddleGrip,
+		preventVerticalLock(b, preferredDirection)
+		clampBallToPhysicsSettings(b, physics)
+		maybeShowHighSpin(spinBeforePaddle, b.omega)
+		if isPrimary {
+			recordLastPaddleSpinDebug(true, spinBeforePaddle, b.omega)
+			recordLastCollisionDebug(
+				"PADDLE", incomingPaddleAngle, velocityAngleDegrees(b.vx, b.vy),
+				velocityAngleDegrees(noSpinPaddle.vx, noSpinPaddle.vy),
+				spinBeforePaddle, b.omega, deltaVx, noSpinDeltaVx, b.r,
 			)
-			maxFrictionDelta := effectivePaddleFriction * normalDeltaSpeed
-			desiredDeltaVx := -relativeSlip / 3.0
-			deltaVx := clampFloat(desiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
-			b.vx += deltaVx
-			b.omega -= 2 * deltaVx / b.r
-			b.omega += -paddle.vx * improvedPaddleSpinTransfer / math.Max(b.r, 1)
-
-			preferredDirection := incomingVx
-			if preferredDirection == 0 {
-				preferredDirection = paddle.vx
-			}
-			if preferredDirection == 0 {
-				preferredDirection = hitPos - 0.5
-			}
-
-			// Zero-spin counterfactual for the debug panel. It receives the same
-			// paddle movement and impact geometry, but starts with omega=0.
-			noSpinPaddle := *b
-			noSpinPaddle.omega = 0
-			noSpinPaddle.vx -= deltaVx
-			noSpinRelativeSlip := noSpinPaddle.vx - paddle.vx
-			noSpinDesiredDeltaVx := -noSpinRelativeSlip / 3.0
-			noSpinDeltaVx := clampFloat(noSpinDesiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
-			noSpinPaddle.vx += noSpinDeltaVx
-			preventVerticalLock(&noSpinPaddle, preferredDirection)
-			noSpinSpeed := math.Hypot(noSpinPaddle.vx, noSpinPaddle.vy)
-			if noSpinSpeed > physics.maxSpeed {
-				scale := physics.maxSpeed / noSpinSpeed
-				noSpinPaddle.vx *= scale
-				noSpinPaddle.vy *= scale
-			}
-
-			preventVerticalLock(b, preferredDirection)
-
-			postCollisionSpeed := math.Hypot(b.vx, b.vy)
-			if postCollisionSpeed > physics.maxSpeed {
-				scale := physics.maxSpeed / postCollisionSpeed
-				b.vx *= scale
-				b.vy *= scale
-			}
-			b.omega = clampFloat(b.omega, -physics.maxSpin, physics.maxSpin)
-			maybeShowHighSpin(spinBeforePaddle, b.omega)
-			if isPrimary {
-				recordLastPaddleSpinDebug(true, spinBeforePaddle, b.omega)
-				recordLastCollisionDebug(
-					"PADDLE",
-					incomingAngle,
-					velocityAngleDegrees(b.vx, b.vy),
-					velocityAngleDegrees(noSpinPaddle.vx, noSpinPaddle.vy),
-					spinBeforePaddle,
-					b.omega,
-					deltaVx,
-					noSpinDeltaVx,
-					b.r,
-				)
-			}
-			playImpactSound(b, math.Abs(incomingVy), playPaddleHit)
-		} else {
-			// Original paddle response, deliberately preserved unchanged.
-			speed += physics.paddleBoost
-			if speed > physics.maxSpeed {
-				speed = physics.maxSpeed
-			}
-			b.vx = speed * math.Sin(angle)
-			b.vy = -speed * math.Cos(angle)
-			b.omega += paddle.vx * 0.1 * (hitPos - 0.5)
-			if math.Abs(b.omega) > physics.maxSpin {
-				b.omega = math.Copysign(physics.maxSpin, b.omega)
-			}
-			maybeShowHighSpin(spinBeforePaddle, b.omega)
-			if isPrimary {
-				recordLastPaddleSpinDebug(true, spinBeforePaddle, b.omega)
-				recordLastCollisionDebug(
-					"PADDLE",
-					incomingPaddleAngle,
-					velocityAngleDegrees(b.vx, b.vy),
-					velocityAngleDegrees(b.vx, b.vy),
-					spinBeforePaddle,
-					b.omega,
-					0,
-					0,
-					b.r,
-				)
-			}
-			playImpactSound(b, math.Abs(b.vy), playPaddleHit)
 		}
+		playImpactSound(b, math.Abs(incomingVy), playPaddleHit)
 	}
 
-	if improved {
-		handleImprovedBrickCollisions(b, isPrimary, previousX, previousY)
-	} else {
-		// Original brick response, deliberately preserved unchanged.
-		for _, i := range candidateBrickIndices(b) {
-			brickPtr := &bricks[i]
-			if !brickPtr.alive {
-				continue
-			}
-			if b.x+b.r > brickPtr.x && b.x-b.r < brickPtr.x+brickPtr.w &&
-				b.y+b.r > brickPtr.y && b.y-b.r < brickPtr.y+brickPtr.h {
-
-				if passActive {
-					if destroyBrick(brickPtr) {
-						playBrickBreak()
-						if influencerActive {
-							destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier)
-						}
-					}
-					continue
-				}
-
-				overlapX := 0.0
-				overlapY := 0.0
-				if b.x < brickPtr.x+brickPtr.w/2 {
-					overlapX = (b.x + b.r) - brickPtr.x
-				} else {
-					overlapX = brickPtr.x + brickPtr.w - (b.x - b.r)
-				}
-				if b.y < brickPtr.y+brickPtr.h/2 {
-					overlapY = (b.y + b.r) - brickPtr.y
-				} else {
-					overlapY = brickPtr.y + brickPtr.h - (b.y - b.r)
-				}
-
-				var nx, ny float64
-				if overlapX < overlapY {
-					if b.x < brickPtr.x+brickPtr.w/2 {
-						nx = -1
-						b.x = brickPtr.x - b.r
-					} else {
-						nx = 1
-						b.x = brickPtr.x + brickPtr.w + b.r
-					}
-				} else {
-					if b.y < brickPtr.y+brickPtr.h/2 {
-						ny = -1
-						b.y = brickPtr.y - b.r
-					} else {
-						ny = 1
-						b.y = brickPtr.y + brickPtr.h + b.r
-					}
-				}
-
-				impactSpeed := math.Max(0, -(b.vx*nx + b.vy*ny))
-				resolveSelectedCollisionDebug(b, nx, ny, 0, 0, false, 1.0, "BRICK", isPrimary)
-
-				if brickPtr.unbreakable {
-					playImpactSound(b, impactSpeed, playUnbreakable)
-					continue
-				}
-
-				if brickPtr.magic {
-					if isPrimary {
-						activatePowerUpWithBrick(brickPtr)
-					}
-					destroyBrick(brickPtr)
-					playMagic()
-					if influencerActive {
-						destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier)
-					}
-					continue
-				}
-
-				if physics.brickBoost != 0 {
-					b.vy -= physics.brickBoost
-					if math.Abs(b.vy) > physics.maxSpeed {
-						b.vy = math.Copysign(physics.maxSpeed, b.vy)
-					}
-					if math.Abs(b.vx) > physics.maxSpeed {
-						b.vx = math.Copysign(physics.maxSpeed, b.vx)
-					}
-				}
-				if destroyBrick(brickPtr) {
-					playBrickBreak()
-				}
-				if influencerActive {
-					destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier)
-				}
-			}
-		}
-	}
-	updateFastOrbitDetector(b, dt, improved)
-	updateStuckDetector(b, dt, improved)
+	handleBrickCollisions(b, isPrimary, previousX, previousY)
+	updateFastOrbitDetector(b, dt)
+	updateStuckDetector(b, dt)
 }
 
-// Improved mode subdivides fast movement so a ball cannot skip through thin
-// bricks between frames. Original mode still performs exactly one step.
+// Physics subdivides fast movement so a ball cannot skip through thin
+// bricks between frames.  still performs exactly one step.
+// Subdivide exceptionally fast movement so the ball cannot skip thin bricks.
 func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 	if dt <= 0 {
 		return
@@ -3283,7 +2915,7 @@ func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 
 	stepDT := dt / float64(steps)
 	for step := 0; step < steps; step++ {
-		updateBallStep(b, stepDT, isPrimary, true)
+		updateBallStep(b, stepDT, isPrimary)
 		if b.y+b.r > canvasHeight {
 			break
 		}
@@ -3291,11 +2923,7 @@ func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 }
 
 func updateBall(b *Ball, dt float64, isPrimary bool) {
-	if useImprovedPhysics {
-		updateBallAdaptive(b, dt, isPrimary)
-		return
-	}
-	updateBallStep(b, dt, isPrimary, false)
+	updateBallAdaptive(b, dt, isPrimary)
 }
 
 func loseLife() {
@@ -3738,6 +3366,49 @@ func applyPhoneTiltControl(dt float64) bool {
 	return true
 }
 
+// applyMousePaddleControl advances the paddle toward the latest mouse target.
+// The target speed is limited by the remaining stopping distance, so the paddle
+// brakes before the target instead of crossing it and oscillating. Pointer event
+// frequency and monitor refresh rate therefore do not affect the motion model.
+func applyMousePaddleControl(dt float64) bool {
+	if !mouseControlActive || dt <= 0 {
+		return false
+	}
+
+	maxX := math.Max(0, canvasWidth-paddle.w)
+	mousePaddleTargetX = clampFloat(mousePaddleTargetX, 0, maxX)
+	distance := mousePaddleTargetX - paddle.x
+
+	if math.Abs(distance) <= defaultMousePaddleSnapDistance {
+		paddle.x = mousePaddleTargetX
+		paddle.vx = 0
+		return true
+	}
+
+	direction := sign(distance)
+	stoppingSpeed := math.Sqrt(2 * defaultMousePaddleBraking * math.Abs(distance))
+	targetSpeed := direction * math.Min(defaultMousePaddleMaxSpeed, stoppingSpeed)
+
+	changeRate := defaultMousePaddleAcceleration
+	if sign(paddle.vx) != 0 && sign(paddle.vx) != direction {
+		changeRate = defaultMousePaddleBraking
+	} else if math.Abs(targetSpeed) < math.Abs(paddle.vx) {
+		changeRate = defaultMousePaddleBraking
+	}
+
+	nextVelocity := moveToward(paddle.vx, targetSpeed, changeRate*dt)
+	step := nextVelocity * dt
+	if sign(step) == direction && math.Abs(step) >= math.Abs(distance) {
+		paddle.x = mousePaddleTargetX
+		paddle.vx = 0
+		return true
+	}
+
+	paddle.vx = nextVelocity
+	paddle.x += step
+	return true
+}
+
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
@@ -3792,6 +3463,8 @@ func update(dt float64) {
 		}
 		paddle.vx = moveToward(paddle.vx, targetSpeed, changeRate*dt)
 		paddle.x += paddle.vx * dt
+	} else if applyMousePaddleControl(dt) {
+		// Mouse movement is already integrated by the fixed-step controller.
 	} else if mobileControlsEnabled {
 		switch mobileControlMode {
 		case "vertical", "follow":
@@ -3983,8 +3656,11 @@ func resetBalls() {
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
 	paddlePreviousX = paddle.x
+	mouseControlActive = false
+	mousePaddleTargetX = paddle.x
 	clearLastPaddleSpinDebug()
 	clearLastCollisionDebug()
+	syncRenderInterpolation()
 }
 
 func ensureBrickCanvas() {
@@ -4031,7 +3707,7 @@ func drawBrickGroup(target js.Value, kind int) {
 		}
 		target.Call("save")
 		target.Call("beginPath")
-		if useImprovedPhysics && improvedDrawBrickTilt {
+		if drawBrickTilt {
 			centerX := br.x + br.w/2
 			centerY := br.y + br.h/2
 			target.Call("translate", centerX, centerY)
@@ -4164,7 +3840,7 @@ func physicsSettingValue(settings *physicsSettings, key string) float64 {
 	return 0
 }
 
-func parsePhysicsConfigKey(key string) (mode, field string, ok bool) {
+func parsePhysicsConfigKey(key string) (field string, ok bool) {
 	fields := []string{
 		"gravity", "restitution", "frictionCoeff", "paddleBoost", "brickBoost",
 		"maxSpeed", "maxSpin", "stuckSpeedThreshold", "stuckDuration",
@@ -4172,38 +3848,18 @@ func parsePhysicsConfigKey(key string) (mode, field string, ok bool) {
 	}
 	for _, candidate := range fields {
 		if key == candidate {
-			return "active", candidate, true
-		}
-		suffix := strings.ToUpper(candidate[:1]) + candidate[1:]
-		if key == "original"+suffix {
-			return "original", candidate, true
-		}
-		if key == "improved"+suffix {
-			return "improved", candidate, true
+			return candidate, true
 		}
 	}
-	return "", "", false
+	return "", false
 }
 
 func configState(key string) (effective, defaultValue, kind string, ok bool) {
-	if mode, field, physicsKey := parsePhysicsConfigKey(key); physicsKey {
-		settings := activePhysicsSettings()
-		defaults := originalPhysicsDefaults()
-		if useImprovedPhysics {
-			defaults = improvedPhysicsDefaults()
-		}
-		switch mode {
-		case "original":
-			settings = &originalPhysicsSettings
-			defaults = originalPhysicsDefaults()
-		case "improved":
-			settings = &improvedPhysicsSettings
-			defaults = improvedPhysicsDefaults()
-		}
-		return formatConfigFloat(physicsSettingValue(settings, field)),
+	if field, physicsKey := parsePhysicsConfigKey(key); physicsKey {
+		defaults := defaultPhysicsSettings()
+		return formatConfigFloat(physicsSettingValue(&physicsConfig, field)),
 			formatConfigFloat(physicsSettingValue(&defaults, field)), "float", true
 	}
-
 	switch key {
 	case "backgroundColor":
 		return palette[0], defaultPalette[0], "string", true
@@ -4368,52 +4024,13 @@ func debugOverlayLines() []string {
 		devState = "ON"
 	}
 
-	physicsMode := "ORIGINAL"
-	if useImprovedPhysics {
-		physicsMode = "IMPROVED"
-	}
-
 	lines := []string{
 		"BUILD " + buildID,
-		"PHYSICS " + physicsMode,
-		"FPS CURRENT " + fmt.Sprintf("%.1f", fpsCurrent),
-		"BALL 1 SPEED CURRENT " + fmt.Sprintf("%.2f", math.Hypot(ball.vx, ball.vy)),
-		"BALL 1 SPIN CURRENT " + fmt.Sprintf("%+.2f", ball.omega),
-	}
-	if lastPaddleSpinValid {
-		lines = append(lines,
-			"LAST PADDLE HIT BALL "+strconv.Itoa(lastPaddleSpinBall),
-			"BALL SPIN BEFORE "+fmt.Sprintf("%+.2f", lastPaddleSpinBefore),
-			"BALL SPIN ADDED  "+fmt.Sprintf("%+.2f", lastPaddleSpinAdded),
-			"BALL SPIN AFTER  "+fmt.Sprintf("%+.2f", lastPaddleSpinAfter),
-		)
-	} else {
-		lines = append(lines, "LAST PADDLE HIT (none)")
-	}
-	if lastCollisionValid {
-		lines = append(lines,
-			"LAST BALL 1 COLLISION "+lastCollisionSurface,
-			"ANGLE IN          "+fmt.Sprintf("%+.2f deg", lastCollisionIncomingAngle),
-			"ANGLE OUT         "+fmt.Sprintf("%+.2f deg", lastCollisionOutgoingAngle),
-			"ANGLE CHANGE      "+fmt.Sprintf("%+.2f deg", lastCollisionAngleChange),
-			"SPIN ANGLE EFFECT "+fmt.Sprintf("%+.2f deg", lastCollisionSpinAngleEffect),
-			"HIT SPIN BEFORE   "+fmt.Sprintf("%+.2f", lastCollisionSpinBefore),
-			"HIT SPIN CHANGE   "+fmt.Sprintf("%+.2f", lastCollisionSpinChange),
-			"HIT SPIN AFTER     "+fmt.Sprintf("%+.2f", lastCollisionSpinAfter),
-			"CONTACT SPIN SPEED "+fmt.Sprintf("%+.2f", lastCollisionContactSpinSurfaceSpeed),
-			"IMPULSE WITH SPIN  "+fmt.Sprintf("%+.2f", lastCollisionTangentialImpulse),
-			"IMPULSE NO SPIN    "+fmt.Sprintf("%+.2f", lastCollisionNoSpinImpulse),
-			"SPIN IMPULSE EFFECT "+fmt.Sprintf("%+.2f", lastCollisionSpinImpulseEffect),
-		)
-	} else {
-		lines = append(lines, "LAST BALL 1 COLLISION (none)")
-	}
-	lines = append(lines,
-		"LEVEL "+strconv.Itoa(currentLevelIndex+1)+"/"+strconv.Itoa(len(levels)),
-		"UNLOCKED THROUGH "+strconv.Itoa(highestUnlockedLevel+1),
-		"DEV ALL LEVELS "+devState,
+		"LEVEL " + strconv.Itoa(currentLevelIndex+1) + "/" + strconv.Itoa(len(levels)),
+		"UNLOCKED THROUGH " + strconv.Itoa(highestUnlockedLevel+1),
+		"DEV ALL LEVELS " + devState,
 		"LEVEL OVERRIDES:",
-	)
+	}
 
 	otherLines, paletteLines := currentLevelOverrideSections()
 	if len(otherLines) == 0 && len(paletteLines) == 0 {
@@ -4426,6 +4043,68 @@ func debugOverlayLines() []string {
 		lines = append(lines, paletteLines...)
 	}
 	return lines
+}
+func physicsOverlayLines() []string {
+	status := "OK"
+	if physicsWarningTimer > 0 {
+		status = "WARNING: PHYSICS COULD NOT KEEP UP"
+	}
+
+	lines := []string{
+		"BUILD " + buildID,
+		"PHYSICS FIXED STEP " + fmt.Sprintf("%.0f Hz / %.3f ms", physicsStepHz, physicsStepSeconds*1000),
+		"MAX TRAVEL / TICK  " + fmt.Sprintf("%.2f px", physicsConfig.maxSpeed*physicsStepSeconds),
+		"PHYSICS ACTUAL     " + fmt.Sprintf("%.1f Hz", physicsStepRateCurrent),
+		"SIMULATION REALTIME " + fmt.Sprintf("%.1f%%", physicsRealtimePercent),
+		"PHYSICS COMPUTE LOAD " + fmt.Sprintf("%.1f%%", physicsComputeLoad),
+		"RENDER FPS          " + fmt.Sprintf("%.1f", fpsCurrent),
+		"RENDER INTERP       ON / alpha " + fmt.Sprintf("%.3f", renderInterpolationAlpha),
+		"STEPS LAST FRAME    " + strconv.Itoa(physicsLastFrameSteps),
+		"STEPS PEAK FRAME    " + strconv.Itoa(physicsPeakFrameSteps),
+		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
+		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
+		"STATUS " + status,
+		"",
+		"BALL 1 SPEED " + fmt.Sprintf("%.2f", math.Hypot(ball.vx, ball.vy)),
+		"BALL 1 SPIN  " + fmt.Sprintf("%+.2f", ball.omega),
+	}
+	if secondBallActive {
+		lines = append(lines,
+			"BALL 2 SPEED "+fmt.Sprintf("%.2f", math.Hypot(secondBall.vx, secondBall.vy)),
+			"BALL 2 SPIN  "+fmt.Sprintf("%+.2f", secondBall.omega),
+		)
+	}
+	if lastPaddleSpinValid {
+		lines = append(lines,
+			"",
+			"LAST PADDLE HIT BALL "+strconv.Itoa(lastPaddleSpinBall),
+			"SPIN BEFORE "+fmt.Sprintf("%+.2f", lastPaddleSpinBefore),
+			"SPIN ADDED  "+fmt.Sprintf("%+.2f", lastPaddleSpinAdded),
+			"SPIN AFTER  "+fmt.Sprintf("%+.2f", lastPaddleSpinAfter),
+		)
+	}
+	if lastCollisionValid {
+		lines = append(lines,
+			"",
+			"LAST BALL 1 COLLISION "+lastCollisionSurface,
+			"ANGLE IN          "+fmt.Sprintf("%+.2f deg", lastCollisionIncomingAngle),
+			"ANGLE OUT         "+fmt.Sprintf("%+.2f deg", lastCollisionOutgoingAngle),
+			"ANGLE CHANGE      "+fmt.Sprintf("%+.2f deg", lastCollisionAngleChange),
+			"SPIN ANGLE EFFECT "+fmt.Sprintf("%+.2f deg", lastCollisionSpinAngleEffect),
+			"HIT SPIN BEFORE   "+fmt.Sprintf("%+.2f", lastCollisionSpinBefore),
+			"HIT SPIN CHANGE   "+fmt.Sprintf("%+.2f", lastCollisionSpinChange),
+			"HIT SPIN AFTER    "+fmt.Sprintf("%+.2f", lastCollisionSpinAfter),
+			"CONTACT SPIN SPEED "+fmt.Sprintf("%+.2f", lastCollisionContactSpinSurfaceSpeed),
+			"IMPULSE WITH SPIN "+fmt.Sprintf("%+.2f", lastCollisionTangentialImpulse),
+			"IMPULSE NO SPIN   "+fmt.Sprintf("%+.2f", lastCollisionNoSpinImpulse),
+			"SPIN IMPULSE EFFECT "+fmt.Sprintf("%+.2f", lastCollisionSpinImpulseEffect),
+		)
+	}
+	return lines
+}
+
+func physicsOverlayReport() string {
+	return strings.Join(physicsOverlayLines(), "\n")
 }
 
 func debugOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
@@ -4458,6 +4137,12 @@ func debugOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeigh
 	return panelX, panelY, panelWidth, panelHeight, maxRows
 }
 
+func physicsOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
+	panelX, panelY, panelWidth, panelHeight, maxRows = debugOverlayGeometry(lineCount)
+	panelX = 10
+	return panelX, panelY, panelWidth, panelHeight, maxRows
+}
+
 func debugOverlayReport() string {
 	return strings.Join(debugOverlayLines(), "\n")
 }
@@ -4475,17 +4160,24 @@ func pointerCanvasPosition(e js.Value) (x, y float64, ok bool) {
 	return x, y, true
 }
 
-func pointerInsideDebugOverlay(e js.Value) bool {
-	if !debugOverlayVisible {
-		return false
-	}
+func overlayReportAtPointer(e js.Value) (string, bool) {
 	x, y, ok := pointerCanvasPosition(e)
 	if !ok {
-		return false
+		return "", false
 	}
-	panelX, panelY, panelWidth, panelHeight, _ := debugOverlayGeometry(len(debugOverlayLines()))
-	return x >= panelX && x <= panelX+panelWidth &&
-		y >= panelY && y <= panelY+panelHeight
+	if debugOverlayVisible {
+		panelX, panelY, panelWidth, panelHeight, _ := debugOverlayGeometry(len(debugOverlayLines()))
+		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
+			return debugOverlayReport(), true
+		}
+	}
+	if physicsOverlayVisible {
+		panelX, panelY, panelWidth, panelHeight, _ := physicsOverlayGeometry(len(physicsOverlayLines()))
+		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
+			return physicsOverlayReport(), true
+		}
+	}
+	return "", false
 }
 
 func copyTextToClipboard(text string) bool {
@@ -4520,12 +4212,7 @@ func copyTextToClipboard(text string) bool {
 	return success
 }
 
-func drawDebugOverlay() {
-	if !debugOverlayVisible {
-		return
-	}
-
-	lines := debugOverlayLines()
+func drawOverlayLines(lines []string) {
 	panelX, panelY, panelWidth, panelHeight, maxRows := debugOverlayGeometry(len(lines))
 
 	const lineHeight = 18.0
@@ -4552,6 +4239,40 @@ func drawDebugOverlay() {
 	ctx.Call("restore")
 }
 
+func drawDebugOverlay() {
+	if debugOverlayVisible {
+		drawOverlayLines(debugOverlayLines())
+	}
+}
+
+func drawPhysicsOverlayLines(lines []string) {
+	panelX, panelY, _, _, maxRows := physicsOverlayGeometry(len(lines))
+
+	const lineHeight = 18.0
+	const padding = 12.0
+	const columnWidth = 420.0
+
+	ctx.Call("save")
+	ctx.Set("fillStyle", palette[4])
+	ctx.Set("font", "14px GameFont, monospace")
+	ctx.Set("textAlign", "left")
+
+	for i, line := range lines {
+		column := i / maxRows
+		row := i % maxRows
+		x := panelX + padding + float64(column)*columnWidth
+		y := panelY + padding + lineHeight*float64(row+1) - 3
+		ctx.Call("fillText", line, x, y)
+	}
+	ctx.Call("restore")
+}
+
+func drawPhysicsOverlay() {
+	if physicsOverlayVisible {
+		drawPhysicsOverlayLines(physicsOverlayLines())
+	}
+}
+
 func drawCenteredOverlay() {
 	ctx.Call("save")
 	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.5)")
@@ -4559,7 +4280,8 @@ func drawCenteredOverlay() {
 	ctx.Call("restore")
 }
 
-func draw() {
+func draw(alpha float64) {
+	renderState := interpolatedRenderSnapshot(alpha)
 	ctx.Set("fillStyle", palette[0])
 	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
 
@@ -4569,30 +4291,30 @@ func draw() {
 	ctx.Call("drawImage", brickCanvas, 0, 0)
 	drawZapperBolts()
 
-	if blackHoleActive && showBlackHole {
+	if renderState.blackHoleActive && showBlackHole {
 		ctx.Set("fillStyle", "#000000")
 		ctx.Set("strokeStyle", "#9d4edd")
 		ctx.Set("lineWidth", 5)
 		ctx.Call("beginPath")
-		ctx.Call("arc", blackHoleX, blackHoleY, 28, 0, 2*math.Pi)
+		ctx.Call("arc", renderState.blackHoleX, renderState.blackHoleY, 28, 0, 2*math.Pi)
 		ctx.Call("fill")
 		ctx.Call("stroke")
 
 		ctx.Set("strokeStyle", "#c77dff")
 		ctx.Set("lineWidth", 2)
 		ctx.Call("beginPath")
-		ctx.Call("arc", blackHoleX, blackHoleY, 42, 0, 2*math.Pi)
+		ctx.Call("arc", renderState.blackHoleX, renderState.blackHoleY, 42, 0, 2*math.Pi)
 		ctx.Call("stroke")
 	}
 
-	drawBall(ball.x, ball.y, ball.r, ball.angle, palette[3], palette[5])
-	if secondBallActive {
-		drawBall(secondBall.x, secondBall.y, secondBall.r, secondBall.angle, palette[7], palette[8])
+	drawBall(renderState.ballX, renderState.ballY, ball.r, renderState.ballAngle, palette[3], palette[5])
+	if renderState.secondBallActive {
+		drawBall(renderState.secondBallX, renderState.secondBallY, secondBall.r, renderState.secondBallAngle, palette[7], palette[8])
 	}
 
 	ctx.Set("fillStyle", palette[1])
 	ctx.Call("beginPath")
-	ctx.Call("roundRect", paddle.x, paddle.y, paddle.w, paddle.h, paddleRadius)
+	ctx.Call("roundRect", renderState.paddleX, paddle.y, paddle.w, paddle.h, paddleRadius)
 	ctx.Call("fill")
 
 	ctx.Set("fillStyle", palette[4])
@@ -4665,6 +4387,7 @@ func draw() {
 	}
 
 	drawDebugOverlay()
+	drawPhysicsOverlay()
 }
 
 func drawBall(x, y, radius, angle float64, fillColor, strokeColor string) {
@@ -4695,6 +4418,7 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 			js.Global().Get("console").Call("error", "Panic in gameLoop:", r)
 		}
 	}()
+
 	now := js.Global().Get("performance").Call("now").Float()
 	rawDt := 0.0
 	if lastTime != 0 {
@@ -4702,9 +4426,6 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 	}
 	lastTime = now
 
-	// Measure the browser's actual requestAnimationFrame cadence. This is not
-	// capped at 60; high-refresh displays can report higher values. Ignore only
-	// long background-tab gaps and publish a smoothed half-second sample.
 	if rawDt > 0 && rawDt < 1.0 {
 		fpsSampleElapsed += rawDt
 		fpsSampleFrames++
@@ -4720,12 +4441,62 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 		}
 	}
 
-	dt := rawDt
-	if dt > 0.05 {
-		dt = 0.05
+	frameDt := rawDt
+	if frameDt < 0 {
+		frameDt = 0
 	}
-	update(dt)
-	draw()
+	if frameDt > physicsMaxFrameDelta {
+		physicsSampleDroppedTime += frameDt - physicsMaxFrameDelta
+		physicsDroppedTimeTotal += frameDt - physicsMaxFrameDelta
+		physicsWarningTimer = physicsWarningHoldSeconds
+		frameDt = physicsMaxFrameDelta
+	}
+	physicsAccumulator += frameDt
+
+	computeStart := js.Global().Get("performance").Call("now").Float()
+	steps := 0
+	for physicsAccumulator+1e-12 >= physicsStepSeconds && steps < physicsMaxCatchUpSteps {
+		beginPhysicsStepForRendering()
+		update(physicsStepSeconds)
+		physicsAccumulator -= physicsStepSeconds
+		steps++
+	}
+	if physicsAccumulator >= physicsStepSeconds {
+		dropped := physicsAccumulator - math.Mod(physicsAccumulator, physicsStepSeconds)
+		physicsAccumulator = math.Mod(physicsAccumulator, physicsStepSeconds)
+		physicsSampleDroppedTime += dropped
+		physicsDroppedTimeTotal += dropped
+		physicsWarningTimer = physicsWarningHoldSeconds
+	}
+	computeSeconds := (js.Global().Get("performance").Call("now").Float() - computeStart) / 1000.0
+
+	physicsLastFrameSteps = steps
+	if steps > physicsPeakFrameSteps {
+		physicsPeakFrameSteps = steps
+	}
+	if rawDt > 0 && rawDt < 1.0 {
+		physicsSampleElapsed += rawDt
+		physicsSampleSteps += steps
+		physicsSampleComputeTime += computeSeconds
+		if physicsSampleElapsed >= 0.5 {
+			physicsStepRateCurrent = float64(physicsSampleSteps) / physicsSampleElapsed
+			physicsRealtimePercent = float64(physicsSampleSteps) * physicsStepSeconds / physicsSampleElapsed * 100
+			physicsComputeLoad = physicsSampleComputeTime / physicsSampleElapsed * 100
+			if physicsSampleDroppedTime > 0 || physicsComputeLoad >= 90 {
+				physicsWarningTimer = physicsWarningHoldSeconds
+			}
+			physicsSampleElapsed = 0
+			physicsSampleSteps = 0
+			physicsSampleComputeTime = 0
+			physicsSampleDroppedTime = 0
+		}
+	}
+	if physicsWarningTimer > 0 {
+		physicsWarningTimer = math.Max(0, physicsWarningTimer-rawDt)
+	}
+
+	renderInterpolationAlpha = clampFloat(physicsAccumulator/physicsStepSeconds, 0, 1)
+	draw(renderInterpolationAlpha)
 	js.Global().Call("requestAnimationFrame", loopFunc)
 	return nil
 }
@@ -4738,6 +4509,74 @@ func clampFloat(x, min, max float64) float64 {
 		return max
 	}
 	return x
+}
+
+func captureRenderSnapshot() renderSnapshot {
+	return renderSnapshot{
+		ballX: ball.x, ballY: ball.y, ballAngle: ball.angle,
+		secondBallX: secondBall.x, secondBallY: secondBall.y, secondBallAngle: secondBall.angle,
+		paddleX:    paddle.x,
+		blackHoleX: blackHoleX, blackHoleY: blackHoleY,
+		secondBallActive: secondBallActive,
+		blackHoleActive:  blackHoleActive,
+	}
+}
+
+func syncRenderInterpolation() {
+	previousRenderSnapshot = captureRenderSnapshot()
+	renderSnapshotReady = true
+	renderInterpolationAlpha = 0
+}
+
+func beginPhysicsStepForRendering() {
+	previousRenderSnapshot = captureRenderSnapshot()
+	renderSnapshotReady = true
+}
+
+func lerpFloat(a, b, alpha float64) float64 {
+	return a + (b-a)*alpha
+}
+
+// TODO(render): If uneven browser/compositor pacing remains visible, consider
+// bounded visual-only extrapolation of moving objects by no more than one physics
+// step, suppressed around collisions. Keep it disabled unless interpolation alone
+// proves insufficient; it must never modify the authoritative physics state.
+func interpolatedRenderSnapshot(alpha float64) renderSnapshot {
+	current := captureRenderSnapshot()
+	if !renderSnapshotReady {
+		previousRenderSnapshot = current
+		renderSnapshotReady = true
+		return current
+	}
+
+	alpha = clampFloat(alpha, 0, 1)
+	result := renderSnapshot{
+		ballX:            lerpFloat(previousRenderSnapshot.ballX, current.ballX, alpha),
+		ballY:            lerpFloat(previousRenderSnapshot.ballY, current.ballY, alpha),
+		ballAngle:        lerpFloat(previousRenderSnapshot.ballAngle, current.ballAngle, alpha),
+		paddleX:          lerpFloat(previousRenderSnapshot.paddleX, current.paddleX, alpha),
+		blackHoleX:       lerpFloat(previousRenderSnapshot.blackHoleX, current.blackHoleX, alpha),
+		blackHoleY:       lerpFloat(previousRenderSnapshot.blackHoleY, current.blackHoleY, alpha),
+		secondBallActive: current.secondBallActive,
+		blackHoleActive:  current.blackHoleActive,
+	}
+
+	// New or removed transient objects must not interpolate from stale positions.
+	if previousRenderSnapshot.secondBallActive == current.secondBallActive {
+		result.secondBallX = lerpFloat(previousRenderSnapshot.secondBallX, current.secondBallX, alpha)
+		result.secondBallY = lerpFloat(previousRenderSnapshot.secondBallY, current.secondBallY, alpha)
+		result.secondBallAngle = lerpFloat(previousRenderSnapshot.secondBallAngle, current.secondBallAngle, alpha)
+	} else {
+		result.secondBallX = current.secondBallX
+		result.secondBallY = current.secondBallY
+		result.secondBallAngle = current.secondBallAngle
+	}
+	if previousRenderSnapshot.blackHoleActive != current.blackHoleActive {
+		result.blackHoleX = current.blackHoleX
+		result.blackHoleY = current.blackHoleY
+	}
+
+	return result
 }
 
 func clampBallToPhysicsSettings(b *Ball, settings *physicsSettings) {
@@ -4763,22 +4602,35 @@ func verticalDragToHorizontalDelta(deltaY float64) float64 {
 }
 
 // ---- Input ----
-func movePaddleToPointer(e js.Value) {
+func pointerPaddleX(e js.Value) (float64, bool) {
 	rect := canvas.Call("getBoundingClientRect")
 	displayWidth := rect.Get("width").Float()
 	if displayWidth <= 0 {
-		return
+		return 0, false
 	}
 
 	scaleX := canvasWidth / displayWidth
 	pointerX := (e.Get("clientX").Float() - rect.Get("left").Float()) * scaleX
 	x := pointerX - paddle.w/2
+	x = clampFloat(x, 0, math.Max(0, canvasWidth-paddle.w))
+	return x, true
+}
 
-	if x < 0 {
-		x = 0
+func setMousePaddleTarget(e js.Value) {
+	x, ok := pointerPaddleX(e)
+	if !ok {
+		return
 	}
-	if x > canvasWidth-paddle.w {
-		x = canvasWidth - paddle.w
+	mousePaddleTargetX = x
+	mouseControlActive = true
+}
+
+// Touch-follow mode intentionally remains direct: its physics update branch does
+// not integrate paddle.vx again, unlike the old desktop mouse path.
+func movePaddleToPointer(e js.Value) {
+	x, ok := pointerPaddleX(e)
+	if !ok {
+		return
 	}
 
 	paddle.vx = (x - paddle.x) * 12
@@ -4840,37 +4692,23 @@ func setupInput() {
 			return nil
 		}
 
-		// Toggle the build/config debug panel.
+		// I: level/palette overrides. P: physics diagnostics.
 		if (key == "i" || key == "I") && !e.Get("repeat").Bool() {
 			debugOverlayVisible = !debugOverlayVisible
+			if debugOverlayVisible {
+				physicsOverlayVisible = false
+			}
 			return nil
 		}
-
-		// Runtime A/B physics switch. Startup mode is controlled by defaultUseImprovedPhysics.
-		if (key == "f" || key == "F") && !e.Get("repeat").Bool() {
-			useImprovedPhysics = !useImprovedPhysics
-			settings := activePhysicsSettings()
-			clampBallToPhysicsSettings(&ball, settings)
-			if secondBallActive {
-				clampBallToPhysicsSettings(&secondBall, settings)
-			}
-			refreshCurrentGravity()
-			ball.stuckTimer = 0
-			resetFastOrbitState(&ball)
-			resetFastOrbitState(&secondBall)
-			clearLastPaddleSpinDebug()
-			clearLastCollisionDebug()
-			secondBall.stuckTimer = 0
-			bricksDirty = true
-			if useImprovedPhysics {
-				showStatus("Physics: improved", 2.0)
-			} else {
-				showStatus("Physics: original", 2.0)
+		if (key == "p" || key == "P") && !e.Get("repeat").Bool() {
+			physicsOverlayVisible = !physicsOverlayVisible
+			if physicsOverlayVisible {
+				debugOverlayVisible = false
 			}
 			return nil
 		}
 
-		// Start a new game after winning. N/P remain level-navigation cheats.
+		// Start a new game after winning. Page Up/Page Down remain level-navigation cheats.
 		if gameOver && win {
 			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
 				jumpToLevel(0)
@@ -4878,9 +4716,8 @@ func setupInput() {
 			return nil
 		}
 
-		// Cheat keys must work even while waiting to launch, paused, or on
-		// a game-over/win screen.
-		if (key == "n" || key == "N") && !e.Get("repeat").Bool() {
+		// Page Up / Page Down navigate levels even while paused or waiting.
+		if key == "PageDown" && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex < limit {
 				jumpToLevel(currentLevelIndex + 1)
@@ -4891,7 +4728,7 @@ func setupInput() {
 			}
 			return nil
 		}
-		if (key == "p" || key == "P") && !e.Get("repeat").Bool() {
+		if key == "PageUp" && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex > 0 {
 				jumpToLevel(currentLevelIndex - 1)
@@ -4993,8 +4830,10 @@ func setupInput() {
 
 		// Paddle controls: arrows, A/D, and separate left/right Alt keys.
 		if key == "ArrowLeft" || key == "a" || key == "A" || code == "AltLeft" {
+			mouseControlActive = false
 			leftPressed = true
 		} else if key == "ArrowRight" || key == "d" || key == "D" || code == "AltRight" {
+			mouseControlActive = false
 			rightPressed = true
 		}
 		return nil
@@ -5050,8 +4889,8 @@ func setupInput() {
 
 		// Clicking or tapping the visible debug panel copies its complete text.
 		// Consume the event so it does not also launch, unpause, or move the paddle.
-		if pointerInsideDebugOverlay(e) {
-			if copyTextToClipboard(debugOverlayReport()) {
+		if report, inside := overlayReportAtPointer(e); inside {
+			if copyTextToClipboard(report) {
 				showStatus("Debug info copied", 1.5)
 			} else {
 				showStatus("Clipboard unavailable", 1.5)
@@ -5143,7 +4982,7 @@ func setupInput() {
 		if pointerType == "mouse" {
 			leftPressed = false
 			rightPressed = false
-			movePaddleToPointer(e)
+			setMousePaddleTarget(e)
 
 			if gameOver && !win {
 				retryCurrentLevel()
@@ -5196,7 +5035,7 @@ func setupInput() {
 			e.Call("preventDefault")
 			leftPressed = false
 			rightPressed = false
-			movePaddleToPointer(e)
+			setMousePaddleTarget(e)
 		}
 
 		return nil
@@ -5263,7 +5102,7 @@ func setupInput() {
 	canvas.Call("addEventListener", "pointercancel", pointerCancel)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		paddle.vx = 0
+		mouseControlActive = false
 		return nil
 	})
 	canvas.Call("addEventListener", "mouseleave", mouseLeave)
@@ -5352,6 +5191,7 @@ func main() {
 	setupInput()
 	setupMobileControlSelector()
 	resetGame()
+	syncRenderInterpolation()
 
 	setPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) == 0 || gameOver {

@@ -1,21 +1,21 @@
 # Level 26: Heavy Rain
 # Tall separated drops, strong gravity, and a fast paddle produce a vertical chase.
-gravity=700
+gravity=600
 restitution=0.86
-frictionCoeff=0.15
-maxSpin=55
+//frictionCoeff=0.15
+//maxSpin=55
 paddleBoost=1450
-brickBoost=450
-maxSpeed=1200
+brickBoost=250
+maxSpeed=1100
 brickWidth=34
 brickHeight=38
 brickPadding=18
 brickOffsetTop=35
 paddleWidth=250
 ballX=900
-ballY=20
-ballVx=-420
-ballVy=-260
+ballY=23
+ballVx=200
+ballVy=2
 ballRadius=11
 powerUpDuration=9
 enableBlackHole=false
