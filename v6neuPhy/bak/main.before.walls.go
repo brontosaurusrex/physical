@@ -14,7 +14,7 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260727-9561683b92"
+	buildID = "20260727-f2b7a951c4"
 
 	// Rendering follows requestAnimationFrame, but simulation always advances in
 	// fixed 1/240-second steps. At maxSpeed=1250 this is about 5.2 px per tick.
@@ -92,24 +92,6 @@ const (
 	physicsMinimumCollisionGrip     = 0.08
 	physicsMinimumPaddleGrip        = 0.55 // 0.45
 	physicsCollisionSlop            = 0.05
-
-	// A short input-memory window makes deliberate paddle spin less dependent on
-	// landing on one exact 240 Hz tick. Only spin transfer uses this history.
-	paddleSpinGraceSeconds = 0.050
-
-	// Speeds above the level max are allowed when collision spin converts into
-	// translation, then their excess decays smoothly back toward maxSpeed.
-	physicsOverspeedHalfLife = 0.35
-
-	// Invisible deterministic wall roughness. Nearby impact positions receive
-	// smoothly related normals; the same level and position always match.
-	wallNoiseCellSize          = 20.0 //120.0
-	wallSideTiltDegrees        = 0.15
-	wallTopTiltDegrees         = 3.45 //0.45
-	wallCornerFadeDistance     = 40.0
-	wallNoiseIDLeft        int = 1
-	wallNoiseIDRight       int = 2
-	wallNoiseIDTop         int = 3
 
 	// Every brick receives a stable, tiny rotation. The same
 	// angle is used for drawing and collision normals, breaking exact vertical
@@ -366,11 +348,6 @@ type statusMessage struct {
 	timer float64
 }
 
-type paddleVelocitySample struct {
-	vx  float64
-	age float64
-}
-
 // renderSnapshot stores the last completed fixed-step state used for visual
 // interpolation. Physics remains authoritative; only drawing is smoothed.
 type renderSnapshot struct {
@@ -481,9 +458,6 @@ var (
 
 	paddlePreviousX float64
 
-	// Recent fixed-step paddle velocities used only for spin transfer at impact.
-	paddleSpinHistory []paddleVelocitySample
-
 	hudLivesValue int
 	hudLevelValue int
 	hudScoreValue int
@@ -491,9 +465,8 @@ var (
 	hudLevelText  string
 	hudScoreText  string
 
-	// Per-level measured peaks. Speed records the fastest incoming collision
-	// speed, before paddle boost or collision response. Spin records the greatest
-	// absolute spin reached. Both survive life loss and reset with the level.
+	// Per-level measured peaks. These survive life loss and reset only when the
+	// level starts again or a different level is loaded.
 	levelMeasuredMaxSpeed float64
 	levelMeasuredMaxSpin  float64
 
@@ -606,53 +579,6 @@ func rotateVector(x, y, angle float64) (float64, float64) {
 	cosAngle := math.Cos(angle)
 	sinAngle := math.Sin(angle)
 	return x*cosAngle - y*sinAngle, x*sinAngle + y*cosAngle
-}
-
-func wallNoiseHash(cell, wallID int) float64 {
-	hash := uint32(cell+0x40000000)*0x9e3779b9 ^
-		uint32(currentLevelIndex+1)*0x85ebca6b ^
-		uint32(wallID)*0xc2b2ae35
-	hash ^= hash >> 16
-	hash *= 0x7feb352d
-	hash ^= hash >> 15
-	hash *= 0x846ca68b
-	hash ^= hash >> 16
-	return float64(hash&0x00ffffff)/float64(0x00ffffff)*2 - 1
-}
-
-// wallNoise returns smooth deterministic one-dimensional value noise.
-func wallNoise(position float64, wallID int) float64 {
-	if wallNoiseCellSize <= 0 {
-		return 0
-	}
-
-	x := position / wallNoiseCellSize
-	cell := int(math.Floor(x))
-	t := x - float64(cell)
-	t = t * t * (3 - 2*t)
-	a := wallNoiseHash(cell, wallID)
-	b := wallNoiseHash(cell+1, wallID)
-	return a + (b-a)*t
-}
-
-func wallCornerFade(position, wallLength float64) float64 {
-	if wallCornerFadeDistance <= 0 || wallLength <= 0 {
-		return 1
-	}
-
-	edgeDistance := math.Min(position, wallLength-position)
-	t := clampFloat(edgeDistance/wallCornerFadeDistance, 0, 1)
-	return t * t * (3 - 2*t)
-}
-
-func roughWallNormal(
-	nx, ny, position, wallLength float64,
-	wallID int,
-	maximumTiltDegrees float64,
-) (float64, float64) {
-	angleDegrees := wallNoise(position, wallID) * maximumTiltDegrees
-	angleDegrees *= wallCornerFade(position, wallLength)
-	return rotateVector(nx, ny, angleDegrees*math.Pi/180)
 }
 
 const (
@@ -937,41 +863,6 @@ func moveToward(current, target, maxDelta float64) float64 {
 	return target
 }
 
-func resetPaddleSpinHistory() {
-	paddleSpinHistory = paddleSpinHistory[:0]
-}
-
-func updatePaddleSpinHistory(dt float64) {
-	if dt <= 0 || paddleSpinGraceSeconds <= 0 {
-		resetPaddleSpinHistory()
-		return
-	}
-
-	kept := paddleSpinHistory[:0]
-	for _, sample := range paddleSpinHistory {
-		sample.age += dt
-		if sample.age <= paddleSpinGraceSeconds {
-			kept = append(kept, sample)
-		}
-	}
-	paddleSpinHistory = append(kept, paddleVelocitySample{vx: paddle.vx})
-}
-
-func effectivePaddleSpinVelocity() float64 {
-	best := paddle.vx
-	for _, sample := range paddleSpinHistory {
-		if sample.age < 0 || sample.age > paddleSpinGraceSeconds {
-			continue
-		}
-		weight := 1 - sample.age/paddleSpinGraceSeconds
-		candidate := sample.vx * weight
-		if math.Abs(candidate) > math.Abs(best) {
-			best = candidate
-		}
-	}
-	return best
-}
-
 func showStatus(text string, duration float64) {
 	statusMessages = append(statusMessages, statusMessage{text: text, timer: duration})
 	if len(statusMessages) > statusMessageLimit {
@@ -1070,16 +961,13 @@ func maybePlayLastBrickSound() {
 	}
 }
 
-func recordMeasuredBallSpin(b *Ball) {
+func recordMeasuredBallPeaks(b *Ball) {
 	if b == nil {
 		return
 	}
 
+	levelMeasuredMaxSpeed = math.Max(levelMeasuredMaxSpeed, math.Hypot(b.vx, b.vy))
 	levelMeasuredMaxSpin = math.Max(levelMeasuredMaxSpin, math.Abs(b.omega))
-}
-
-func recordIncomingCollisionSpeed(speed float64) {
-	levelMeasuredMaxSpeed = math.Max(levelMeasuredMaxSpeed, speed)
 }
 
 func updateHUDCache() {
@@ -1609,7 +1497,6 @@ func resolveCollisionDebug(
 	record bool,
 ) {
 	incomingAngle := velocityAngleDegrees(b.vx, b.vy)
-	incomingSpeed := math.Hypot(b.vx, b.vy)
 	spinBefore := b.omega
 
 	// A zero-spin clone gives a direct A/B measurement of the angle caused by
@@ -1623,7 +1510,6 @@ func resolveCollisionDebug(
 
 	tangentialImpulse := 0.0
 	if impulse, collided := resolveCollisionBall(b, nx, ny, surfVx, surfVy, frictionScale); collided {
-		recordIncomingCollisionSpeed(incomingSpeed)
 		tangentialImpulse = impulse
 	}
 
@@ -2262,7 +2148,6 @@ func startLevel(index int) {
 	mobileLeftPointerID = -1
 	mobileRightPointerID = -1
 	paddle.vx = 0
-	resetPaddleSpinHistory()
 
 	// User toggles never carry into a new level.
 	magnetCheat = false
@@ -2285,10 +2170,9 @@ func startLevel(index int) {
 	ball.stuckTimer = 0
 	ball.soundCooldown = 0
 	ball.r = ballRadius
-	// Use the real launch speed as the baseline. Later updates are made only
-	// from incoming speeds immediately before actual collisions.
-	levelMeasuredMaxSpeed = math.Hypot(ball.vx, ball.vy)
-	levelMeasuredMaxSpin = math.Abs(ball.omega)
+	levelMeasuredMaxSpeed = 0
+	levelMeasuredMaxSpin = 0
+	recordMeasuredBallPeaks(&ball)
 	resetFastOrbitState(&ball)
 	resetFastOrbitState(&secondBall)
 	secondBallActive = false
@@ -2928,7 +2812,6 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	b.vx *= airDamping
 	b.vy *= airDamping
 	b.omega *= spinDamping
-	applyOverspeedDrag(b, dt, physics)
 
 	previousX, previousY := b.x, b.y
 	b.x += b.vx * dt
@@ -2939,22 +2822,19 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	if b.x-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vx)
 		b.x = b.r + physicsCollisionSlop
-		nx, ny := roughWallNormal(1, 0, b.y, canvasHeight, wallNoiseIDLeft, wallSideTiltDegrees)
-		resolveCollisionDebug(b, nx, ny, 0, 0, physicsWallFrictionScale, "WALL LEFT", isPrimary)
+		resolveCollisionDebug(b, 1, 0, 0, 0, physicsWallFrictionScale, "WALL LEFT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.x+b.r > canvasWidth {
 		impactSpeed := math.Max(0, b.vx)
 		b.x = canvasWidth - b.r - physicsCollisionSlop
-		nx, ny := roughWallNormal(-1, 0, b.y, canvasHeight, wallNoiseIDRight, wallSideTiltDegrees)
-		resolveCollisionDebug(b, nx, ny, 0, 0, physicsWallFrictionScale, "WALL RIGHT", isPrimary)
+		resolveCollisionDebug(b, -1, 0, 0, 0, physicsWallFrictionScale, "WALL RIGHT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vy)
 		b.y = b.r + physicsCollisionSlop
-		nx, ny := roughWallNormal(0, 1, b.x, canvasWidth, wallNoiseIDTop, wallTopTiltDegrees)
-		resolveCollisionDebug(b, nx, ny, 0, 0, physicsWallFrictionScale, "WALL TOP", isPrimary)
+		resolveCollisionDebug(b, 0, 1, 0, 0, physicsWallFrictionScale, "WALL TOP", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y+b.r > canvasHeight {
@@ -2967,7 +2847,6 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	if b.vy > 0 &&
 		b.x+b.r > pLeft && b.x-b.r < pRight &&
 		b.y+b.r > pTop && b.y+b.r < pBottom {
-		recordIncomingCollisionSpeed(math.Hypot(b.vx, b.vy))
 		b.y = pTop - b.r - physicsCollisionSlop
 		resetFastOrbitState(b)
 
@@ -2983,8 +2862,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 		b.vx = speed*math.Sin(angle) + incomingVx*0.15
 		b.vy = -speed * math.Cos(angle)
 
-		effectivePaddleVx := effectivePaddleSpinVelocity()
-		relativeSlip := b.vx - b.omega*b.r - effectivePaddleVx
+		relativeSlip := b.vx - b.omega*b.r - paddle.vx
 		normalDeltaSpeed := math.Abs(b.vy - incomingVy)
 		effectivePaddleFriction := math.Max(
 			physics.frictionCoeff*physicsPaddleFrictionScale,
@@ -2995,7 +2873,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 		deltaVx := clampFloat(desiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
 		b.vx += deltaVx
 		b.omega -= 2 * deltaVx / b.r
-		b.omega += -effectivePaddleVx * physicsPaddleSpinTransfer / math.Max(b.r, 1)
+		b.omega += -paddle.vx * physicsPaddleSpinTransfer / math.Max(b.r, 1)
 
 		preferredDirection := incomingVx
 		if preferredDirection == 0 {
@@ -3008,7 +2886,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 		noSpinPaddle := *b
 		noSpinPaddle.omega = 0
 		noSpinPaddle.vx -= deltaVx
-		noSpinRelativeSlip := noSpinPaddle.vx - effectivePaddleVx
+		noSpinRelativeSlip := noSpinPaddle.vx - paddle.vx
 		noSpinDesiredDeltaVx := -noSpinRelativeSlip / 3.0
 		noSpinDeltaVx := clampFloat(noSpinDesiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
 		noSpinPaddle.vx += noSpinDeltaVx
@@ -3063,7 +2941,7 @@ func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 
 func updateBall(b *Ball, dt float64, isPrimary bool) {
 	updateBallAdaptive(b, dt, isPrimary)
-	recordMeasuredBallSpin(b)
+	recordMeasuredBallPeaks(b)
 }
 
 func loseLife() {
@@ -3552,7 +3430,6 @@ func applyMousePaddleControl(dt float64) bool {
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
-		resetPaddleSpinHistory()
 		return
 	}
 
@@ -3638,7 +3515,6 @@ func update(dt float64) {
 		paddle.vx = 0
 	}
 	paddlePreviousX = paddle.x
-	updatePaddleSpinHistory(dt)
 
 	// ---- Independent power-up timers ----
 	gravityChanged := false
@@ -3798,7 +3674,6 @@ func resetBalls() {
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
 	paddlePreviousX = paddle.x
-	resetPaddleSpinHistory()
 	mouseControlActive = false
 	mousePaddleTargetX = paddle.x
 	clearLastPaddleSpinDebug()
@@ -4469,32 +4344,20 @@ func draw(alpha float64) {
 		"font",
 		"18px GameFont, monospace",
 	)
-	// Match the P display: 10 units from the canvas edge plus 12 units of
-	// internal text padding. Its first-line baseline would be 37 at the top.
-	const (
-		hudTextX      = 22.0
-		hudFirstLineY = 37.0
-		hudLineStep   = 30.0
-	)
 	updateHUDCache()
-	ctx.Call("fillText", hudLivesText, hudTextX, hudFirstLineY)
-	ctx.Call("fillText", hudLevelText, hudTextX, hudFirstLineY+hudLineStep)
-	ctx.Call("fillText", hudScoreText, hudTextX, hudFirstLineY+2*hudLineStep)
+	ctx.Call("fillText", hudLivesText, 10, 30)
+	ctx.Call("fillText", hudLevelText, 10, 60)
+	ctx.Call("fillText", hudScoreText, 10, 90)
 
 	currentSpeed := math.Hypot(ball.vx, ball.vy)
 	ctx.Call("fillText", "Speed: "+fmt.Sprintf("%.0f", currentSpeed)+
-		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpeed)+")", hudTextX, hudFirstLineY+3*hudLineStep)
-
-	if math.Abs(ball.omega) > 100 {
-		ctx.Set("fillStyle", "#ff0000")
-	}
+		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpeed)+")", 10, 120)
 	ctx.Call("fillText", "Spin:  "+fmt.Sprintf("%+.0f", ball.omega)+
-		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpin)+")", hudTextX, hudFirstLineY+4*hudLineStep)
-	ctx.Set("fillStyle", palette[4])
+		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpin)+")", 10, 150)
 
 	for i, message := range statusMessages {
-		y := hudFirstLineY + 160.0 + float64(i)*hudLineStep
-		ctx.Call("fillText", message.text, hudTextX, y)
+		y := 190.0 + float64(i)*30.0
+		ctx.Call("fillText", message.text, 10, y)
 	}
 
 	if waitingForStart && !gameOver {
@@ -4744,27 +4607,13 @@ func interpolatedRenderSnapshot(alpha float64) renderSnapshot {
 	return result
 }
 
-func applyOverspeedDrag(b *Ball, dt float64, settings *physicsSettings) {
-	if b == nil || settings == nil || dt <= 0 || settings.maxSpeed <= 0 || physicsOverspeedHalfLife <= 0 {
-		return
-	}
-
-	speed := math.Hypot(b.vx, b.vy)
-	if speed <= settings.maxSpeed || speed <= 0 {
-		return
-	}
-
-	excess := speed - settings.maxSpeed
-	excess *= math.Exp(-math.Ln2 * dt / physicsOverspeedHalfLife)
-	targetSpeed := settings.maxSpeed + excess
-	scale := targetSpeed / speed
-	b.vx *= scale
-	b.vy *= scale
-}
-
 func clampBallToPhysicsSettings(b *Ball, settings *physicsSettings) {
-	// Linear overspeed is intentionally not hard-clamped. It is allowed as a
-	// temporary result of spin-to-speed transfer and decays in flight.
+	speed := math.Hypot(b.vx, b.vy)
+	if speed > settings.maxSpeed && speed > 0 {
+		scale := settings.maxSpeed / speed
+		b.vx *= scale
+		b.vy *= scale
+	}
 	b.omega = clampFloat(b.omega, -settings.maxSpin, settings.maxSpin)
 }
 

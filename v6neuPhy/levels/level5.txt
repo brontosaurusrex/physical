@@ -3,8 +3,12 @@ enableBlackHole=true
 brickWidth=15
 brickHeight=30
 brickPadding=10
-maxSpeed=1050
+//maxSpeed=1050
 enableZapper=true
+ballX=1500
+ballY=23
+ballVx=200
+ballVy=2
 ---
 M//     M//           M// M//                 
 M//     M//           M// M//                 
