@@ -2,8 +2,8 @@
 # Tall separated drops, strong gravity, and a fast paddle produce a vertical chase.
 gravity=700
 restitution=0.86
-frictionCoeff=0.15
-maxSpin=55
+//frictionCoeff=0.15
+//maxSpin=55
 paddleBoost=1450
 brickBoost=450
 maxSpeed=1200

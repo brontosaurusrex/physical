@@ -14,11 +14,11 @@ import (
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260727-46d937b593"
+	buildID = "20260727-3e7840cf3f"
 
 	// Rendering follows requestAnimationFrame, but simulation always advances in
 	// fixed 1/240-second steps. At maxSpeed=1250 this is about 5.2 px per tick.
-	physicsStepHz             = 240.0
+	physicsStepHz             = 240.0 // 240.0
 	physicsStepSeconds        = 1.0 / physicsStepHz
 	physicsMaxCatchUpSteps    = 32
 	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
@@ -70,7 +70,7 @@ const (
 	defaultPhysicsFrictionCoeff       = 0.14 // 0.10
 	defaultPhysicsPaddleBoost         = 900.0
 	defaultPhysicsBrickBoost          = 100.0
-	defaultPhysicsMaxSpeed            = 1250.0 // 1170.0
+	defaultPhysicsMaxSpeed            = 1000.0 // 1170.0
 	defaultPhysicsMaxSpin             = 1530.0
 	defaultPhysicsStuckSpeedThreshold = 85.0
 	defaultPhysicsStuckDuration       = 3.0
@@ -348,6 +348,17 @@ type statusMessage struct {
 	timer float64
 }
 
+// renderSnapshot stores the last completed fixed-step state used for visual
+// interpolation. Physics remains authoritative; only drawing is smoothed.
+type renderSnapshot struct {
+	ballX, ballY, ballAngle                   float64
+	secondBallX, secondBallY, secondBallAngle float64
+	paddleX                                   float64
+	blackHoleX, blackHoleY                    float64
+	secondBallActive                          bool
+	blackHoleActive                           bool
+}
+
 // ---- Global state ----
 var (
 	doc    = js.Global().Get("document")
@@ -476,6 +487,10 @@ var (
 	physicsWarningTimer      float64
 	physicsLastFrameSteps    int
 	physicsPeakFrameSteps    int
+
+	previousRenderSnapshot   renderSnapshot
+	renderSnapshotReady      bool
+	renderInterpolationAlpha float64
 
 	lastPaddleSpinValid  bool
 	lastPaddleSpinBall   int
@@ -2187,6 +2202,7 @@ func startLevel(index int) {
 
 	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
+	syncRenderInterpolation()
 	saveCurrentLevel()
 	log("Level " + strconv.Itoa(index+1) + " started")
 }
@@ -3644,6 +3660,7 @@ func resetBalls() {
 	mousePaddleTargetX = paddle.x
 	clearLastPaddleSpinDebug()
 	clearLastCollisionDebug()
+	syncRenderInterpolation()
 }
 
 func ensureBrickCanvas() {
@@ -4041,6 +4058,7 @@ func physicsOverlayLines() []string {
 		"SIMULATION REALTIME " + fmt.Sprintf("%.1f%%", physicsRealtimePercent),
 		"PHYSICS COMPUTE LOAD " + fmt.Sprintf("%.1f%%", physicsComputeLoad),
 		"RENDER FPS          " + fmt.Sprintf("%.1f", fpsCurrent),
+		"RENDER INTERP       ON / alpha " + fmt.Sprintf("%.3f", renderInterpolationAlpha),
 		"STEPS LAST FRAME    " + strconv.Itoa(physicsLastFrameSteps),
 		"STEPS PEAK FRAME    " + strconv.Itoa(physicsPeakFrameSteps),
 		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
@@ -4119,6 +4137,12 @@ func debugOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeigh
 	return panelX, panelY, panelWidth, panelHeight, maxRows
 }
 
+func physicsOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
+	panelX, panelY, panelWidth, panelHeight, maxRows = debugOverlayGeometry(lineCount)
+	panelX = 10
+	return panelX, panelY, panelWidth, panelHeight, maxRows
+}
+
 func debugOverlayReport() string {
 	return strings.Join(debugOverlayLines(), "\n")
 }
@@ -4148,7 +4172,7 @@ func overlayReportAtPointer(e js.Value) (string, bool) {
 		}
 	}
 	if physicsOverlayVisible {
-		panelX, panelY, panelWidth, panelHeight, _ := debugOverlayGeometry(len(physicsOverlayLines()))
+		panelX, panelY, panelWidth, panelHeight, _ := physicsOverlayGeometry(len(physicsOverlayLines()))
 		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
 			return physicsOverlayReport(), true
 		}
@@ -4221,9 +4245,31 @@ func drawDebugOverlay() {
 	}
 }
 
+func drawPhysicsOverlayLines(lines []string) {
+	panelX, panelY, _, _, maxRows := physicsOverlayGeometry(len(lines))
+
+	const lineHeight = 18.0
+	const padding = 12.0
+	const columnWidth = 420.0
+
+	ctx.Call("save")
+	ctx.Set("fillStyle", palette[4])
+	ctx.Set("font", "14px GameFont, monospace")
+	ctx.Set("textAlign", "left")
+
+	for i, line := range lines {
+		column := i / maxRows
+		row := i % maxRows
+		x := panelX + padding + float64(column)*columnWidth
+		y := panelY + padding + lineHeight*float64(row+1) - 3
+		ctx.Call("fillText", line, x, y)
+	}
+	ctx.Call("restore")
+}
+
 func drawPhysicsOverlay() {
 	if physicsOverlayVisible {
-		drawOverlayLines(physicsOverlayLines())
+		drawPhysicsOverlayLines(physicsOverlayLines())
 	}
 }
 
@@ -4234,7 +4280,8 @@ func drawCenteredOverlay() {
 	ctx.Call("restore")
 }
 
-func draw() {
+func draw(alpha float64) {
+	renderState := interpolatedRenderSnapshot(alpha)
 	ctx.Set("fillStyle", palette[0])
 	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
 
@@ -4244,30 +4291,30 @@ func draw() {
 	ctx.Call("drawImage", brickCanvas, 0, 0)
 	drawZapperBolts()
 
-	if blackHoleActive && showBlackHole {
+	if renderState.blackHoleActive && showBlackHole {
 		ctx.Set("fillStyle", "#000000")
 		ctx.Set("strokeStyle", "#9d4edd")
 		ctx.Set("lineWidth", 5)
 		ctx.Call("beginPath")
-		ctx.Call("arc", blackHoleX, blackHoleY, 28, 0, 2*math.Pi)
+		ctx.Call("arc", renderState.blackHoleX, renderState.blackHoleY, 28, 0, 2*math.Pi)
 		ctx.Call("fill")
 		ctx.Call("stroke")
 
 		ctx.Set("strokeStyle", "#c77dff")
 		ctx.Set("lineWidth", 2)
 		ctx.Call("beginPath")
-		ctx.Call("arc", blackHoleX, blackHoleY, 42, 0, 2*math.Pi)
+		ctx.Call("arc", renderState.blackHoleX, renderState.blackHoleY, 42, 0, 2*math.Pi)
 		ctx.Call("stroke")
 	}
 
-	drawBall(ball.x, ball.y, ball.r, ball.angle, palette[3], palette[5])
-	if secondBallActive {
-		drawBall(secondBall.x, secondBall.y, secondBall.r, secondBall.angle, palette[7], palette[8])
+	drawBall(renderState.ballX, renderState.ballY, ball.r, renderState.ballAngle, palette[3], palette[5])
+	if renderState.secondBallActive {
+		drawBall(renderState.secondBallX, renderState.secondBallY, secondBall.r, renderState.secondBallAngle, palette[7], palette[8])
 	}
 
 	ctx.Set("fillStyle", palette[1])
 	ctx.Call("beginPath")
-	ctx.Call("roundRect", paddle.x, paddle.y, paddle.w, paddle.h, paddleRadius)
+	ctx.Call("roundRect", renderState.paddleX, paddle.y, paddle.w, paddle.h, paddleRadius)
 	ctx.Call("fill")
 
 	ctx.Set("fillStyle", palette[4])
@@ -4409,6 +4456,7 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 	computeStart := js.Global().Get("performance").Call("now").Float()
 	steps := 0
 	for physicsAccumulator+1e-12 >= physicsStepSeconds && steps < physicsMaxCatchUpSteps {
+		beginPhysicsStepForRendering()
 		update(physicsStepSeconds)
 		physicsAccumulator -= physicsStepSeconds
 		steps++
@@ -4447,7 +4495,8 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 		physicsWarningTimer = math.Max(0, physicsWarningTimer-rawDt)
 	}
 
-	draw()
+	renderInterpolationAlpha = clampFloat(physicsAccumulator/physicsStepSeconds, 0, 1)
+	draw(renderInterpolationAlpha)
 	js.Global().Call("requestAnimationFrame", loopFunc)
 	return nil
 }
@@ -4460,6 +4509,74 @@ func clampFloat(x, min, max float64) float64 {
 		return max
 	}
 	return x
+}
+
+func captureRenderSnapshot() renderSnapshot {
+	return renderSnapshot{
+		ballX: ball.x, ballY: ball.y, ballAngle: ball.angle,
+		secondBallX: secondBall.x, secondBallY: secondBall.y, secondBallAngle: secondBall.angle,
+		paddleX:    paddle.x,
+		blackHoleX: blackHoleX, blackHoleY: blackHoleY,
+		secondBallActive: secondBallActive,
+		blackHoleActive:  blackHoleActive,
+	}
+}
+
+func syncRenderInterpolation() {
+	previousRenderSnapshot = captureRenderSnapshot()
+	renderSnapshotReady = true
+	renderInterpolationAlpha = 0
+}
+
+func beginPhysicsStepForRendering() {
+	previousRenderSnapshot = captureRenderSnapshot()
+	renderSnapshotReady = true
+}
+
+func lerpFloat(a, b, alpha float64) float64 {
+	return a + (b-a)*alpha
+}
+
+// TODO(render): If uneven browser/compositor pacing remains visible, consider
+// bounded visual-only extrapolation of moving objects by no more than one physics
+// step, suppressed around collisions. Keep it disabled unless interpolation alone
+// proves insufficient; it must never modify the authoritative physics state.
+func interpolatedRenderSnapshot(alpha float64) renderSnapshot {
+	current := captureRenderSnapshot()
+	if !renderSnapshotReady {
+		previousRenderSnapshot = current
+		renderSnapshotReady = true
+		return current
+	}
+
+	alpha = clampFloat(alpha, 0, 1)
+	result := renderSnapshot{
+		ballX:            lerpFloat(previousRenderSnapshot.ballX, current.ballX, alpha),
+		ballY:            lerpFloat(previousRenderSnapshot.ballY, current.ballY, alpha),
+		ballAngle:        lerpFloat(previousRenderSnapshot.ballAngle, current.ballAngle, alpha),
+		paddleX:          lerpFloat(previousRenderSnapshot.paddleX, current.paddleX, alpha),
+		blackHoleX:       lerpFloat(previousRenderSnapshot.blackHoleX, current.blackHoleX, alpha),
+		blackHoleY:       lerpFloat(previousRenderSnapshot.blackHoleY, current.blackHoleY, alpha),
+		secondBallActive: current.secondBallActive,
+		blackHoleActive:  current.blackHoleActive,
+	}
+
+	// New or removed transient objects must not interpolate from stale positions.
+	if previousRenderSnapshot.secondBallActive == current.secondBallActive {
+		result.secondBallX = lerpFloat(previousRenderSnapshot.secondBallX, current.secondBallX, alpha)
+		result.secondBallY = lerpFloat(previousRenderSnapshot.secondBallY, current.secondBallY, alpha)
+		result.secondBallAngle = lerpFloat(previousRenderSnapshot.secondBallAngle, current.secondBallAngle, alpha)
+	} else {
+		result.secondBallX = current.secondBallX
+		result.secondBallY = current.secondBallY
+		result.secondBallAngle = current.secondBallAngle
+	}
+	if previousRenderSnapshot.blackHoleActive != current.blackHoleActive {
+		result.blackHoleX = current.blackHoleX
+		result.blackHoleY = current.blackHoleY
+	}
+
+	return result
 }
 
 func clampBallToPhysicsSettings(b *Ball, settings *physicsSettings) {
@@ -4599,8 +4716,8 @@ func setupInput() {
 			return nil
 		}
 
-		// Page Down / Page Up navigate levels even while paused or waiting.
-		if key == "PageDown" && !e.Get("repeat").Bool() {
+		// Page Up / Page Down navigate levels even while paused or waiting.
+		if key == "PageUp" && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex < limit {
 				jumpToLevel(currentLevelIndex + 1)
@@ -4611,7 +4728,7 @@ func setupInput() {
 			}
 			return nil
 		}
-		if key == "PageUp" && !e.Get("repeat").Bool() {
+		if key == "PageDown" && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex > 0 {
 				jumpToLevel(currentLevelIndex - 1)
@@ -5074,6 +5191,7 @@ func main() {
 	setupInput()
 	setupMobileControlSelector()
 	resetGame()
+	syncRenderInterpolation()
 
 	setPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) == 0 || gameOver {
