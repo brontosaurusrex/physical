@@ -66,10 +66,10 @@ const (
 	// Improved physics defaults. These can be tuned without touching Original.
 	improvedDefaultGravity             = 300.0
 	improvedDefaultRestitution         = 0.90
-	improvedDefaultFrictionCoeff       = 0.10
+	improvedDefaultFrictionCoeff       = 0.14 // 0.10
 	improvedDefaultPaddleBoost         = 900.0
 	improvedDefaultBrickBoost          = 100.0
-	improvedDefaultMaxSpeed            = 1170.0
+	improvedDefaultMaxSpeed            = 1250.0 // 1170.0
 	improvedDefaultMaxSpin             = 1530.0
 	improvedDefaultStuckSpeedThreshold = 85.0
 	improvedDefaultStuckDuration       = 3.0
@@ -78,18 +78,18 @@ const (
 	improvedDefaultTiltSideMax         = 340.0
 
 	// Improved-only contact/flight tuning.
-	improvedMagnusCoefficient        = 0.015 //0.0015
-	improvedMagnusAccelerationScale  = 0.30
-	improvedSpinDrag                 = 0.10
+	improvedMagnusCoefficient        = 0.0030 //0.0015
+	improvedMagnusAccelerationScale  = 0.25
+	improvedSpinDrag                 = 0.04 // 0.10
 	improvedAirDrag                  = 0.010
-	improvedWallFrictionScale        = 0.60 //0.60
+	improvedWallFrictionScale        = 0.35 //0.60
 	improvedBrickFrictionScale       = 1.00 //1.00
-	improvedUnbreakableFrictionScale = 0.95 //0.35
-	improvedPaddleFrictionScale      = 2.35 //1.35
-	improvedPaddleSpinTransfer       = 2.25
-	improvedCollisionSpinCoupling    = 2.50
+	improvedUnbreakableFrictionScale = 0.80 //0.35
+	improvedPaddleFrictionScale      = 2.60 //2.35
+	improvedPaddleSpinTransfer       = 2.80 //2.25
+	improvedCollisionSpinCoupling    = 2.00 //2.50
 	improvedMinimumCollisionGrip     = 0.08
-	improvedMinimumPaddleGrip        = 0.25
+	improvedMinimumPaddleGrip        = 0.45 // 0.25
 	improvedCollisionSlop            = 0.05
 
 	// Every brick receives a stable, tiny rotation in Improved mode. The same
