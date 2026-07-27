@@ -83,7 +83,7 @@ const (
 	physicsMagnusAccelerationScale  = 0.25
 	physicsSpinDrag                 = 0.04 // 0.10
 	physicsAirDrag                  = 0.010
-	physicsWallFrictionScale        = 1.65 //0.35
+	physicsWallFrictionScale        = 2.00 //0.35
 	physicsBrickFrictionScale       = 2.00 //1.00
 	physicsUnbreakableFrictionScale = 1.80 //0.35
 	physicsPaddleFrictionScale      = 3.20 //2.60
