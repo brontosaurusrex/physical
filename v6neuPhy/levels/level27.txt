@@ -2,12 +2,12 @@
 gravity=260
 stuckSpeedThreshold=250
 stuckDuration=0.4
-tiltUpSpeed=-6600
+tiltUpSpeed=-100
 tiltSideMin=280
-tiltSideMax=420
+tiltSideMax=1420
 restitution=0.90
-frictionCoeff=0.06
-maxSpin=55
+//frictionCoeff=0.06
+//maxSpin=55
 paddleBoost=950
 brickBoost=70
 maxSpeed=1100

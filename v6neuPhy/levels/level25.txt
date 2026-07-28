@@ -1,17 +1,18 @@
 # Level 25: Hourglass
 # Zero gravity and an unbreakable diagonal frame create two mirrored chambers.
 stuckSpeedThreshold=350
-stuckDuration=0.7
+stuckDuration=1.7
 tiltUpSpeed=-2600
 tiltSideMin=280
 tiltSideMax=1420
 gravity=100
 paddleBoost=1200
 //brickBoost=0
-//maxSpeed=900
+maxSpeed=870
 brickWidth=42
 brickHeight=18
-brickPadding=20
+//brickPadding=20
+brickPadding=25
 brickOffsetTop=95
 paddleWidth=240
 ballX=900
