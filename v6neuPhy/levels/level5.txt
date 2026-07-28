@@ -9,6 +9,8 @@ ballX=1500
 ballY=23
 ballVx=200
 ballVy=2
+audioRoom=bigopenroom
+audioRoomDry=0.80
 ---
 M//     M//           M// M//                 
 M//     M//           M// M//                 

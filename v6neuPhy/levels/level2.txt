@@ -18,6 +18,8 @@ secondBallSpinColor=#d68c45
 magicStrokeColor=#ffd700
 unbreakableStrokeColor=#e76f51
 brickStrokeColor=#4c956c
+audioRoom=smallhall
+audioRoomDry=0.95
 ---
 M####MMM####M
 ######M######

@@ -17,6 +17,8 @@ secondBallSpinColor=#00ffff
 magicStrokeColor=#ffd700
 unbreakableColor=#ff3366
 unbreakableStrokeColor=#ff3366
+audioRoom=matrix
+audioRoomDry=0.30
 ---
 U # U # M # M
  U # U # M # M

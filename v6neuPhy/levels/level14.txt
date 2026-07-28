@@ -52,7 +52,8 @@ enableInfluencer=false
 enableZapper=false
 magnet=false
 zapper=false
-
+audioRoom=cave
+audioRoomDry=0.67
 ---
 UUUUUUUUUUUUUUUUUUU
 U                 U

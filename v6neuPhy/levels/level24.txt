@@ -37,6 +37,8 @@ spinColor=#fefae0
 secondBallColor=#ca6702
 secondBallSpinColor=#ca6702
 textColor=#e9d8a6
+audioRoom=matrix
+audioRoomDry=0.50
 ---
 
 M#M       ###       M#M

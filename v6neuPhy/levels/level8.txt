@@ -20,6 +20,9 @@ spinColor=#e89c5b
 secondBallColor=#c7cbd1
 textColor=#e89c5b
 secondBallSpinColor=#c7cbd1
+
+audioRoom=cave
+audioRoomDry=0.50
 ---
 U      ####MM       U
 U      MM####       U
