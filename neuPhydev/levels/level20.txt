@@ -31,6 +31,8 @@ tiltSideMin=280
 tiltSideMax=420
 enableZapper=true
 powerUpDuration=25
+audioRoom=space
+audioRoomDry=0.80
 ---                                                         
                                  XX                      
                                 XXXXX                    

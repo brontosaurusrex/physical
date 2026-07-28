@@ -22,6 +22,8 @@ secondBallColor=#c7cbd1
 textColor=#e7e9ec
 secondBallSpinColor=#8d939b
 //maxSpeed=950
+audioRoom=cave
+audioRoomDry=0.75
 ---
 M######## ########M
 M########M########M

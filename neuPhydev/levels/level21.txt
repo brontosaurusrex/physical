@@ -36,6 +36,9 @@ spinColor=#efe3ca
 secondBallColor=#efe3ca
 textColor=#efe3ca
 secondBallSpinColor=#efe3ca
+
+audioRoom=underwater
+audioRoomDry=0.0
 ---
 
                                                                                            

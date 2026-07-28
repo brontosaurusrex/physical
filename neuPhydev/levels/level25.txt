@@ -34,6 +34,9 @@ spinColor=#f8f9fa
 secondBallColor=#80ffdb
 secondBallSpinColor=#80ffdb
 textColor=#e0aaff
+
+audioRoom=space
+audioRoomDry=0.8
 ---
 
  UXXMXX             XXMXXU

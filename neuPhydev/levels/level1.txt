@@ -21,6 +21,8 @@ spinColor=#ffffff
 secondBallColor=#c7cbd1
 textColor=#e7e9ec
 secondBallSpinColor=#8d939b
+audioRoom=space
+audioRoomDry=0.50
 ---
                   %MM%M                  
                %%%M% MMM                 

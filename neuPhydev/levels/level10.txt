@@ -14,6 +14,8 @@ paddleBoost=450
 magnet=true
 enableReverseGravity=false
 enableMagnet=false
+audioRoom=space
+audioRoomDry=0.40
 ---
 
 UU  UU  UUU   UUU  UU  UU
