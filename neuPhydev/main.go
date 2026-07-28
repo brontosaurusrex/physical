@@ -14,25 +14,42 @@ import (
 	"syscall/js"
 )
 
-// All normal-brick hit samples are compiled into the WASM binary. Adding or
-// removing WAV files from this folder only requires rebuilding the program.
+// Normal-brick samples and optional feature-named magic WAVs are compiled
+// into the WASM binary. Add or replace WAV files, then rebuild.
 //
-//go:embed sounds/brickHits/*.wav
-var embeddedBrickHitSamples embed.FS
+//go:embed sounds/brickHits/*.wav sounds/magicBrickHits
+var embeddedBrickSamples embed.FS
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260728-9798623dd2"
+	buildID = "20260728-c84d12e5f9"
 
-	brickHitSampleDirectory   = "sounds/brickHits"
-	brickHitPlaybackRateMin   = 0.94
-	brickHitPlaybackRateMax   = 1.07
-	brickHitFilterMinHz       = 2400.0
-	brickHitFilterMaxHz       = 12900.0
-	brickHitGainMin           = 0.16
-	brickHitGainMax           = 0.50
+	brickHitSampleDirectory = "sounds/brickHits"
+	brickHitPlaybackRateMin = 0.94
+	brickHitPlaybackRateMax = 1.07
+	brickHitFilterMinHz     = 2400.0
+	brickHitFilterMaxHz     = 12900.0
+	brickHitGainMin         = 0.16
+	brickHitGainMax         = 0.40
+
+	magicFeatureSampleDirectory = "sounds/magicBrickHits"
+	magicFeaturePlaybackRateMin = 0.96
+	magicFeaturePlaybackRateMax = 1.04
+	magicFeatureFilterMinHz     = 3000.0
+	magicFeatureFilterMaxHz     = 16000.0
+	magicFeatureHardMaxHz       = 500.0
+	magicFeatureGainMin         = 0.15
+	magicFeatureGainMax         = 0.32
+	magicFeatureMaxActiveVoices = 4
+	magicFeatureRetriggerFade   = 0.018
+
 	brickHitMaxActiveVoices   = 8
 	brickHitMaxStartsPerFrame = 3
+
+	// Zapper-destroyed bricks use their normal sample bank, but the sample is
+	// shifted upward so an electrical kill is distinct from a ball collision.
+	zapperBrickPitchScale = 1.32
+	zapperBrickStrength   = 0.72
 
 	// Rendering follows requestAnimationFrame, but simulation always advances in
 	// fixed 1/240-second steps. At maxSpeed=1250 this is about 5.2 px per tick.
@@ -384,6 +401,15 @@ type statusMessage struct {
 	timer float64
 }
 
+// A feature sample may be long (for example blackhole.wav). Only one voice for
+// a given feature is allowed at once; retriggering gently replaces it.
+type magicFeatureVoice struct {
+	source js.Value
+	gain   js.Value
+	ended  js.Func
+	active bool
+}
+
 type paddleVelocitySample struct {
 	vx  float64
 	age float64
@@ -567,13 +593,20 @@ var (
 	audioMaster      js.Value
 	audioInitialized bool
 
-	brickHitBuffers         []js.Value
-	brickHitDecodeCallbacks []js.Func
-	brickHitDecodePending   int
-	brickHitSamplesLoading  bool
-	brickHitLastIndex       = -1
-	brickHitActiveVoices    int
-	brickHitStartsThisFrame int
+	brickHitBuffers        []js.Value
+	brickHitDecodePending  int
+	brickHitSamplesLoading bool
+	brickHitLastIndex      = -1
+
+	magicFeatureBuffers        = make(map[string]js.Value)
+	magicFeatureDecodePending  int
+	magicFeatureSamplesLoading bool
+	magicFeatureVoices         = make(map[string]*magicFeatureVoice)
+	magicFeatureActiveVoices   int
+
+	embeddedSampleDecodeCallbacks []js.Func
+	brickHitActiveVoices          int
+	brickHitStartsThisFrame       int
 )
 
 type brick struct {
@@ -1135,6 +1168,7 @@ func toggleSound() {
 		}
 		showStatus("Sound on", 2.0)
 	} else {
+		stopAllMagicFeatureVoices()
 		if audioInitialized && !audioMaster.IsUndefined() && !audioMaster.IsNull() {
 			audioMaster.Get("gain").Call("cancelScheduledValues", audioCtx.Get("currentTime").Float())
 			audioMaster.Get("gain").Set("value", 0)
@@ -1144,26 +1178,38 @@ func toggleSound() {
 }
 
 // ---- Audio (non-blocking, scheduled via Web Audio) ----
-func finishBrickHitSampleDecode() {
-	if brickHitDecodePending > 0 {
-		brickHitDecodePending--
+func finishEmbeddedSampleDecode(
+	label string,
+	buffers *[]js.Value,
+	loading *bool,
+	pending *int,
+) {
+	if *pending > 0 {
+		*pending--
 	}
-	if brickHitDecodePending != 0 {
+	if *pending != 0 {
 		return
 	}
 
-	brickHitSamplesLoading = false
-	log(fmt.Sprintf("Embedded brick-hit samples ready: %d", len(brickHitBuffers)))
+	*loading = false
+	log(fmt.Sprintf("Embedded %s samples ready: %d", label, len(*buffers)))
 }
 
-func loadEmbeddedBrickHitSamples() {
-	if !audioInitialized || brickHitSamplesLoading || len(brickHitBuffers) > 0 {
+func loadEmbeddedSampleBank(
+	directory string,
+	label string,
+	buffers *[]js.Value,
+	loading *bool,
+	pending *int,
+	lastIndex *int,
+) {
+	if !audioInitialized || *loading || len(*buffers) > 0 {
 		return
 	}
 
-	entries, err := fs.ReadDir(embeddedBrickHitSamples, brickHitSampleDirectory)
+	entries, err := fs.ReadDir(embeddedBrickSamples, directory)
 	if err != nil {
-		log("Could not read embedded brick-hit samples: " + err.Error())
+		log("Could not read embedded " + label + " samples: " + err.Error())
 		return
 	}
 
@@ -1172,24 +1218,24 @@ func loadEmbeddedBrickHitSamples() {
 		if entry.IsDir() || !strings.EqualFold(filepathExtension(entry.Name()), ".wav") {
 			continue
 		}
-		names = append(names, brickHitSampleDirectory+"/"+entry.Name())
+		names = append(names, directory+"/"+entry.Name())
 	}
 	sort.Strings(names)
 	if len(names) == 0 {
-		log("No embedded WAV files found in " + brickHitSampleDirectory)
+		log("No embedded WAV files found in " + directory)
 		return
 	}
 
-	brickHitSamplesLoading = true
-	brickHitDecodePending = len(names)
-	brickHitBuffers = brickHitBuffers[:0]
-	brickHitLastIndex = -1
+	*loading = true
+	*pending = len(names)
+	*buffers = (*buffers)[:0]
+	*lastIndex = -1
 
 	for _, name := range names {
-		data, readErr := embeddedBrickHitSamples.ReadFile(name)
+		data, readErr := embeddedBrickSamples.ReadFile(name)
 		if readErr != nil {
-			log("Could not read embedded brick-hit sample " + name + ": " + readErr.Error())
-			finishBrickHitSampleDecode()
+			log("Could not read embedded " + label + " sample " + name + ": " + readErr.Error())
+			finishEmbeddedSampleDecode(label, buffers, loading, pending)
 			continue
 		}
 
@@ -1199,9 +1245,9 @@ func loadEmbeddedBrickHitSamples() {
 
 		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 			if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
-				brickHitBuffers = append(brickHitBuffers, args[0])
+				*buffers = append(*buffers, args[0])
 			}
-			finishBrickHitSampleDecode()
+			finishEmbeddedSampleDecode(label, buffers, loading, pending)
 			return nil
 		})
 		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
@@ -1209,20 +1255,120 @@ func loadEmbeddedBrickHitSamples() {
 			if len(args) > 0 {
 				reason = fmt.Sprint(args[0])
 			}
-			log("Could not decode embedded brick-hit sample " + sampleName + ": " + reason)
-			finishBrickHitSampleDecode()
+			log("Could not decode embedded " + label + " sample " + sampleName + ": " + reason)
+			finishEmbeddedSampleDecode(label, buffers, loading, pending)
 			return nil
 		})
 
 		// Keep callbacks alive for the lifetime of the page. This is a tiny fixed
-		// allocation and avoids releasing a js.Func while the browser is invoking it.
-		brickHitDecodeCallbacks = append(brickHitDecodeCallbacks, success, failure)
+		// allocation and avoids releasing a js.Func while the browser invokes it.
+		embeddedSampleDecodeCallbacks = append(embeddedSampleDecodeCallbacks, success, failure)
 
 		func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					log("Could not start decoding embedded brick-hit sample " + sampleName + ": " + fmt.Sprint(recovered))
-					finishBrickHitSampleDecode()
+					log("Could not start decoding embedded " + label + " sample " + sampleName + ": " + fmt.Sprint(recovered))
+					finishEmbeddedSampleDecode(label, buffers, loading, pending)
+				}
+			}()
+			audioCtx.Call("decodeAudioData", byteArray.Get("buffer"), success, failure)
+		}()
+	}
+}
+
+func loadEmbeddedBrickHitSamples() {
+	loadEmbeddedSampleBank(
+		brickHitSampleDirectory,
+		"normal-brick hit",
+		&brickHitBuffers,
+		&brickHitSamplesLoading,
+		&brickHitDecodePending,
+		&brickHitLastIndex,
+	)
+}
+
+func finishMagicFeatureSampleDecode() {
+	if magicFeatureDecodePending > 0 {
+		magicFeatureDecodePending--
+	}
+	if magicFeatureDecodePending != 0 {
+		return
+	}
+
+	magicFeatureSamplesLoading = false
+	log(fmt.Sprintf("Embedded magic-feature samples ready: %d", len(magicFeatureBuffers)))
+}
+
+func magicFeatureNameFromFilename(name string) string {
+	extension := filepathExtension(name)
+	return strings.ToLower(strings.TrimSpace(strings.TrimSuffix(name, extension)))
+}
+
+func loadEmbeddedMagicFeatureSamples() {
+	if !audioInitialized || magicFeatureSamplesLoading || len(magicFeatureBuffers) > 0 {
+		return
+	}
+
+	entries, err := fs.ReadDir(embeddedBrickSamples, magicFeatureSampleDirectory)
+	if err != nil {
+		log("Could not read embedded magic-feature samples: " + err.Error())
+		return
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepathExtension(entry.Name()), ".wav") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		log("No feature-named WAV files found in " + magicFeatureSampleDirectory + "; using synthesized power-up sounds")
+		return
+	}
+
+	magicFeatureSamplesLoading = true
+	magicFeatureDecodePending = len(names)
+	clear(magicFeatureBuffers)
+
+	for _, fileName := range names {
+		featureName := magicFeatureNameFromFilename(fileName)
+		path := magicFeatureSampleDirectory + "/" + fileName
+		data, readErr := embeddedBrickSamples.ReadFile(path)
+		if readErr != nil {
+			log("Could not read embedded magic-feature sample " + path + ": " + readErr.Error())
+			finishMagicFeatureSampleDecode()
+			continue
+		}
+
+		byteArray := js.Global().Get("Uint8Array").New(len(data))
+		js.CopyBytesToJS(byteArray, data)
+
+		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
+				magicFeatureBuffers[featureName] = args[0]
+			}
+			finishMagicFeatureSampleDecode()
+			return nil
+		})
+		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			reason := "unknown decode error"
+			if len(args) > 0 {
+				reason = fmt.Sprint(args[0])
+			}
+			log("Could not decode embedded magic-feature sample " + path + ": " + reason)
+			finishMagicFeatureSampleDecode()
+			return nil
+		})
+
+		embeddedSampleDecodeCallbacks = append(embeddedSampleDecodeCallbacks, success, failure)
+
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log("Could not start decoding embedded magic-feature sample " + path + ": " + fmt.Sprint(recovered))
+					finishMagicFeatureSampleDecode()
 				}
 			}()
 			audioCtx.Call("decodeAudioData", byteArray.Get("buffer"), success, failure)
@@ -1276,6 +1422,7 @@ func initAudio() {
 	audioMaster.Get("gain").Set("value", 0.33)
 	ensureAudioRunning()
 	loadEmbeddedBrickHitSamples()
+	loadEmbeddedMagicFeatureSamples()
 	log("Audio initialized")
 }
 
@@ -1364,28 +1511,47 @@ func playPaddleHit() {
 	scheduleTone("sine", varyFreq(90, 0.06), varyFreq(70, 0.06), audioRand(0.08, 0.11), audioRand(0.05, 0.08), 0)
 }
 
-func playSynthBrickBreak() {
-	scheduleTone("square", varyFreq(520, 0.12), varyFreq(360, 0.12), audioRand(0.045, 0.065), audioRand(0.07, 0.11), 0)
-	scheduleTone("triangle", varyFreq(760, 0.10), varyFreq(520, 0.10), audioRand(0.032, 0.05), audioRand(0.035, 0.06), audioRand(0.005, 0.012))
+func playSynthBrickBreakPitched(pitchScale float64) {
+	if pitchScale <= 0 {
+		pitchScale = 1
+	}
+	scheduleTone("square", varyFreq(520*pitchScale, 0.12), varyFreq(360*pitchScale, 0.12), audioRand(0.045, 0.065), audioRand(0.07, 0.11), 0)
+	scheduleTone("triangle", varyFreq(760*pitchScale, 0.10), varyFreq(520*pitchScale, 0.10), audioRand(0.032, 0.05), audioRand(0.035, 0.06), audioRand(0.005, 0.012))
 }
 
-func chooseBrickHitSampleIndex() int {
-	count := len(brickHitBuffers)
+func playSynthBrickBreak() {
+	playSynthBrickBreakPitched(1)
+}
+
+func chooseSampleIndex(buffers []js.Value, lastIndex int) int {
+	count := len(buffers)
 	if count <= 1 {
 		return count - 1
 	}
-	if brickHitLastIndex < 0 || brickHitLastIndex >= count {
+	if lastIndex < 0 || lastIndex >= count {
 		return rand.Intn(count)
 	}
 
 	index := rand.Intn(count - 1)
-	if index >= brickHitLastIndex {
+	if index >= lastIndex {
 		index++
 	}
 	return index
 }
 
-func playBrickBreak(impactSpeed float64) {
+func playSampledBrickImpact(
+	impactSpeed float64,
+	buffers []js.Value,
+	lastIndex *int,
+	playbackRateMin float64,
+	playbackRateMax float64,
+	filterMinHz float64,
+	filterMaxHz float64,
+	gainMin float64,
+	gainMax float64,
+	label string,
+	fallback func(),
+) {
 	if !enableSounds {
 		return
 	}
@@ -1393,11 +1559,10 @@ func playBrickBreak(impactSpeed float64) {
 	samplePlaybackReady := audioInitialized &&
 		!audioCtx.IsNull() && !audioCtx.IsUndefined() &&
 		!audioMaster.IsNull() && !audioMaster.IsUndefined() &&
-		len(brickHitBuffers) > 0
+		len(buffers) > 0
 
-	// Protect the render/physics thread from large pass-through or influencer
-	// bursts. Extra destroyed bricks remain destroyed; they simply do not start
-	// another sound in this animation frame.
+	// The budget is shared by normal and magic bricks. Extra bricks are still
+	// destroyed; only excess sounds in a large burst are skipped.
 	if brickHitStartsThisFrame >= brickHitMaxStartsPerFrame {
 		return
 	}
@@ -1407,25 +1572,25 @@ func playBrickBreak(impactSpeed float64) {
 	brickHitStartsThisFrame++
 
 	if !samplePlaybackReady {
-		playSynthBrickBreak()
+		fallback()
 		return
 	}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			log("Brick-hit sample playback failed: " + fmt.Sprint(recovered))
-			playSynthBrickBreak()
+			log(label + " sample playback failed: " + fmt.Sprint(recovered))
+			fallback()
 		}
 	}()
 
 	ensureAudioRunning()
 
-	index := chooseBrickHitSampleIndex()
-	if index < 0 || index >= len(brickHitBuffers) {
-		playSynthBrickBreak()
+	index := chooseSampleIndex(buffers, *lastIndex)
+	if index < 0 || index >= len(buffers) {
+		fallback()
 		return
 	}
-	brickHitLastIndex = index
+	*lastIndex = index
 
 	referenceSpeed := math.Max(physicsConfig.maxSpeed, minimumCollisionSoundSpeed+1)
 	strength := clampFloat(
@@ -1439,21 +1604,21 @@ func playBrickBreak(impactSpeed float64) {
 	filter := audioCtx.Call("createBiquadFilter")
 	gain := audioCtx.Call("createGain")
 
-	source.Set("buffer", brickHitBuffers[index])
+	source.Set("buffer", buffers[index])
 	source.Get("playbackRate").Call(
 		"setValueAtTime",
-		audioRand(brickHitPlaybackRateMin, brickHitPlaybackRateMax),
+		audioRand(playbackRateMin, playbackRateMax),
 		now,
 	)
 
 	filter.Set("type", "lowpass")
-	cutoff := brickHitFilterMinHz + (brickHitFilterMaxHz-brickHitFilterMinHz)*strength
+	cutoff := filterMinHz + (filterMaxHz-filterMinHz)*strength
 	cutoff *= audioRand(0.86, 1.14)
 	nyquistMargin := audioCtx.Get("sampleRate").Float() * 0.45
 	filter.Get("frequency").Call("setValueAtTime", clampFloat(cutoff, 800, nyquistMargin), now)
 	filter.Get("Q").Call("setValueAtTime", audioRand(0.25, 0.85), now)
 
-	volume := brickHitGainMin + (brickHitGainMax-brickHitGainMin)*strength
+	volume := gainMin + (gainMax-gainMin)*strength
 	volume *= audioRand(0.90, 1.08)
 	gain.Get("gain").Call("setValueAtTime", volume, now)
 
@@ -1477,6 +1642,208 @@ func playBrickBreak(impactSpeed float64) {
 	brickHitActiveVoices++
 }
 
+func playBrickBreakPitched(impactSpeed, pitchScale float64) {
+	if pitchScale <= 0 {
+		pitchScale = 1
+	}
+	playSampledBrickImpact(
+		impactSpeed,
+		brickHitBuffers,
+		&brickHitLastIndex,
+		brickHitPlaybackRateMin*pitchScale,
+		brickHitPlaybackRateMax*pitchScale,
+		brickHitFilterMinHz,
+		brickHitFilterMaxHz,
+		brickHitGainMin,
+		brickHitGainMax,
+		"Normal-brick hit",
+		func() { playSynthBrickBreakPitched(pitchScale) },
+	)
+}
+
+func playBrickBreak(impactSpeed float64) {
+	playBrickBreakPitched(impactSpeed, 1)
+}
+
+func retireMagicFeatureVoice(voice *magicFeatureVoice, now float64) {
+	if voice == nil {
+		return
+	}
+	if voice.active {
+		voice.active = false
+		if magicFeatureActiveVoices > 0 {
+			magicFeatureActiveVoices--
+		}
+	}
+
+	defer func() { _ = recover() }()
+	gainParam := voice.gain.Get("gain")
+	currentGain := math.Max(gainParam.Get("value").Float(), 0.0001)
+	gainParam.Call("cancelScheduledValues", now)
+	gainParam.Call("setValueAtTime", currentGain, now)
+	gainParam.Call("linearRampToValueAtTime", 0.0001, now+magicFeatureRetriggerFade)
+	voice.source.Call("stop", now+magicFeatureRetriggerFade+0.004)
+}
+
+func stopMagicFeatureVoice(feature string) {
+	feature = strings.ToLower(strings.TrimSpace(feature))
+	voice := magicFeatureVoices[feature]
+	if voice == nil {
+		return
+	}
+	delete(magicFeatureVoices, feature)
+
+	now := 0.0
+	if audioInitialized && !audioCtx.IsNull() && !audioCtx.IsUndefined() {
+		now = audioCtx.Get("currentTime").Float()
+	}
+	retireMagicFeatureVoice(voice, now)
+}
+
+func stopAllMagicFeatureVoices() {
+	for feature := range magicFeatureVoices {
+		stopMagicFeatureVoice(feature)
+	}
+}
+
+func playMagicFeature(feature string, impactSpeed, pitchScale float64) {
+	if !enableSounds {
+		return
+	}
+	if pitchScale <= 0 {
+		pitchScale = 1
+	}
+
+	feature = strings.ToLower(strings.TrimSpace(feature))
+	buffer, found := magicFeatureBuffers[feature]
+	sampleReady := found && audioInitialized &&
+		!audioCtx.IsNull() && !audioCtx.IsUndefined() &&
+		!audioMaster.IsNull() && !audioMaster.IsUndefined()
+	if !sampleReady {
+		// This is the established generated feature-unlock cue.
+		playPowerup()
+		return
+	}
+
+	existing := magicFeatureVoices[feature]
+	if existing == nil && magicFeatureActiveVoices >= magicFeatureMaxActiveVoices {
+		playPowerup()
+		return
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log("Magic-feature sample playback failed for " + feature + ": " + fmt.Sprint(recovered))
+			playPowerup()
+		}
+	}()
+
+	ensureAudioRunning()
+	now := audioCtx.Get("currentTime").Float()
+	start := now
+	if existing != nil {
+		// A rapid second blackhole (or any same feature) restarts that feature's
+		// cue instead of layering another long copy over it.
+		retireMagicFeatureVoice(existing, now)
+		start += magicFeatureRetriggerFade * 0.55
+	}
+
+	referenceSpeed := math.Max(physicsConfig.maxSpeed, minimumCollisionSoundSpeed+1)
+	strength := clampFloat(
+		(impactSpeed-minimumCollisionSoundSpeed)/(referenceSpeed-minimumCollisionSoundSpeed),
+		0, 1,
+	)
+	strength = math.Sqrt(strength)
+
+	source := audioCtx.Call("createBufferSource")
+	filter := audioCtx.Call("createBiquadFilter")
+	gain := audioCtx.Call("createGain")
+
+	source.Set("buffer", buffer)
+	source.Get("playbackRate").Call(
+		"setValueAtTime",
+		audioRand(magicFeaturePlaybackRateMin, magicFeaturePlaybackRateMax)*pitchScale,
+		start,
+	)
+
+	filter.Set("type", "lowpass")
+	cutoff := magicFeatureFilterMinHz + (magicFeatureFilterMaxHz-magicFeatureFilterMinHz)*strength
+	cutoff *= audioRand(0.90, 1.10)
+
+	nyquistMargin := audioCtx.Get("sampleRate").Float() * 0.45
+	maxCutoff := math.Min(magicFeatureHardMaxHz, nyquistMargin)
+
+	filter.Get("frequency").Call(
+		"setValueAtTime",
+		clampFloat(cutoff, 800, maxCutoff),
+		start,
+	)
+
+	filter.Get("Q").Call("setValueAtTime", audioRand(0.20, 0.70), start)
+
+	volume := magicFeatureGainMin + (magicFeatureGainMax-magicFeatureGainMin)*strength
+	volume *= audioRand(0.94, 1.06)
+	gain.Get("gain").Call("setValueAtTime", volume, start)
+
+	source.Call("connect", filter)
+	filter.Call("connect", gain)
+	gain.Call("connect", audioMaster)
+
+	voice := &magicFeatureVoice{source: source, gain: gain, active: true}
+	var ended js.Func
+	ended = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if voice.active {
+			voice.active = false
+			if magicFeatureActiveVoices > 0 {
+				magicFeatureActiveVoices--
+			}
+		}
+		if current := magicFeatureVoices[feature]; current == voice {
+			delete(magicFeatureVoices, feature)
+		}
+		source.Set("onended", js.Null())
+		ended.Release()
+		return nil
+	})
+	voice.ended = ended
+	source.Set("onended", ended)
+	magicFeatureVoices[feature] = voice
+	magicFeatureActiveVoices++
+	source.Call("start", start)
+}
+
+func playMagicPitched(impactSpeed, pitchScale float64) {
+	_ = impactSpeed
+	if !enableSounds {
+		return
+	}
+	if brickHitStartsThisFrame >= brickHitMaxStartsPerFrame {
+		return
+	}
+	brickHitStartsThisFrame++
+	playSynthMagicPitched(pitchScale)
+}
+
+func playMagic(impactSpeed float64) {
+	playMagicPitched(impactSpeed, 1)
+}
+
+func playZapperDestroyedBrick(br *brick) {
+	if br == nil {
+		return
+	}
+
+	referenceSpeed := math.Max(physicsConfig.maxSpeed, minimumCollisionSoundSpeed+1)
+	impactSpeed := minimumCollisionSoundSpeed +
+		(referenceSpeed-minimumCollisionSoundSpeed)*zapperBrickStrength
+
+	if br.magic {
+		playMagicPitched(impactSpeed, zapperBrickPitchScale)
+	} else {
+		playBrickBreakPitched(impactSpeed, zapperBrickPitchScale)
+	}
+}
+
 func playUnbreakable() {
 	// Low, rounded impact with small natural variation.
 	base := varyFreq(82, 0.10)
@@ -1484,9 +1851,16 @@ func playUnbreakable() {
 	scheduleTone("triangle", varyFreq(46, 0.08), varyFreq(34, 0.08), audioRand(0.11, 0.16), audioRand(0.05, 0.08), 0.004)
 }
 
-func playMagic() {
-	scheduleTone("sine", varyFreq(660, 0.06), varyFreq(990, 0.06), audioRand(0.09, 0.13), audioRand(0.08, 0.11), 0)
-	scheduleTone("triangle", varyFreq(990, 0.05), varyFreq(1480, 0.05), audioRand(0.11, 0.15), audioRand(0.055, 0.08), audioRand(0.05, 0.075))
+func playSynthMagicPitched(pitchScale float64) {
+	if pitchScale <= 0 {
+		pitchScale = 1
+	}
+	scheduleTone("sine", varyFreq(660*pitchScale, 0.06), varyFreq(990*pitchScale, 0.06), audioRand(0.09, 0.13), audioRand(0.08, 0.11), 0)
+	scheduleTone("triangle", varyFreq(990*pitchScale, 0.05), varyFreq(1480*pitchScale, 0.05), audioRand(0.11, 0.15), audioRand(0.055, 0.08), audioRand(0.05, 0.075))
+}
+
+func playSynthMagic() {
+	playSynthMagicPitched(1)
 }
 
 func playPowerup() {
@@ -2082,6 +2456,7 @@ func refreshCurrentGravity() {
 }
 
 func clearTimedPowerUps() {
+	stopAllMagicFeatureVoices()
 	lowGravityActive = false
 	lowGravityTimer = 0
 	passActive = false
@@ -2103,8 +2478,9 @@ func clearTimedPowerUps() {
 	refreshCurrentGravity()
 }
 
-// Activate powerup
-func activatePowerUpWithBrick(hitBrick *brick) {
+// Activate a magic-brick feature and play the WAV whose basename exactly
+// matches that feature. Missing/failed samples use the established generator.
+func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 
 	var available []int
 	if enableLowGravity {
@@ -2147,35 +2523,38 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 	}
 
 	if len(available) == 0 {
-		return
+		return false
 	}
 
 	p := available[rand.Intn(len(available))]
+	feature := ""
+	activated := true
 
 	switch p {
 	case POWER_LOW_GRAVITY:
+		feature = "lowgravity"
 		lowGravityActive = true
 		lowGravityTimer = powerUpDuration
 		refreshCurrentGravity()
 		showStatus("Low Gravity!", powerUpDuration)
-		playPowerup()
 	case POWER_PASS:
+		feature = "passthrough"
 		passActive = true
 		passTimer = powerUpDuration
 		showStatus("Pass Through!", powerUpDuration)
-		playPowerup()
 	case POWER_NUKE:
+		feature = "nuke"
 		nukeBricks(hitBrick)
 		showStatus("Nuke!", 2.0)
-		playPowerup()
 	case POWER_REVERSE_GRAVITY:
+		feature = "reversegravity"
 		reverseGravityActive = true
 		reverseGravityTimer = powerUpDuration
 		refreshCurrentGravity()
 		showStatus("Reverse Gravity!", powerUpDuration)
-		playPowerup()
 	case POWER_DUAL_BALLS:
 		if !secondBallActive {
+			feature = "dualballs"
 			secondBallActive = true
 			secondBall.x = ball.x
 			secondBall.y = ball.y
@@ -2187,14 +2566,14 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 			secondBall.r = ball.r
 			resetFastOrbitState(&secondBall)
 			showStatus("Dual Balls!", 2.0)
-			playPowerup()
 		} else {
+			feature = "speedboost"
 			ball.vx *= 1.1
 			ball.vy *= 1.1
 			showStatus("Speed Boost!", 2.0)
-			playPowerup()
 		}
 	case POWER_BLACKHOLE:
+		feature = "blackhole"
 		blackHoleActive = true
 		blackHoleTimer = powerUpDuration
 		currentGravity = 0
@@ -2210,37 +2589,44 @@ func activatePowerUpWithBrick(hitBrick *brick) {
 		}
 
 		showStatus("Black Hole!", powerUpDuration)
-		playPowerup()
 		refreshCurrentGravity()
 	case POWER_MAGNET:
+		feature = "magnet"
 		magnetPowerActive = true
 		magnetPowerTimer = powerUpDuration
 		showStatus("Magnets!", powerUpDuration)
-		playPowerup()
 	case POWER_INFLUENCER:
+		feature = "influencer"
 		influencerActive = true
 		influencerTimer = powerUpDuration
 		showStatus("Influencer!", powerUpDuration)
-		playPowerup()
 	case POWER_ZAPPER:
+		feature = "zapper"
 		zapperPowerActive = true
 		zapperPowerTimer = powerUpDuration
 		zapperTargetIndex = -1
 		zapperHitTimer = 0
 		showStatus("Zapper!", powerUpDuration)
-		playPowerup()
 	case POWER_BREAK_UNBREAKABLE:
+		feature = "breakunbreakable"
 		if breakRandomUnbreakable() {
 			showStatus("Unbreakable destroyed!", 2.0)
-			playPowerup()
+		} else {
+			activated = false
 		}
 	case POWER_BIG_PADDLE:
+		feature = "bigpaddle"
 		bigPaddleActive = true
 		bigPaddleTimer = powerUpDuration
 		setPaddleSize(paddleWidth*2, paddleHeight)
 		showStatus("Big Paddle!", powerUpDuration)
-		playPowerup()
 	}
+
+	if !activated || feature == "" {
+		return false
+	}
+	playMagicFeature(feature, impactSpeed, 1)
+	return true
 }
 
 // ---- Load levels ----
@@ -2472,6 +2858,7 @@ func loadSavedLevel() int {
 
 // ---- Start a level ----
 func startLevel(index int) {
+	stopAllMagicFeatureVoices()
 	if index >= len(levels) {
 		gameOver = true
 		win = true
@@ -2670,7 +3057,7 @@ func destroyBricksInRadius(ballX, ballY, radius, impactSpeed float64) {
 		dy := ballY - closestY
 		if dx*dx+dy*dy <= radiusSquared && destroyBrick(br) {
 			if br.magic {
-				playMagic()
+				playMagic(impactSpeed)
 			} else {
 				playBrickBreak(impactSpeed)
 			}
@@ -2840,6 +3227,7 @@ func updateOneZapper(
 
 	br := &bricks[*targetIndex]
 	if destroyBrick(br) {
+		playZapperDestroyedBrick(br)
 		playZapper()
 	}
 
@@ -3015,9 +3403,15 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 	if passActive {
 		for _, contact := range contacts {
 			br := &bricks[contact.index]
+			featureActivated := false
+			if br.magic && isPrimary {
+				featureActivated = activatePowerUpWithBrick(br, contact.impact)
+			}
 			if destroyBrick(br) {
 				if br.magic {
-					playMagic()
+					if !featureActivated {
+						playMagic(contact.impact)
+					}
 				} else {
 					playBrickBreak(contact.impact)
 				}
@@ -3090,11 +3484,12 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 			continue
 		}
 		if br.magic {
+			featureActivated := false
 			if isPrimary {
-				activatePowerUpWithBrick(br)
+				featureActivated = activatePowerUpWithBrick(br, contact.impact)
 			}
-			if destroyBrick(br) {
-				playMagic()
+			if destroyBrick(br) && !featureActivated {
+				playMagic(contact.impact)
 			}
 			if influencerActive {
 				destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier, contact.impact)
@@ -3882,6 +4277,7 @@ func update(dt float64) {
 	if lowGravityActive {
 		lowGravityTimer -= dt
 		if lowGravityTimer <= 0 {
+			stopMagicFeatureVoice("lowgravity")
 			lowGravityActive = false
 			lowGravityTimer = 0
 			gravityChanged = true
@@ -3890,6 +4286,7 @@ func update(dt float64) {
 	if reverseGravityActive {
 		reverseGravityTimer -= dt
 		if reverseGravityTimer <= 0 {
+			stopMagicFeatureVoice("reversegravity")
 			reverseGravityActive = false
 			reverseGravityTimer = 0
 			gravityChanged = true
@@ -3898,6 +4295,7 @@ func update(dt float64) {
 	if passActive {
 		passTimer -= dt
 		if passTimer <= 0 {
+			stopMagicFeatureVoice("passthrough")
 			passActive = false
 			passTimer = 0
 		}
@@ -3905,6 +4303,7 @@ func update(dt float64) {
 	if magnetPowerActive {
 		magnetPowerTimer -= dt
 		if magnetPowerTimer <= 0 {
+			stopMagicFeatureVoice("magnet")
 			magnetPowerActive = false
 			magnetPowerTimer = 0
 		}
@@ -3912,6 +4311,7 @@ func update(dt float64) {
 	if zapperPowerActive {
 		zapperPowerTimer -= dt
 		if zapperPowerTimer <= 0 {
+			stopMagicFeatureVoice("zapper")
 			zapperPowerActive = false
 			zapperPowerTimer = 0
 			zapperTargetIndex = -1
@@ -3923,6 +4323,7 @@ func update(dt float64) {
 	if bigPaddleActive {
 		bigPaddleTimer -= dt
 		if bigPaddleTimer <= 0 {
+			stopMagicFeatureVoice("bigpaddle")
 			bigPaddleActive = false
 			bigPaddleTimer = 0
 			setPaddleSize(paddleWidth, paddleHeight)
@@ -3946,6 +4347,7 @@ func update(dt float64) {
 
 		blackHoleTimer -= dt
 		if blackHoleTimer <= 0 {
+			stopMagicFeatureVoice("blackhole")
 			blackHoleActive = false
 			blackHoleTimer = 0
 			blackHoleDirection = 0
@@ -3957,6 +4359,7 @@ func update(dt float64) {
 	if influencerActive {
 		influencerTimer -= dt
 		if influencerTimer <= 0 {
+			stopMagicFeatureVoice("influencer")
 			influencerActive = false
 			influencerTimer = 0
 		}
