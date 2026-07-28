@@ -1,5 +1,10 @@
 brickPadding=12
 ballRadius=25
+stuckSpeedThreshold=250
+stuckDuration=0.4
+tiltUpSpeed=-100
+tiltSideMin=280
+tiltSideMax=1020
 backgroundColor=#071521
 paddleColor=#FAF0E6
 brickColor=#B9B4C7

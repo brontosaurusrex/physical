@@ -3,9 +3,7 @@
 package main
 
 import (
-	"embed"
 	"fmt"
-	"io/fs"
 	"math"
 	"math/rand"
 	"sort"
@@ -14,25 +12,9 @@ import (
 	"syscall/js"
 )
 
-// All normal-brick hit samples are compiled into the WASM binary. Adding or
-// removing WAV files from this folder only requires rebuilding the program.
-//
-//go:embed sounds/brickHits/*.wav
-var embeddedBrickHitSamples embed.FS
-
 // ---- Default values (constants) ----
 const (
-	buildID = "20260728-9798623dd2"
-
-	brickHitSampleDirectory   = "sounds/brickHits"
-	brickHitPlaybackRateMin   = 0.94
-	brickHitPlaybackRateMax   = 1.07
-	brickHitFilterMinHz       = 2400.0
-	brickHitFilterMaxHz       = 12900.0
-	brickHitGainMin           = 0.16
-	brickHitGainMax           = 0.50
-	brickHitMaxActiveVoices   = 8
-	brickHitMaxStartsPerFrame = 3
+	buildID = "20260727-9561683b92"
 
 	// Rendering follows requestAnimationFrame, but simulation always advances in
 	// fixed 1/240-second steps. At maxSpeed=1250 this is about 5.2 px per tick.
@@ -566,14 +548,6 @@ var (
 	audioCtx         js.Value
 	audioMaster      js.Value
 	audioInitialized bool
-
-	brickHitBuffers         []js.Value
-	brickHitDecodeCallbacks []js.Func
-	brickHitDecodePending   int
-	brickHitSamplesLoading  bool
-	brickHitLastIndex       = -1
-	brickHitActiveVoices    int
-	brickHitStartsThisFrame int
 )
 
 type brick struct {
@@ -1144,100 +1118,6 @@ func toggleSound() {
 }
 
 // ---- Audio (non-blocking, scheduled via Web Audio) ----
-func finishBrickHitSampleDecode() {
-	if brickHitDecodePending > 0 {
-		brickHitDecodePending--
-	}
-	if brickHitDecodePending != 0 {
-		return
-	}
-
-	brickHitSamplesLoading = false
-	log(fmt.Sprintf("Embedded brick-hit samples ready: %d", len(brickHitBuffers)))
-}
-
-func loadEmbeddedBrickHitSamples() {
-	if !audioInitialized || brickHitSamplesLoading || len(brickHitBuffers) > 0 {
-		return
-	}
-
-	entries, err := fs.ReadDir(embeddedBrickHitSamples, brickHitSampleDirectory)
-	if err != nil {
-		log("Could not read embedded brick-hit samples: " + err.Error())
-		return
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepathExtension(entry.Name()), ".wav") {
-			continue
-		}
-		names = append(names, brickHitSampleDirectory+"/"+entry.Name())
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		log("No embedded WAV files found in " + brickHitSampleDirectory)
-		return
-	}
-
-	brickHitSamplesLoading = true
-	brickHitDecodePending = len(names)
-	brickHitBuffers = brickHitBuffers[:0]
-	brickHitLastIndex = -1
-
-	for _, name := range names {
-		data, readErr := embeddedBrickHitSamples.ReadFile(name)
-		if readErr != nil {
-			log("Could not read embedded brick-hit sample " + name + ": " + readErr.Error())
-			finishBrickHitSampleDecode()
-			continue
-		}
-
-		sampleName := name
-		byteArray := js.Global().Get("Uint8Array").New(len(data))
-		js.CopyBytesToJS(byteArray, data)
-
-		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
-				brickHitBuffers = append(brickHitBuffers, args[0])
-			}
-			finishBrickHitSampleDecode()
-			return nil
-		})
-		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			reason := "unknown decode error"
-			if len(args) > 0 {
-				reason = fmt.Sprint(args[0])
-			}
-			log("Could not decode embedded brick-hit sample " + sampleName + ": " + reason)
-			finishBrickHitSampleDecode()
-			return nil
-		})
-
-		// Keep callbacks alive for the lifetime of the page. This is a tiny fixed
-		// allocation and avoids releasing a js.Func while the browser is invoking it.
-		brickHitDecodeCallbacks = append(brickHitDecodeCallbacks, success, failure)
-
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					log("Could not start decoding embedded brick-hit sample " + sampleName + ": " + fmt.Sprint(recovered))
-					finishBrickHitSampleDecode()
-				}
-			}()
-			audioCtx.Call("decodeAudioData", byteArray.Get("buffer"), success, failure)
-		}()
-	}
-}
-
-func filepathExtension(name string) string {
-	index := strings.LastIndexByte(name, '.')
-	if index < 0 {
-		return ""
-	}
-	return name[index:]
-}
-
 func initAudio() {
 	if audioInitialized || !enableSounds {
 		return
@@ -1275,7 +1155,6 @@ func initAudio() {
 	audioInitialized = true
 	audioMaster.Get("gain").Set("value", 0.33)
 	ensureAudioRunning()
-	loadEmbeddedBrickHitSamples()
 	log("Audio initialized")
 }
 
@@ -1364,117 +1243,9 @@ func playPaddleHit() {
 	scheduleTone("sine", varyFreq(90, 0.06), varyFreq(70, 0.06), audioRand(0.08, 0.11), audioRand(0.05, 0.08), 0)
 }
 
-func playSynthBrickBreak() {
+func playBrickBreak() {
 	scheduleTone("square", varyFreq(520, 0.12), varyFreq(360, 0.12), audioRand(0.045, 0.065), audioRand(0.07, 0.11), 0)
 	scheduleTone("triangle", varyFreq(760, 0.10), varyFreq(520, 0.10), audioRand(0.032, 0.05), audioRand(0.035, 0.06), audioRand(0.005, 0.012))
-}
-
-func chooseBrickHitSampleIndex() int {
-	count := len(brickHitBuffers)
-	if count <= 1 {
-		return count - 1
-	}
-	if brickHitLastIndex < 0 || brickHitLastIndex >= count {
-		return rand.Intn(count)
-	}
-
-	index := rand.Intn(count - 1)
-	if index >= brickHitLastIndex {
-		index++
-	}
-	return index
-}
-
-func playBrickBreak(impactSpeed float64) {
-	if !enableSounds {
-		return
-	}
-
-	samplePlaybackReady := audioInitialized &&
-		!audioCtx.IsNull() && !audioCtx.IsUndefined() &&
-		!audioMaster.IsNull() && !audioMaster.IsUndefined() &&
-		len(brickHitBuffers) > 0
-
-	// Protect the render/physics thread from large pass-through or influencer
-	// bursts. Extra destroyed bricks remain destroyed; they simply do not start
-	// another sound in this animation frame.
-	if brickHitStartsThisFrame >= brickHitMaxStartsPerFrame {
-		return
-	}
-	if samplePlaybackReady && brickHitActiveVoices >= brickHitMaxActiveVoices {
-		return
-	}
-	brickHitStartsThisFrame++
-
-	if !samplePlaybackReady {
-		playSynthBrickBreak()
-		return
-	}
-
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			log("Brick-hit sample playback failed: " + fmt.Sprint(recovered))
-			playSynthBrickBreak()
-		}
-	}()
-
-	ensureAudioRunning()
-
-	index := chooseBrickHitSampleIndex()
-	if index < 0 || index >= len(brickHitBuffers) {
-		playSynthBrickBreak()
-		return
-	}
-	brickHitLastIndex = index
-
-	referenceSpeed := math.Max(physicsConfig.maxSpeed, minimumCollisionSoundSpeed+1)
-	strength := clampFloat(
-		(impactSpeed-minimumCollisionSoundSpeed)/(referenceSpeed-minimumCollisionSoundSpeed),
-		0, 1,
-	)
-	strength = math.Sqrt(strength)
-
-	now := audioCtx.Get("currentTime").Float()
-	source := audioCtx.Call("createBufferSource")
-	filter := audioCtx.Call("createBiquadFilter")
-	gain := audioCtx.Call("createGain")
-
-	source.Set("buffer", brickHitBuffers[index])
-	source.Get("playbackRate").Call(
-		"setValueAtTime",
-		audioRand(brickHitPlaybackRateMin, brickHitPlaybackRateMax),
-		now,
-	)
-
-	filter.Set("type", "lowpass")
-	cutoff := brickHitFilterMinHz + (brickHitFilterMaxHz-brickHitFilterMinHz)*strength
-	cutoff *= audioRand(0.86, 1.14)
-	nyquistMargin := audioCtx.Get("sampleRate").Float() * 0.45
-	filter.Get("frequency").Call("setValueAtTime", clampFloat(cutoff, 800, nyquistMargin), now)
-	filter.Get("Q").Call("setValueAtTime", audioRand(0.25, 0.85), now)
-
-	volume := brickHitGainMin + (brickHitGainMax-brickHitGainMin)*strength
-	volume *= audioRand(0.90, 1.08)
-	gain.Get("gain").Call("setValueAtTime", volume, now)
-
-	source.Call("connect", filter)
-	filter.Call("connect", gain)
-	gain.Call("connect", audioMaster)
-
-	// Install the completion callback before starting the source, then release
-	// the Go callback as soon as this one-shot voice ends.
-	var ended js.Func
-	ended = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if brickHitActiveVoices > 0 {
-			brickHitActiveVoices--
-		}
-		source.Set("onended", js.Null())
-		ended.Release()
-		return nil
-	})
-	source.Set("onended", ended)
-	source.Call("start", now)
-	brickHitActiveVoices++
 }
 
 func playUnbreakable() {
@@ -2657,7 +2428,7 @@ func applyBrickMagnetism(b *Ball, dt float64) {
 }
 
 // ---- Influencer area damage ----
-func destroyBricksInRadius(ballX, ballY, radius, impactSpeed float64) {
+func destroyBricksInRadius(ballX, ballY, radius float64) {
 	radiusSquared := radius * radius
 	for i := range bricks {
 		br := &bricks[i]
@@ -2669,11 +2440,7 @@ func destroyBricksInRadius(ballX, ballY, radius, impactSpeed float64) {
 		dx := ballX - closestX
 		dy := ballY - closestY
 		if dx*dx+dy*dy <= radiusSquared && destroyBrick(br) {
-			if br.magic {
-				playMagic()
-			} else {
-				playBrickBreak(impactSpeed)
-			}
+			playBrickBreak()
 		}
 	}
 }
@@ -3016,13 +2783,9 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 		for _, contact := range contacts {
 			br := &bricks[contact.index]
 			if destroyBrick(br) {
-				if br.magic {
-					playMagic()
-				} else {
-					playBrickBreak(contact.impact)
-				}
+				playBrickBreak()
 				if influencerActive {
-					destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier, contact.impact)
+					destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier)
 				}
 			}
 		}
@@ -3097,16 +2860,16 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 				playMagic()
 			}
 			if influencerActive {
-				destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier, contact.impact)
+				destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier)
 			}
 			continue
 		}
 		if destroyBrick(br) {
 			destroyedNormal = true
-			playBrickBreak(contact.impact)
+			playBrickBreak()
 		}
 		if influencerActive {
-			destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier, contact.impact)
+			destroyBricksInRadius(b.x, b.y, b.r*influencerMultiplier)
 		}
 	}
 
@@ -4815,9 +4578,6 @@ func drawBall(x, y, radius, angle float64, fillColor, strokeColor string) {
 
 // ---- Game loop ----
 func gameLoop(this js.Value, args []js.Value) interface{} {
-	// This budget spans all fixed physics steps executed by one visual frame.
-	brickHitStartsThisFrame = 0
-
 	defer func() {
 		if r := recover(); r != nil {
 			js.Global().Get("console").Call("error", "Panic in gameLoop:", r)
