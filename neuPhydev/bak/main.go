@@ -22,7 +22,19 @@ var embeddedBrickSamples embed.FS
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260728-e31a7b4c90"
+	buildID = "20260728-92b6d41e7c"
+
+	// Three submix buses feed the master output. Change these values to rebalance
+	// complete sound families without editing individual sound definitions.
+	audioMixerMaster = 1.00
+	audioMixerBricks = 0.30
+	audioMixerMagic  = 0.20
+	audioMixerSynths = 0.80
+
+	// Level files may select a room with audioRoom=<name> and optionally
+	// override its dry amount with audioRoomDry=0..1. Omitted audioRoom means
+	// a completely dry signal path with no room effect.
+	audioRoomTransitionSeconds = 0.16
 
 	brickHitSampleDirectory = "sounds/brickHits"
 	brickHitPlaybackRateMin = 0.94
@@ -303,6 +315,11 @@ var (
 	enableBigPaddle        = defaultEnableBigPaddle
 
 	enableSounds = true
+
+	// Per-level room settings. A negative dry value means use the preset default.
+	currentAudioRoom    = "none"
+	currentAudioRoomDry = -1.0
+
 	paused       bool
 	leftPressed  bool
 	rightPressed bool
@@ -592,7 +609,27 @@ var (
 	// ---- Audio ----
 	audioCtx         js.Value
 	audioMaster      js.Value
+	audioBrickBus    js.Value
+	audioMagicBus    js.Value
+	audioSynthBus    js.Value
 	audioInitialized bool
+
+	// Reusable per-level room-effects graph. The three mixer buses feed
+	// audioRoomInput; its dry and processed wet branches reunite at audioMaster.
+	audioRoomInput          js.Value
+	audioRoomDryGain        js.Value
+	audioRoomWetGain        js.Value
+	audioRoomInputFilter    js.Value
+	audioRoomOutputFilter   js.Value
+	audioRoomDelay1         js.Value
+	audioRoomDelay2         js.Value
+	audioRoomDelay3         js.Value
+	audioRoomTapGain1       js.Value
+	audioRoomTapGain2       js.Value
+	audioRoomTapGain3       js.Value
+	audioRoomWetSum         js.Value
+	audioRoomFeedbackFilter js.Value
+	audioRoomFeedbackGain   js.Value
 
 	brickHitBuffers        []js.Value
 	brickHitDecodePending  int
@@ -1385,6 +1422,190 @@ func filepathExtension(name string) string {
 	return name[index:]
 }
 
+type audioRoomPreset struct {
+	name       string
+	defaultDry float64
+
+	inputFilterType string
+	inputFrequency  float64
+	inputQ          float64
+
+	outputFilterType string
+	outputFrequency  float64
+	outputQ          float64
+
+	delay1, delay2, delay3       float64
+	tapGain1, tapGain2, tapGain3 float64
+	feedback                     float64
+}
+
+func normalizeAudioRoomName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	replacer := strings.NewReplacer("_", "", "-", "", " ", "")
+	name = replacer.Replace(name)
+	switch name {
+	case "", "none", "off", "dry", "disabled":
+		return "none"
+	case "smallroom", "roomsmall":
+		return "smallroom"
+	case "bigopenroom", "openroom", "bigroom", "roomopen":
+		return "bigopenroom"
+	case "smallhall", "hallsmall":
+		return "smallhall"
+	case "bighall", "largehall", "hallbig":
+		return "bighall"
+	case "underwater", "water":
+		return "underwater"
+	case "space":
+		return "space"
+	case "cave", "cavern":
+		return "cave"
+	case "matrix", "digital":
+		return "matrix"
+	default:
+		return name
+	}
+}
+
+func audioRoomPresetForName(name string) (audioRoomPreset, bool) {
+	name = normalizeAudioRoomName(name)
+	switch name {
+	case "none":
+		return audioRoomPreset{
+			name: "none", defaultDry: 1,
+			inputFilterType: "lowpass", inputFrequency: 20000, inputQ: 0.0001,
+			outputFilterType: "lowpass", outputFrequency: 20000, outputQ: 0.0001,
+			delay1: 0.01, delay2: 0.02, delay3: 0.04,
+		}, true
+	case "smallroom":
+		return audioRoomPreset{
+			name: "smallroom", defaultDry: 0.78,
+			inputFilterType: "highpass", inputFrequency: 80, inputQ: 0.35,
+			outputFilterType: "lowpass", outputFrequency: 9000, outputQ: 0.45,
+			delay1: 0.011, delay2: 0.023, delay3: 0.041,
+			tapGain1: 0.40, tapGain2: 0.28, tapGain3: 0.20, feedback: 0.08,
+		}, true
+	case "bigopenroom":
+		return audioRoomPreset{
+			name: "bigopenroom", defaultDry: 0.82,
+			inputFilterType: "highpass", inputFrequency: 70, inputQ: 0.30,
+			outputFilterType: "lowpass", outputFrequency: 11000, outputQ: 0.35,
+			delay1: 0.070, delay2: 0.150, delay3: 0.310,
+			tapGain1: 0.28, tapGain2: 0.20, tapGain3: 0.15, feedback: 0.08,
+		}, true
+	case "smallhall":
+		return audioRoomPreset{
+			name: "smallhall", defaultDry: 0.68,
+			inputFilterType: "highpass", inputFrequency: 90, inputQ: 0.35,
+			outputFilterType: "lowpass", outputFrequency: 7000, outputQ: 0.50,
+			delay1: 0.028, delay2: 0.061, delay3: 0.115,
+			tapGain1: 0.38, tapGain2: 0.30, tapGain3: 0.24, feedback: 0.22,
+		}, true
+	case "bighall":
+		return audioRoomPreset{
+			name: "bighall", defaultDry: 0.55,
+			inputFilterType: "highpass", inputFrequency: 80, inputQ: 0.35,
+			outputFilterType: "lowpass", outputFrequency: 5400, outputQ: 0.55,
+			delay1: 0.055, delay2: 0.125, delay3: 0.260,
+			tapGain1: 0.34, tapGain2: 0.28, tapGain3: 0.24, feedback: 0.36,
+		}, true
+	case "cave":
+		return audioRoomPreset{
+			name: "cave", defaultDry: 0.42,
+			inputFilterType: "highpass", inputFrequency: 65, inputQ: 0.30,
+			outputFilterType: "lowpass", outputFrequency: 3000, outputQ: 0.65,
+			delay1: 0.075, delay2: 0.190, delay3: 0.420,
+			tapGain1: 0.36, tapGain2: 0.30, tapGain3: 0.26, feedback: 0.50,
+		}, true
+	case "space":
+		return audioRoomPreset{
+			name: "space", defaultDry: 0.58,
+			inputFilterType: "highpass", inputFrequency: 160, inputQ: 0.40,
+			outputFilterType: "lowpass", outputFrequency: 7000, outputQ: 0.35,
+			delay1: 0.110, delay2: 0.290, delay3: 0.520,
+			tapGain1: 0.22, tapGain2: 0.18, tapGain3: 0.14, feedback: 0.26,
+		}, true
+	case "matrix":
+		return audioRoomPreset{
+			name: "matrix", defaultDry: 0.60,
+			inputFilterType: "bandpass", inputFrequency: 1800, inputQ: 2.80,
+			outputFilterType: "lowpass", outputFrequency: 6500, outputQ: 1.20,
+			delay1: 0.011, delay2: 0.023, delay3: 0.047,
+			tapGain1: 0.32, tapGain2: 0.27, tapGain3: 0.22, feedback: 0.58,
+		}, true
+	case "underwater":
+		return audioRoomPreset{
+			name: "underwater", defaultDry: 0.10,
+			inputFilterType: "lowpass", inputFrequency: 600, inputQ: 0.80,
+			outputFilterType: "lowpass", outputFrequency: 750, outputQ: 0.55,
+			delay1: 0.008, delay2: 0.022, delay3: 0.041,
+			tapGain1: 0.40, tapGain2: 0.30, tapGain3: 0.23, feedback: 0.18,
+		}, true
+	default:
+		return audioRoomPreset{}, false
+	}
+}
+
+func smoothAudioParam(param js.Value, value, now float64) {
+	if param.IsUndefined() || param.IsNull() {
+		return
+	}
+	defer func() { _ = recover() }()
+	current := param.Get("value").Float()
+	param.Call("cancelScheduledValues", now)
+	param.Call("setValueAtTime", current, now)
+	param.Call("linearRampToValueAtTime", value, now+audioRoomTransitionSeconds)
+}
+
+func applyAudioRoomSettings() {
+	if !audioInitialized || audioCtx.IsUndefined() || audioCtx.IsNull() {
+		return
+	}
+
+	preset, found := audioRoomPresetForName(currentAudioRoom)
+	if !found {
+		log("Unknown audioRoom preset: " + currentAudioRoom + "; using none")
+		preset, _ = audioRoomPresetForName("none")
+		currentAudioRoom = "none"
+	}
+
+	dry := preset.defaultDry
+	if currentAudioRoomDry >= 0 {
+		dry = clampFloat(currentAudioRoomDry, 0, 1)
+	}
+	if preset.name == "none" {
+		dry = 1
+	}
+	wet := 1 - dry
+
+	now := audioCtx.Get("currentTime").Float()
+
+	// Filter type changes are instantaneous; frequency, Q, delay, gain, and
+	// feedback are ramped to avoid clicks while moving between levels.
+	audioRoomInputFilter.Set("type", preset.inputFilterType)
+	audioRoomOutputFilter.Set("type", preset.outputFilterType)
+	audioRoomFeedbackFilter.Set("type", "lowpass")
+
+	smoothAudioParam(audioRoomInputFilter.Get("frequency"), preset.inputFrequency, now)
+	smoothAudioParam(audioRoomInputFilter.Get("Q"), preset.inputQ, now)
+	smoothAudioParam(audioRoomOutputFilter.Get("frequency"), preset.outputFrequency, now)
+	smoothAudioParam(audioRoomOutputFilter.Get("Q"), preset.outputQ, now)
+	smoothAudioParam(audioRoomFeedbackFilter.Get("frequency"), math.Min(preset.outputFrequency, 5000), now)
+	smoothAudioParam(audioRoomFeedbackFilter.Get("Q"), 0.45, now)
+
+	smoothAudioParam(audioRoomDelay1.Get("delayTime"), preset.delay1, now)
+	smoothAudioParam(audioRoomDelay2.Get("delayTime"), preset.delay2, now)
+	smoothAudioParam(audioRoomDelay3.Get("delayTime"), preset.delay3, now)
+	smoothAudioParam(audioRoomTapGain1.Get("gain"), preset.tapGain1, now)
+	smoothAudioParam(audioRoomTapGain2.Get("gain"), preset.tapGain2, now)
+	smoothAudioParam(audioRoomTapGain3.Get("gain"), preset.tapGain3, now)
+	smoothAudioParam(audioRoomFeedbackGain.Get("gain"), clampFloat(preset.feedback, 0, 0.75), now)
+	smoothAudioParam(audioRoomDryGain.Get("gain"), dry, now)
+	smoothAudioParam(audioRoomWetGain.Get("gain"), wet, now)
+
+	log(fmt.Sprintf("Audio room: %s (dry %.2f, wet %.2f)", preset.name, dry, wet))
+}
+
 func initAudio() {
 	if audioInitialized || !enableSounds {
 		return
@@ -1395,6 +1616,23 @@ func initAudio() {
 			audioInitialized = false
 			audioCtx = js.Undefined()
 			audioMaster = js.Undefined()
+			audioBrickBus = js.Undefined()
+			audioMagicBus = js.Undefined()
+			audioSynthBus = js.Undefined()
+			audioRoomInput = js.Undefined()
+			audioRoomDryGain = js.Undefined()
+			audioRoomWetGain = js.Undefined()
+			audioRoomInputFilter = js.Undefined()
+			audioRoomOutputFilter = js.Undefined()
+			audioRoomDelay1 = js.Undefined()
+			audioRoomDelay2 = js.Undefined()
+			audioRoomDelay3 = js.Undefined()
+			audioRoomTapGain1 = js.Undefined()
+			audioRoomTapGain2 = js.Undefined()
+			audioRoomTapGain3 = js.Undefined()
+			audioRoomWetSum = js.Undefined()
+			audioRoomFeedbackFilter = js.Undefined()
+			audioRoomFeedbackGain = js.Undefined()
 			js.Global().Get("console").Call("error", "Audio init panic:", fmt.Sprint(r))
 		}
 	}()
@@ -1416,23 +1654,102 @@ func initAudio() {
 	}
 
 	audioMaster = audioCtx.Call("createGain")
-	audioMaster.Get("gain").Set("value", 0.33)
+	audioBrickBus = audioCtx.Call("createGain")
+	audioMagicBus = audioCtx.Call("createGain")
+	audioSynthBus = audioCtx.Call("createGain")
+
+	audioRoomInput = audioCtx.Call("createGain")
+	audioRoomDryGain = audioCtx.Call("createGain")
+	audioRoomWetGain = audioCtx.Call("createGain")
+	audioRoomInputFilter = audioCtx.Call("createBiquadFilter")
+	audioRoomOutputFilter = audioCtx.Call("createBiquadFilter")
+	audioRoomDelay1 = audioCtx.Call("createDelay", 2.0)
+	audioRoomDelay2 = audioCtx.Call("createDelay", 2.0)
+	audioRoomDelay3 = audioCtx.Call("createDelay", 2.0)
+	audioRoomTapGain1 = audioCtx.Call("createGain")
+	audioRoomTapGain2 = audioCtx.Call("createGain")
+	audioRoomTapGain3 = audioCtx.Call("createGain")
+	audioRoomWetSum = audioCtx.Call("createGain")
+	audioRoomFeedbackFilter = audioCtx.Call("createBiquadFilter")
+	audioRoomFeedbackGain = audioCtx.Call("createGain")
+
+	// Start fully dry and silent on the wet branch. The selected level preset
+	// then fades in from this safe state, so an omitted audioRoom can never leak
+	// the default Biquad/Delay settings during initial audio startup.
+	audioRoomDryGain.Get("gain").Set("value", 1)
+	audioRoomWetGain.Get("gain").Set("value", 0)
+	audioRoomTapGain1.Get("gain").Set("value", 0)
+	audioRoomTapGain2.Get("gain").Set("value", 0)
+	audioRoomTapGain3.Get("gain").Set("value", 0)
+	audioRoomDelay1.Get("delayTime").Set("value", 0.01)
+	audioRoomDelay2.Get("delayTime").Set("value", 0.02)
+	audioRoomDelay3.Get("delayTime").Set("value", 0.04)
+	audioRoomFeedbackGain.Get("gain").Set("value", 0)
+
+	audioBrickBus.Call("connect", audioRoomInput)
+	audioMagicBus.Call("connect", audioRoomInput)
+	audioSynthBus.Call("connect", audioRoomInput)
+
+	// Completely dry branch.
+	audioRoomInput.Call("connect", audioRoomDryGain)
+	audioRoomDryGain.Call("connect", audioMaster)
+
+	// Three reflection taps plus a damped feedback tail form the wet branch.
+	audioRoomInput.Call("connect", audioRoomInputFilter)
+	audioRoomInputFilter.Call("connect", audioRoomDelay1)
+	audioRoomInputFilter.Call("connect", audioRoomDelay2)
+	audioRoomInputFilter.Call("connect", audioRoomDelay3)
+	audioRoomDelay1.Call("connect", audioRoomTapGain1)
+	audioRoomDelay2.Call("connect", audioRoomTapGain2)
+	audioRoomDelay3.Call("connect", audioRoomTapGain3)
+	audioRoomTapGain1.Call("connect", audioRoomWetSum)
+	audioRoomTapGain2.Call("connect", audioRoomWetSum)
+	audioRoomTapGain3.Call("connect", audioRoomWetSum)
+	audioRoomWetSum.Call("connect", audioRoomOutputFilter)
+	audioRoomOutputFilter.Call("connect", audioRoomWetGain)
+	audioRoomWetGain.Call("connect", audioMaster)
+
+	// DelayNode in the cycle makes this legal Web Audio feedback routing.
+	audioRoomDelay3.Call("connect", audioRoomFeedbackFilter)
+	audioRoomFeedbackFilter.Call("connect", audioRoomFeedbackGain)
+	audioRoomFeedbackGain.Call("connect", audioRoomDelay3)
+
 	audioMaster.Call("connect", audioCtx.Get("destination"))
 
 	audioInitialized = true
-	audioMaster.Get("gain").Set("value", 0.33)
+	setAudioMixerGains()
+	applyAudioRoomSettings()
 	ensureAudioRunning()
 	loadEmbeddedBrickHitSamples()
 	loadEmbeddedMagicFeatureSamples()
 	log("Audio initialized")
 }
 
+func setAudioMixerGains() {
+	if !audioInitialized {
+		return
+	}
+
+	if !audioMaster.IsUndefined() && !audioMaster.IsNull() {
+		audioMaster.Get("gain").Set("value", audioMixerMaster)
+	}
+	if !audioBrickBus.IsUndefined() && !audioBrickBus.IsNull() {
+		audioBrickBus.Get("gain").Set("value", audioMixerBricks)
+	}
+	if !audioMagicBus.IsUndefined() && !audioMagicBus.IsNull() {
+		audioMagicBus.Get("gain").Set("value", audioMixerMagic)
+	}
+	if !audioSynthBus.IsUndefined() && !audioSynthBus.IsNull() {
+		audioSynthBus.Get("gain").Set("value", audioMixerSynths)
+	}
+}
+
 func ensureAudioRunning() {
 	if !audioInitialized || audioCtx.IsUndefined() || audioCtx.IsNull() {
 		return
 	}
-	if enableSounds && !audioMaster.IsUndefined() && !audioMaster.IsNull() {
-		audioMaster.Get("gain").Set("value", 0.33)
+	if enableSounds {
+		setAudioMixerGains()
 	}
 	state := audioCtx.Get("state")
 	if state.Type() == js.TypeString && state.String() == "suspended" {
@@ -1455,27 +1772,27 @@ func audioPanFromX(hitX float64) float64 {
 	return clampFloat(pan, -brickSoundPanLimit, brickSoundPanLimit)
 }
 
-// Connect an audio node through a StereoPannerNode. Browsers without stereo
-// panner support fall back to the existing centered master connection.
-func connectAudioNodePanned(node js.Value, hitX, when float64) {
+// Connect an audio node through a StereoPannerNode and then into its mixer bus.
+// Browsers without stereo-panner support fall back to a centered bus connection.
+func connectAudioNodePanned(node, destination js.Value, hitX, when float64) {
 	connected := false
 	defer func() {
 		if recover() != nil && !connected {
 			defer func() { _ = recover() }()
-			node.Call("connect", audioMaster)
+			node.Call("connect", destination)
 		}
 	}()
 
 	createPanner := audioCtx.Get("createStereoPanner")
 	if createPanner.Type() != js.TypeFunction {
-		node.Call("connect", audioMaster)
+		node.Call("connect", destination)
 		return
 	}
 
 	panner := audioCtx.Call("createStereoPanner")
 	panner.Get("pan").Call("setValueAtTime", audioPanFromX(hitX), when)
 	node.Call("connect", panner)
-	panner.Call("connect", audioMaster)
+	panner.Call("connect", destination)
 	connected = true
 }
 
@@ -1501,7 +1818,8 @@ func scheduleTonePanned(
 ) {
 	if !audioInitialized || !enableSounds ||
 		audioCtx.IsNull() || audioCtx.IsUndefined() ||
-		audioMaster.IsNull() || audioMaster.IsUndefined() {
+		audioMaster.IsNull() || audioMaster.IsUndefined() ||
+		audioSynthBus.IsNull() || audioSynthBus.IsUndefined() {
 		return
 	}
 
@@ -1526,7 +1844,7 @@ func scheduleTonePanned(
 	gain.Get("gain").Call("exponentialRampToValueAtTime", 0.0001, stop)
 
 	osc.Call("connect", gain)
-	connectAudioNodePanned(gain, hitX, start)
+	connectAudioNodePanned(gain, audioSynthBus, hitX, start)
 	osc.Call("start", start)
 	osc.Call("stop", stop+0.02)
 }
@@ -1616,6 +1934,7 @@ func playSampledBrickImpact(
 	samplePlaybackReady := audioInitialized &&
 		!audioCtx.IsNull() && !audioCtx.IsUndefined() &&
 		!audioMaster.IsNull() && !audioMaster.IsUndefined() &&
+		!audioBrickBus.IsNull() && !audioBrickBus.IsUndefined() &&
 		len(buffers) > 0
 
 	// The budget is shared by normal and magic bricks. Extra bricks are still
@@ -1681,7 +2000,7 @@ func playSampledBrickImpact(
 
 	source.Call("connect", filter)
 	filter.Call("connect", gain)
-	connectAudioNodePanned(gain, hitX, now)
+	connectAudioNodePanned(gain, audioBrickBus, hitX, now)
 
 	// Install the completion callback before starting the source, then release
 	// the Go callback as soon as this one-shot voice ends.
@@ -1776,7 +2095,8 @@ func playMagicFeature(feature string, impactSpeed, pitchScale, hitX float64) {
 	buffer, found := magicFeatureBuffers[feature]
 	sampleReady := found && audioInitialized &&
 		!audioCtx.IsNull() && !audioCtx.IsUndefined() &&
-		!audioMaster.IsNull() && !audioMaster.IsUndefined()
+		!audioMaster.IsNull() && !audioMaster.IsUndefined() &&
+		!audioMagicBus.IsNull() && !audioMagicBus.IsUndefined()
 	if !sampleReady {
 		// This is the established generated feature-unlock cue.
 		playPowerup(hitX)
@@ -1845,7 +2165,7 @@ func playMagicFeature(feature string, impactSpeed, pitchScale, hitX float64) {
 
 	source.Call("connect", filter)
 	filter.Call("connect", gain)
-	connectAudioNodePanned(gain, hitX, start)
+	connectAudioNodePanned(gain, audioMagicBus, hitX, start)
 
 	voice := &magicFeatureVoice{source: source, gain: gain, active: true}
 	var ended js.Func
@@ -2021,6 +2341,8 @@ func resetGlobals() {
 	enableZapper = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
 	enableBigPaddle = defaultEnableBigPaddle
+	currentAudioRoom = "none"
+	currentAudioRoomDry = -1
 	palette = append([]string(nil), defaultPalette...)
 	magicColor = defaultMagicColor
 	magicStrokeColor = defaultMagicStrokeColor
@@ -2039,6 +2361,14 @@ func applyConfig(config map[string]string) {
 	for _, key := range keys {
 		val := config[key]
 		switch key {
+		case "audioRoom":
+			currentAudioRoom = normalizeAudioRoomName(val)
+		case "audioRoomDry":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				currentAudioRoomDry = f
+			} else {
+				log("audioRoomDry must be between 0 and 1")
+			}
 		case "backgroundColor":
 			palette[0] = val
 		case "paddleColor":
@@ -2948,8 +3278,10 @@ func startLevel(index int) {
 	levelMagnetActive = false
 	levelZapperActive = false
 
-	// Apply level-specific config. A level can use magnet=true.
+	// Apply level-specific config. A level can use magnet=true, audioRoom=cave,
+	// and audioRoomDry=0.65. If audioRoom is omitted, resetGlobals leaves it dry.
 	applyConfig(levels[index].config)
+	applyAudioRoomSettings()
 
 	paddle.w = paddleWidth
 	paddle.h = paddleHeight
@@ -4706,6 +5038,10 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 			formatConfigFloat(physicsSettingValue(&defaults, field)), "float", true
 	}
 	switch key {
+	case "audioRoom":
+		return currentAudioRoom, "none", "string", true
+	case "audioRoomDry":
+		return formatConfigFloat(currentAudioRoomDry), "-1", "float", true
 	case "backgroundColor":
 		return palette[0], defaultPalette[0], "string", true
 	case "paddleColor":
@@ -5592,16 +5928,12 @@ func setupInput() {
 			return nil
 		}
 
-		// Start a new game after winning. Page Up/Page Down remain level-navigation cheats.
-		if gameOver && win {
-			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
-				jumpToLevel(0)
-			}
-			return nil
-		}
-
-		// Page Up / Page Down navigate levels even while paused or waiting.
-		if key == "PageDown" && !e.Get("repeat").Bool() {
+		// Page Up / Page Down navigate levels in every game state, including the
+		// win and game-over screens. Check both key and code for browser/keyboard
+		// compatibility.
+		pageDownPressed := key == "PageDown" || code == "PageDown"
+		pageUpPressed := key == "PageUp" || code == "PageUp"
+		if pageDownPressed && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex < limit {
 				jumpToLevel(currentLevelIndex + 1)
@@ -5612,12 +5944,20 @@ func setupInput() {
 			}
 			return nil
 		}
-		if key == "PageUp" && !e.Get("repeat").Bool() {
+		if pageUpPressed && !e.Get("repeat").Bool() {
 			limit := activeUnlockedLimit()
 			if currentLevelIndex > 0 {
 				jumpToLevel(currentLevelIndex - 1)
 			} else if limit > 0 {
 				jumpToLevel(limit)
+			}
+			return nil
+		}
+
+		// Start a new game after winning.
+		if gameOver && win {
+			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
+				jumpToLevel(0)
 			}
 			return nil
 		}
