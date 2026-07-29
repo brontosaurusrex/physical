@@ -13,15 +13,15 @@ secondBallColor=#c7cbd1
 textColor=#e7e9ec
 secondBallSpinColor=#8d939b
 
-gravity=150.0
+gravity=200.0
 restitution=0.99
-//frictionCoeff=0.01
+frictionCoeff=0.0001
 maxSpeed=1000
 paddleBoost=1800
 brickBoost=0
 
 stuckSpeedThreshold=350
-stuckDuration=0.2
+stuckDuration=0.9
 tiltUpSpeed=-2600
 tiltSideMin=280
 tiltSideMax=1420
@@ -34,8 +34,8 @@ ballVy=100
 brickWidth=50
 brickHeight=25
 brickPadding=4
-brickOffsetTop=5
-brickRadius=1
+brickOffsetTop=50
+brickRadius=3
 paddleWidth=240
 
 magicChance=0
@@ -55,7 +55,7 @@ zapper=false
 audioRoom=cave
 audioRoomDry=0.67
 ---
-UUUUUUUUUUUUUUUUUUU
+UUUUUUUUU UUUUUUUUU
 U                 U
 U                 U
 U               U U

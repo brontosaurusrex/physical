@@ -29,6 +29,8 @@ ballX=150.0
 ballY=20.0
 ballVx=30.0
 ballVy=-30.0
+audioRoom=cave
+audioRoomDry=0.80
 ---
 M    M MMMMMM MMMMM M     M
 "m  m" #      #   "# "m m"

@@ -30,6 +30,8 @@ ballX=150.0
 ballY=20.0
 ballVx=30.0
 ballVy=-30.0
+audioRoom=space
+audioRoomDry=0.75
 ---
   X      X
    X    X
