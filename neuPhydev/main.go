@@ -29,7 +29,7 @@ const (
 	// Three submix buses feed the master output. Change these values to rebalance
 	// complete sound families without editing individual sound definitions.
 	audioMixerMaster = 1.00
-	audioMixerBricks = 0.30
+	audioMixerBricks = 0.20 // 0.30
 	audioMixerMagic  = 0.20
 	audioMixerSynths = 0.80
 
