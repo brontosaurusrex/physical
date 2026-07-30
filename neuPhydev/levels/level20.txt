@@ -33,6 +33,7 @@ enableZapper=true
 powerUpDuration=25
 audioRoom=space
 audioRoomDry=0.80
+title="THE SPOT"
 ---                                                         
                                  XX                      
                                 XXXXX                    

@@ -24,6 +24,7 @@ secondBallSpinColor=#8d939b
 //maxSpeed=950
 audioRoom=cave
 audioRoomDry=0.75
+title="TRICKY"
 ---
 M######## ########M
 M########M########M

@@ -433,6 +433,7 @@ var (
 	gameOver                 bool
 	win                      bool
 	waitingForStart          bool
+	levelStartTitle          string
 	levelCompleteTimer       float64
 	levelAdvancePending      bool
 
@@ -2265,6 +2266,30 @@ func resetGlobals() {
 	magicStrokeColor = defaultMagicStrokeColor
 	unbreakableStrokeColor = defaultUnbreakableStrokeColor
 	brickStrokeColor = defaultBrickStrokeColor
+	levelStartTitle = "READY"
+}
+
+func parseLevelStartTitle(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "READY"
+	}
+
+	// Level files may use title="S L A Y". strconv.Unquote handles quoted
+	// strings and escaped characters; unquoted values are accepted as-is.
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		}
+	} else if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		value = value[1 : len(value)-1]
+	}
+
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "READY"
+	}
+	return value
 }
 
 // ---- Apply config overrides from map ----
@@ -2288,6 +2313,8 @@ func applyConfig(config map[string]string) {
 		}
 
 		switch key {
+		case "title":
+			levelStartTitle = parseLevelStartTitle(val)
 		case "audioRoom":
 			currentAudioRoom = normalizeAudioRoomName(val)
 		case "audioRoomDry":
@@ -5864,7 +5891,7 @@ func draw(alpha float64) {
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
 		ctx.Set("font", "72px GameFont, monospace")
-		ctx.Call("fillText", "READY", canvasWidth/2, canvasHeight/2)
+		ctx.Call("fillText", levelStartTitle, canvasWidth/2, canvasHeight/2)
 		ctx.Set("font", "28px GameFont, monospace")
 		//ctx.Call("fillText", "Press Space, Enter, click, or touch", canvasWidth/2, canvasHeight/2+70)
 		ctx.Set("textAlign", "start")

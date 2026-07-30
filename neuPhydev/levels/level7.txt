@@ -19,6 +19,7 @@ unbreakableColor=#ff3366
 unbreakableStrokeColor=#ff3366
 audioRoom=bigroom
 audioRoomDry=0.30
+title="FROM THE RIGHT"
 ---
 U # U # M # M
  U # U # M # M

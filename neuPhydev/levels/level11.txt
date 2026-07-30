@@ -29,6 +29,8 @@ stuckDuration=1.9
 tiltUpSpeed=-2600
 tiltSideMin=280
 tiltSideMax=420
+
+title="NUMBER OF THE BEAST"
 ---
       oe          oe    
     .@XX        .@XX    

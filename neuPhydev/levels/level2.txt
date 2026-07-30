@@ -20,6 +20,7 @@ unbreakableStrokeColor=#e76f51
 brickStrokeColor=#4c956c
 audioRoom=smallhall
 audioRoomDry=0.95
+title="GREEN"
 ---
 M####MMM####M
 ######M######

@@ -38,6 +38,7 @@ secondBallSpinColor=#90e0ef
 textColor=#d8f3dc
 audioRoom=matrix
 audioRoomDry=0.60
+title="MEGABYTE"
 ---
 
  ..   M  .  ..         M * .   M * :. .  ..- . -* .

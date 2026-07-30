@@ -20,6 +20,7 @@ textColor=#d8506d
 secondBallSpinColor=#d8506d
 audioRoom=smallhall
 audioRoomDry=0.95
+title="HEART"
 ---
 
  MMMMMMMM  MMMMMMMM

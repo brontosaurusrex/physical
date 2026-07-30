@@ -2,6 +2,7 @@ enablePassThrough=true
 enableBlackHole=true
 audioRoom=smallhall
 audioRoomDry=0.75
+title="SIMILAR"
 ---
 U#######U
 #########

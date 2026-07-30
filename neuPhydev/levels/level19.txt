@@ -36,6 +36,7 @@ stuckDuration=0.3
 tiltUpSpeed=-2600
 tiltSideMin=280
 tiltSideMax=420
+title="FURNACE"
 ---
 
 

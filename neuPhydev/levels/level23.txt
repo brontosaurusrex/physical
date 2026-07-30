@@ -27,6 +27,7 @@ magicStrokeColor=#503c81
 //unbreakableStrokeColor=#e76f51
 audioRoom=cave
 audioRoomDry=0.10
+title="STALACTITE"
 ---
 
 MMM  MMM=#MM .*M% M MM- M MMMMMMMMMM M MM=M M MM MM.M=.M

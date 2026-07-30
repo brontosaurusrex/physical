@@ -23,6 +23,7 @@ secondBallSpinColor=#c7cbd1
 
 audioRoom=cave
 audioRoomDry=0.50
+title="TEMPLE"
 ---
 U      ####MM       U
 U      MM####       U

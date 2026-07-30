@@ -27,6 +27,7 @@ spinColor=#8e7dbe
 secondBallColor=#f2d0a9
 textColor=#8e7dbe
 secondBallSpinColor=#f2d0a9
+title="GRINDER"
 ---
            UU           
          U####U         
