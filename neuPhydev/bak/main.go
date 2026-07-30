@@ -14,20 +14,22 @@ import (
 	"syscall/js"
 )
 
-// Normal-brick samples and optional feature-named magic WAVs are compiled
-// into the WASM binary. Add or replace WAV files, then rebuild.
+// Compressed runtime samples are embedded from dedicated runtime directories.
+// Editable WAV masters stay one directory above and are not embedded as long as
+// they are kept out of runtime/. Supported compressed files are decoded
+// sequentially at game startup so gameplay never waits for first-use decoding.
 //
-//go:embed sounds/brickHits/*.wav sounds/magicBrickHits
-var embeddedBrickSamples embed.FS
+//go:embed sounds/brickHits/runtime sounds/magicBrickHits/runtime
+var embeddedRuntimeAudio embed.FS
 
 // ---- Default values (constants) ----
 const (
-	buildID = "20260728-92b6d41e7c"
+	buildID = "20260729-8f31c6e4a9"
 
 	// Three submix buses feed the master output. Change these values to rebalance
 	// complete sound families without editing individual sound definitions.
 	audioMixerMaster = 1.00
-	audioMixerBricks = 0.30
+	audioMixerBricks = 0.20 // 0.30
 	audioMixerMagic  = 0.20
 	audioMixerSynths = 0.80
 
@@ -36,7 +38,7 @@ const (
 	// a completely dry signal path with no room effect.
 	audioRoomTransitionSeconds = 0.16
 
-	brickHitSampleDirectory = "sounds/brickHits"
+	brickHitSampleDirectory = "sounds/brickHits/runtime"
 	brickHitPlaybackRateMin = 0.94
 	brickHitPlaybackRateMax = 1.07
 	brickHitFilterMinHz     = 2400.0
@@ -44,7 +46,7 @@ const (
 	brickHitGainMin         = 0.16
 	brickHitGainMax         = 0.40
 
-	magicFeatureSampleDirectory = "sounds/magicBrickHits"
+	magicFeatureSampleDirectory = "sounds/magicBrickHits/runtime"
 	magicFeaturePlaybackRateMin = 0.96
 	magicFeaturePlaybackRateMax = 1.04
 	magicFeatureFilterMinHz     = 3000.0
@@ -55,9 +57,10 @@ const (
 	magicFeatureMaxActiveVoices = 4
 	magicFeatureRetriggerFade   = 0.018
 
-	brickHitMaxActiveVoices   = 8
-	brickHitMaxStartsPerFrame = 3
-	brickSoundPanLimit        = 0.75
+	brickHitMaxActiveVoices    = 8
+	brickHitMaxStartsPerFrame  = 3
+	brickSoundPanLimit         = 0.75
+	embeddedAudioDecodeYieldMS = 12
 
 	// Zapper-destroyed bricks use their normal sample bank, but the sample is
 	// shifted upward so an electrical kill is distinct from a ball collision.
@@ -631,21 +634,34 @@ var (
 	audioRoomFeedbackFilter js.Value
 	audioRoomFeedbackGain   js.Value
 
-	brickHitBuffers        []js.Value
-	brickHitDecodePending  int
-	brickHitSamplesLoading bool
-	brickHitLastIndex      = -1
+	brickHitBuffers   []js.Value
+	brickHitLastIndex = -1
 
-	magicFeatureBuffers        = make(map[string]js.Value)
-	magicFeatureDecodePending  int
-	magicFeatureSamplesLoading bool
-	magicFeatureVoices         = make(map[string]*magicFeatureVoice)
-	magicFeatureActiveVoices   int
+	magicFeatureBuffers      = make(map[string]js.Value)
+	magicFeatureVoices       = make(map[string]*magicFeatureVoice)
+	magicFeatureActiveVoices int
 
-	embeddedSampleDecodeCallbacks []js.Func
-	brickHitActiveVoices          int
-	brickHitStartsThisFrame       int
+	// Embedded compressed audio is read and decoded one file at a time in the
+	// background. Empty/not-yet-ready sample banks use the existing synth
+	// fallback immediately, so gameplay never waits for audio decoding.
+	embeddedAudioCallbacks      []js.Func
+	embeddedAudioPreloadStarted bool
+	embeddedAudioQueue          []embeddedAudioSample
+	embeddedAudioLoadActive     bool
+	embeddedAudioMagicFeatures  = make(map[string]bool)
+	embeddedAudioLoadedCount    int
+	embeddedAudioFailedCount    int
+
+	brickHitActiveVoices    int
+	brickHitStartsThisFrame int
 )
+
+type embeddedAudioSample struct {
+	path    string
+	label   string
+	feature string
+	magic   bool
+}
 
 type brick struct {
 	x, y, w, h  float64
@@ -1199,11 +1215,7 @@ func toggleSound() {
 	enableSounds = !enableSounds
 
 	if enableSounds {
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
+		unlockAudioFromGesture()
 		showStatus("Sound on", 2.0)
 	} else {
 		stopAllMagicFeatureVoices()
@@ -1216,201 +1228,17 @@ func toggleSound() {
 }
 
 // ---- Audio (non-blocking, scheduled via Web Audio) ----
-func finishEmbeddedSampleDecode(
-	label string,
-	buffers *[]js.Value,
-	loading *bool,
-	pending *int,
-) {
-	if *pending > 0 {
-		*pending--
-	}
-	if *pending != 0 {
-		return
-	}
 
-	*loading = false
-	log(fmt.Sprintf("Embedded %s samples ready: %d", label, len(*buffers)))
-}
+func supportedCompressedAudioFile(name string) bool {
+	name = strings.TrimSpace(name)
 
-func loadEmbeddedSampleBank(
-	directory string,
-	label string,
-	buffers *[]js.Value,
-	loading *bool,
-	pending *int,
-	lastIndex *int,
-) {
-	if !audioInitialized || *loading || len(*buffers) > 0 {
-		return
-	}
-
-	entries, err := fs.ReadDir(embeddedBrickSamples, directory)
-	if err != nil {
-		log("Could not read embedded " + label + " samples: " + err.Error())
-		return
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepathExtension(entry.Name()), ".wav") {
-			continue
-		}
-		names = append(names, directory+"/"+entry.Name())
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		log("No embedded WAV files found in " + directory)
-		return
-	}
-
-	*loading = true
-	*pending = len(names)
-	*buffers = (*buffers)[:0]
-	*lastIndex = -1
-
-	for _, name := range names {
-		data, readErr := embeddedBrickSamples.ReadFile(name)
-		if readErr != nil {
-			log("Could not read embedded " + label + " sample " + name + ": " + readErr.Error())
-			finishEmbeddedSampleDecode(label, buffers, loading, pending)
-			continue
-		}
-
-		sampleName := name
-		byteArray := js.Global().Get("Uint8Array").New(len(data))
-		js.CopyBytesToJS(byteArray, data)
-
-		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
-				*buffers = append(*buffers, args[0])
-			}
-			finishEmbeddedSampleDecode(label, buffers, loading, pending)
-			return nil
-		})
-		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			reason := "unknown decode error"
-			if len(args) > 0 {
-				reason = fmt.Sprint(args[0])
-			}
-			log("Could not decode embedded " + label + " sample " + sampleName + ": " + reason)
-			finishEmbeddedSampleDecode(label, buffers, loading, pending)
-			return nil
-		})
-
-		// Keep callbacks alive for the lifetime of the page. This is a tiny fixed
-		// allocation and avoids releasing a js.Func while the browser invokes it.
-		embeddedSampleDecodeCallbacks = append(embeddedSampleDecodeCallbacks, success, failure)
-
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					log("Could not start decoding embedded " + label + " sample " + sampleName + ": " + fmt.Sprint(recovered))
-					finishEmbeddedSampleDecode(label, buffers, loading, pending)
-				}
-			}()
-			audioCtx.Call("decodeAudioData", byteArray.Get("buffer"), success, failure)
-		}()
-	}
-}
-
-func loadEmbeddedBrickHitSamples() {
-	loadEmbeddedSampleBank(
-		brickHitSampleDirectory,
-		"normal-brick hit",
-		&brickHitBuffers,
-		&brickHitSamplesLoading,
-		&brickHitDecodePending,
-		&brickHitLastIndex,
-	)
-}
-
-func finishMagicFeatureSampleDecode() {
-	if magicFeatureDecodePending > 0 {
-		magicFeatureDecodePending--
-	}
-	if magicFeatureDecodePending != 0 {
-		return
-	}
-
-	magicFeatureSamplesLoading = false
-	log(fmt.Sprintf("Embedded magic-feature samples ready: %d", len(magicFeatureBuffers)))
-}
-
-func magicFeatureNameFromFilename(name string) string {
-	extension := filepathExtension(name)
-	return strings.ToLower(strings.TrimSpace(strings.TrimSuffix(name, extension)))
-}
-
-func loadEmbeddedMagicFeatureSamples() {
-	if !audioInitialized || magicFeatureSamplesLoading || len(magicFeatureBuffers) > 0 {
-		return
-	}
-
-	entries, err := fs.ReadDir(embeddedBrickSamples, magicFeatureSampleDirectory)
-	if err != nil {
-		log("Could not read embedded magic-feature samples: " + err.Error())
-		return
-	}
-
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepathExtension(entry.Name()), ".wav") {
-			continue
-		}
-		names = append(names, entry.Name())
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		log("No feature-named WAV files found in " + magicFeatureSampleDirectory + "; using synthesized power-up sounds")
-		return
-	}
-
-	magicFeatureSamplesLoading = true
-	magicFeatureDecodePending = len(names)
-	clear(magicFeatureBuffers)
-
-	for _, fileName := range names {
-		featureName := magicFeatureNameFromFilename(fileName)
-		path := magicFeatureSampleDirectory + "/" + fileName
-		data, readErr := embeddedBrickSamples.ReadFile(path)
-		if readErr != nil {
-			log("Could not read embedded magic-feature sample " + path + ": " + readErr.Error())
-			finishMagicFeatureSampleDecode()
-			continue
-		}
-
-		byteArray := js.Global().Get("Uint8Array").New(len(data))
-		js.CopyBytesToJS(byteArray, data)
-
-		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
-				magicFeatureBuffers[featureName] = args[0]
-			}
-			finishMagicFeatureSampleDecode()
-			return nil
-		})
-		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-			reason := "unknown decode error"
-			if len(args) > 0 {
-				reason = fmt.Sprint(args[0])
-			}
-			log("Could not decode embedded magic-feature sample " + path + ": " + reason)
-			finishMagicFeatureSampleDecode()
-			return nil
-		})
-
-		embeddedSampleDecodeCallbacks = append(embeddedSampleDecodeCallbacks, success, failure)
-
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					log("Could not start decoding embedded magic-feature sample " + path + ": " + fmt.Sprint(recovered))
-					finishMagicFeatureSampleDecode()
-				}
-			}()
-			audioCtx.Call("decodeAudioData", byteArray.Get("buffer"), success, failure)
-		}()
+	switch strings.ToLower(filepathExtension(name)) {
+	case ".mp3", ".ogg", ".oga", ".opus", ".webm", ".m4a", ".aac", ".flac":
+		return true
+	default:
+		// WAV is intentionally excluded. WAV masters belong outside runtime/ and
+		// are never read or decoded by this loader.
+		return false
 	}
 }
 
@@ -1420,6 +1248,191 @@ func filepathExtension(name string) string {
 		return ""
 	}
 	return name[index:]
+}
+
+func keepEmbeddedAudioCallback(callback js.Func) {
+	embeddedAudioCallbacks = append(embeddedAudioCallbacks, callback)
+}
+
+func queueEmbeddedAudioDirectory(directory, label string, magic bool) {
+	entries, err := fs.ReadDir(embeddedRuntimeAudio, directory)
+	if err != nil {
+		log("Could not read embedded " + label + " directory " + directory + ": " + err.Error())
+		return
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !supportedCompressedAudioFile(entry.Name()) {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+
+	for _, fileName := range names {
+		sample := embeddedAudioSample{
+			path:  directory + "/" + fileName,
+			label: label,
+			magic: magic,
+		}
+
+		if magic {
+			sample.feature = magicFeatureNameFromFilename(fileName)
+			if sample.feature == "" || embeddedAudioMagicFeatures[sample.feature] {
+				continue
+			}
+			embeddedAudioMagicFeatures[sample.feature] = true
+		}
+
+		embeddedAudioQueue = append(embeddedAudioQueue, sample)
+	}
+}
+
+func finishEmbeddedAudioSampleLoad(sample embeddedAudioSample, loaded bool) {
+	if loaded {
+		embeddedAudioLoadedCount++
+	} else {
+		embeddedAudioFailedCount++
+	}
+	embeddedAudioLoadActive = false
+	scheduleNextEmbeddedAudioLoad()
+}
+
+func decodeEmbeddedAudio(sample embeddedAudioSample) {
+	data, err := embeddedRuntimeAudio.ReadFile(sample.path)
+	if err != nil {
+		log("Could not read embedded " + sample.label + " sample " + sample.path + ": " + err.Error())
+		finishEmbeddedAudioSampleLoad(sample, false)
+		return
+	}
+	if len(data) == 0 {
+		log("Embedded " + sample.label + " sample was empty: " + sample.path)
+		finishEmbeddedAudioSampleLoad(sample, false)
+		return
+	}
+
+	byteArray := js.Global().Get("Uint8Array").New(len(data))
+	js.CopyBytesToJS(byteArray, data)
+
+	var decodeSuccessCallback js.Func
+	var decodeFailureCallback js.Func
+	finished := false
+	finish := func(loaded bool) {
+		if finished {
+			return
+		}
+		finished = true
+		finishEmbeddedAudioSampleLoad(sample, loaded)
+	}
+
+	decodeSuccessCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) == 0 || args[0].IsUndefined() || args[0].IsNull() {
+			log("Decoded embedded " + sample.label + " sample was empty: " + sample.path)
+			finish(false)
+			return nil
+		}
+
+		if sample.magic {
+			magicFeatureBuffers[sample.feature] = args[0]
+		} else {
+			brickHitBuffers = append(brickHitBuffers, args[0])
+		}
+		finish(true)
+		return nil
+	})
+
+	decodeFailureCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		reason := "decode failed"
+		if len(args) > 0 {
+			reason = fmt.Sprint(args[0])
+		}
+		log("Could not decode embedded " + sample.label + " sample " + sample.path + ": " + reason)
+		finish(false)
+		return nil
+	})
+
+	keepEmbeddedAudioCallback(decodeSuccessCallback)
+	keepEmbeddedAudioCallback(decodeFailureCallback)
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log("Could not start decoding embedded " + sample.label + " sample " + sample.path + ": " + fmt.Sprint(recovered))
+			finish(false)
+		}
+	}()
+	audioCtx.Call("decodeAudioData", byteArray.Get("buffer"), decodeSuccessCallback, decodeFailureCallback)
+}
+
+func scheduleNextEmbeddedAudioLoad() {
+	if embeddedAudioLoadActive {
+		return
+	}
+	if len(embeddedAudioQueue) == 0 {
+		if embeddedAudioPreloadStarted {
+			log(fmt.Sprintf(
+				"Embedded audio preload finished: %d loaded, %d failed; brick=%d magic=%d",
+				embeddedAudioLoadedCount,
+				embeddedAudioFailedCount,
+				len(brickHitBuffers),
+				len(magicFeatureBuffers),
+			))
+		}
+		return
+	}
+
+	sample := embeddedAudioQueue[0]
+	embeddedAudioQueue = embeddedAudioQueue[1:]
+	embeddedAudioLoadActive = true
+
+	timerCallback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if !audioInitialized || audioCtx.IsUndefined() || audioCtx.IsNull() {
+			finishEmbeddedAudioSampleLoad(sample, false)
+			return nil
+		}
+		decodeEmbeddedAudio(sample)
+		return nil
+	})
+	keepEmbeddedAudioCallback(timerCallback)
+	js.Global().Call("setTimeout", timerCallback, embeddedAudioDecodeYieldMS)
+}
+
+func startEmbeddedAudioPreload() {
+	if embeddedAudioPreloadStarted || !audioInitialized {
+		return
+	}
+
+	embeddedAudioPreloadStarted = true
+	embeddedAudioLoadedCount = 0
+	embeddedAudioFailedCount = 0
+	embeddedAudioQueue = embeddedAudioQueue[:0]
+	clear(embeddedAudioMagicFeatures)
+	brickHitBuffers = brickHitBuffers[:0]
+	brickHitLastIndex = -1
+	clear(magicFeatureBuffers)
+
+	queueEmbeddedAudioDirectory(brickHitSampleDirectory, "normal-brick hit", false)
+	queueEmbeddedAudioDirectory(magicFeatureSampleDirectory, "magic-feature", true)
+	sort.Slice(embeddedAudioQueue, func(i, j int) bool {
+		return embeddedAudioQueue[i].path < embeddedAudioQueue[j].path
+	})
+
+	if len(embeddedAudioQueue) == 0 {
+		log("No embedded compressed runtime audio found; using synthesized fallbacks")
+		return
+	}
+
+	log(fmt.Sprintf("Embedded compressed audio queued: %d file(s)", len(embeddedAudioQueue)))
+	scheduleNextEmbeddedAudioLoad()
+}
+
+func magicFeatureNameFromFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if slash := strings.LastIndexByte(name, '/'); slash >= 0 {
+		name = name[slash+1:]
+	}
+	extension := filepathExtension(name)
+	return strings.ToLower(strings.TrimSpace(strings.TrimSuffix(name, extension)))
 }
 
 type audioRoomPreset struct {
@@ -1719,10 +1732,8 @@ func initAudio() {
 	audioInitialized = true
 	setAudioMixerGains()
 	applyAudioRoomSettings()
-	ensureAudioRunning()
-	loadEmbeddedBrickHitSamples()
-	loadEmbeddedMagicFeatureSamples()
-	log("Audio initialized")
+	startEmbeddedAudioPreload()
+	log("Audio graph initialized; embedded compressed samples are preloading")
 }
 
 func setAudioMixerGains() {
@@ -1745,16 +1756,40 @@ func setAudioMixerGains() {
 }
 
 func ensureAudioRunning() {
-	if !audioInitialized || audioCtx.IsUndefined() || audioCtx.IsNull() {
+	if !enableSounds ||
+		!audioInitialized || audioCtx.IsUndefined() || audioCtx.IsNull() {
 		return
 	}
-	if enableSounds {
-		setAudioMixerGains()
-	}
+	setAudioMixerGains()
 	state := audioCtx.Get("state")
 	if state.Type() == js.TypeString && state.String() == "suspended" {
 		audioCtx.Call("resume")
 	}
+}
+
+func unlockAudioFromGesture() {
+	if !enableSounds {
+		return
+	}
+	if !audioInitialized {
+		initAudio()
+	}
+	ensureAudioRunning()
+}
+
+func scheduleAudioPreparation() {
+	if !enableSounds || audioInitialized {
+		return
+	}
+
+	callback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if enableSounds && !audioInitialized {
+			initAudio()
+		}
+		return nil
+	})
+	keepEmbeddedAudioCallback(callback)
+	js.Global().Call("setTimeout", callback, 0)
 }
 
 func brickCenterX(br *brick) float64 {
@@ -5867,11 +5902,7 @@ func bindMobileButton(id string, handler func()) {
 		if len(args) > 0 {
 			args[0].Call("preventDefault")
 		}
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
+		unlockAudioFromGesture()
 		handler()
 		return nil
 	})
@@ -5896,6 +5927,11 @@ func setupInput() {
 		e.Call("preventDefault")
 		key := e.Get("key").String()
 		code := e.Get("code").String()
+
+		// Unlock/resume audio on the first keyboard gesture, including the key
+		// that leaves the waiting screen. Embedded sample decoding is already
+		// asynchronous, so this path never waits for a sample.
+		unlockAudioFromGesture()
 
 		// Temporary development unlock. It is deliberately not stored.
 		if (key == "u" || key == "U") && !e.Get("repeat").Bool() {
@@ -5988,13 +6024,6 @@ func setupInput() {
 
 		if levelAdvancePending {
 			return nil
-		}
-
-		// Browser audio must be unlocked from a user gesture.
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
 		}
 
 		// Sound toggle.
@@ -6122,11 +6151,7 @@ func setupInput() {
 			return nil
 		}
 
-		if !audioInitialized {
-			initAudio()
-		} else {
-			ensureAudioRunning()
-		}
+		unlockAudioFromGesture()
 
 		pointerType := e.Get("pointerType").String()
 
@@ -6416,6 +6441,11 @@ func main() {
 	setupMobileControlSelector()
 	resetGame()
 	syncRenderInterpolation()
+
+	// Build the audio graph and begin embedded compressed-sample decoding after
+	// the current call stack, before normal gameplay. Browsers may keep the
+	// context suspended until the first user gesture, but decoding can proceed.
+	scheduleAudioPreparation()
 
 	setPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) == 0 || gameOver {

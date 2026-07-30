@@ -22,199 +22,12 @@ import (
 //go:embed sounds/brickHits/runtime sounds/magicBrickHits/runtime
 var embeddedRuntimeAudio embed.FS
 
-// ---- Default values (constants) ----
-const (
-	buildID = "20260729-8f31c6e4a9"
+// Compile-time defaults and tuning values live in config.go.
 
-	// Three submix buses feed the master output. Change these values to rebalance
-	// complete sound families without editing individual sound definitions.
-	audioMixerMaster = 1.00
-	audioMixerBricks = 0.20 // 0.30
-	audioMixerMagic  = 0.20
-	audioMixerSynths = 0.80
-
-	// Level files may select a room with audioRoom=<name> and optionally
-	// override its dry amount with audioRoomDry=0..1. Omitted audioRoom means
-	// a completely dry signal path with no room effect.
-	audioRoomTransitionSeconds = 0.16
-
-	brickHitSampleDirectory = "sounds/brickHits/runtime"
-	brickHitPlaybackRateMin = 0.94
-	brickHitPlaybackRateMax = 1.07
-	brickHitFilterMinHz     = 2400.0
-	brickHitFilterMaxHz     = 12900.0
-	brickHitGainMin         = 0.16
-	brickHitGainMax         = 0.40
-
-	magicFeatureSampleDirectory = "sounds/magicBrickHits/runtime"
-	magicFeaturePlaybackRateMin = 0.96
-	magicFeaturePlaybackRateMax = 1.04
-	magicFeatureFilterMinHz     = 3000.0
-	magicFeatureFilterMaxHz     = 16000.0
-	magicFeatureHardMaxHz       = 500.0
-	magicFeatureGainMin         = 0.15
-	magicFeatureGainMax         = 0.32
-	magicFeatureMaxActiveVoices = 4
-	magicFeatureRetriggerFade   = 0.018
-
-	brickHitMaxActiveVoices    = 8
-	brickHitMaxStartsPerFrame  = 3
-	brickSoundPanLimit         = 0.75
-	embeddedAudioDecodeYieldMS = 12
-
-	// Zapper-destroyed bricks use their normal sample bank, but the sample is
-	// shifted upward so an electrical kill is distinct from a ball collision.
-	zapperBrickPitchScale = 1.32
-	zapperBrickStrength   = 0.72
-
-	// Rendering follows requestAnimationFrame, but simulation always advances in
-	// fixed 1/240-second steps. At maxSpeed=1250 this is about 5.2 px per tick.
-	physicsStepHz             = 240.0 // 240.0
-	physicsStepSeconds        = 1.0 / physicsStepHz
-	physicsMaxCatchUpSteps    = 32
-	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
-	physicsWarningHoldSeconds = 3.0
-
-	defaultCanvasWidth    = 1800.0
-	defaultCanvasHeight   = 900.0
-	defaultPaddleWidth    = 220.0
-	defaultPaddleHeight   = 30.0
-	defaultBallRadius     = 8.0
-	defaultBrickRows      = 10
-	defaultBrickCols      = 18
-	defaultBrickWidth     = 60.0
-	defaultBrickHeight    = 20.0
-	defaultBrickPadding   = 20.0
-	defaultBrickOffsetTop = -1.0
-
-	// Keyboard and two-thumb controls accelerate from a precise low speed
-	// to a faster cross-screen speed, then brake quickly when released.
-	defaultDigitalPaddleMaxSpeed     = 2800.0
-	defaultDigitalPaddleAcceleration = 9000.0
-	defaultDigitalPaddleBraking      = 40000.0
-
-	// Mouse input supplies only a target. The fixed-step simulation owns the
-	// actual movement, using a stopping-distance controller so the paddle is
-	// responsive, does not overshoot, and produces refresh-independent spin.
-	defaultMousePaddleMaxSpeed     = 6000.0
-	defaultMousePaddleAcceleration = 50000.0
-	defaultMousePaddleBraking      = 70000.0
-	defaultMousePaddleSnapDistance = 0.35
-
-	defaultPaddleRadius         = 12.0
-	defaultBrickRadius          = 6.0
-	defaultUnbreakableChance    = 0.15
-	defaultMagicChance          = 0.3
-	defaultPowerUpDuration      = 10.0
-	defaultBlackHoleStrength    = 800.0
-	defaultBlackHoleRange       = 200.0
-	defaultMagnetStrength       = 600.0
-	defaultMagnetRange          = 300.0
-	defaultInfluencerMultiplier = 5.0
-	defaultLives                = 7
-	defaultZapperHitTime        = 0.1
-	defaultZapperRange          = 320.0
-
-	// Physics defaults. These are the single runtime physics model.
-	defaultPhysicsGravity             = 300.0
-	defaultPhysicsRestitution         = 0.90
-	defaultPhysicsFrictionCoeff       = 0.14 // 0.10
-	defaultPhysicsPaddleBoost         = 900.0
-	defaultPhysicsBrickBoost          = 100.0
-	defaultPhysicsMaxSpeed            = 1000.0 // 1170.0
-	defaultPhysicsMaxSpin             = 1530.0
-	defaultPhysicsStuckSpeedThreshold = 85.0
-	defaultPhysicsStuckDuration       = 1.2 //3.0
-	defaultPhysicsTiltUpSpeed         = 520.0
-	defaultPhysicsTiltSideMin         = 180.0
-	defaultPhysicsTiltSideMax         = 340.0
-
-	// Contact and flight tuning.
-	physicsMagnusCoefficient        = 0.0030 //0.0015
-	physicsMagnusAccelerationScale  = 0.25
-	physicsSpinDrag                 = 0.04 // 0.10
-	physicsAirDrag                  = 0.010
-	physicsWallFrictionScale        = 2.00 //0.35
-	physicsBrickFrictionScale       = 2.00 //1.00
-	physicsUnbreakableFrictionScale = 1.80 //0.35
-	physicsPaddleFrictionScale      = 3.20 //2.60
-	physicsPaddleSpinTransfer       = 2.80 //2.25
-	physicsCollisionSpinCoupling    = 2.00 //2.00
-	physicsMinimumCollisionGrip     = 0.08
-	physicsMinimumPaddleGrip        = 0.55 // 0.45
-	physicsCollisionSlop            = 0.05
-
-	// A short input-memory window makes deliberate paddle spin less dependent on
-	// landing on one exact 240 Hz tick. Only spin transfer uses this history.
-	paddleSpinGraceSeconds = 0.050
-
-	// Speeds above the level max are allowed when collision spin converts into
-	// translation, then their excess decays smoothly back toward maxSpeed.
-	physicsOverspeedHalfLife = 0.35
-
-	// Invisible deterministic wall roughness. Nearby impact positions receive
-	// smoothly related normals; the same level and position always match.
-	wallNoiseCellSize          = 20.0 //120.0
-	wallSideTiltDegrees        = 0.15
-	wallTopTiltDegrees         = 3.45 //0.45
-	wallCornerFadeDistance     = 40.0
-	wallNoiseIDLeft        int = 1
-	wallNoiseIDRight       int = 2
-	wallNoiseIDTop         int = 3
-
-	// Every brick receives a stable, tiny rotation. The same
-	// angle is used for drawing and collision normals, breaking exact vertical
-	// loops without changing the brick grid or consuming gameplay randomness.
-	brickTiltMinDegrees = 0.2
-	brickTiltMaxDegrees = 2.0 // 1.0
-	drawBrickTilt       = true
-
-	// Detector for fast, nearly axis-aligned loops involving
-	// unbreakable bricks. It preserves total speed and holds one escape direction
-	// briefly so repeated collisions cannot alternate the correction sign.
-	physicsOrbitMinimumSpeed         = 300.0
-	physicsOrbitMinimumHitSpeed      = 80.0
-	physicsOrbitMinorSpeedRatio      = 0.08
-	physicsOrbitMinorSpeedFloor      = 45.0
-	physicsOrbitRequiredHits         = 3
-	physicsOrbitDetectionWindow      = 4.0
-	physicsOrbitMaximumMinorProgress = 40.0
-	physicsOrbitHitCooldown          = 0.08
-	physicsOrbitEscapeSpeed          = 110.0
-	physicsOrbitEscapeDuration       = 0.90
-	physicsOrbitMessageDuration      = 1.5
-
-	statusMessageLimit = 10
-
-	enableHighSpinMessage   = true
-	highSpinThreshold       = 100.0 // 100.0
-	highSpinMessageDuration = 3.5
-
-	defaultPhoneTiltDeadZone  = 1.0
-	defaultPhoneTiltMaxAngle  = 10.0
-	defaultPhoneTiltSmoothing = 18.0
-
-	defaultStartBallX  = 1000.0
-	defaultStartBallY  = 600.0
-	defaultStartBallVx = 180.0
-	defaultStartBallVy = -350.0
-
-	defaultEnableLowGravity       = true
-	defaultEnablePassThrough      = true
-	defaultEnableNuke             = true
-	defaultEnableReverseGravity   = true
-	defaultEnableDualBalls        = true
-	defaultEnableBlackHole        = true
-	defaultEnableMagnet           = true
-	defaultEnableInfluencer       = true
-	defaultEnableZapper           = false
-	defaultEnableBreakUnbreakable = true
-	defaultEnableBigPaddle        = true
-
-	showBlackHole = false // Set true to draw the moving black hole.
-)
-
-// physicsSettings contains the level-overridable values for the single physics model.
+// physicsSettings contains every physics value that is meaningful to override
+// per level. Engine scheduling values such as the fixed-step rate remain global
+// compile-time settings in config.go because changing them per level would alter
+// simulation stability rather than level behavior.
 type physicsSettings struct {
 	gravity             float64
 	restitution         float64
@@ -228,22 +41,102 @@ type physicsSettings struct {
 	tiltUpSpeed         float64
 	tiltSideMin         float64
 	tiltSideMax         float64
+
+	magnusCoefficient       float64
+	magnusAccelerationScale float64
+	spinDrag                float64
+	airDrag                 float64
+
+	wallFrictionScale        float64
+	brickFrictionScale       float64
+	unbreakableFrictionScale float64
+	paddleFrictionScale      float64
+	paddleSpinTransfer       float64
+	collisionSpinCoupling    float64
+	minimumCollisionGrip     float64
+	minimumPaddleGrip        float64
+	collisionSlop            float64
+	paddleSpinGraceSeconds   float64
+	overspeedHalfLife        float64
+
+	wallNoiseCellSize      float64
+	wallSideTiltDegrees    float64
+	wallTopTiltDegrees     float64
+	wallCornerFadeDistance float64
+
+	brickTiltMinDegrees float64
+	brickTiltMaxDegrees float64
+	drawBrickTilt       bool
+
+	orbitMinimumSpeed         float64
+	orbitMinimumHitSpeed      float64
+	orbitMinorSpeedRatio      float64
+	orbitMinorSpeedFloor      float64
+	orbitRequiredHits         int
+	orbitDetectionWindow      float64
+	orbitMaximumMinorProgress float64
+	orbitHitCooldown          float64
+	orbitEscapeSpeed          float64
+	orbitEscapeDuration       float64
 }
 
 func defaultPhysicsSettings() physicsSettings {
 	return physicsSettings{
-		gravity: defaultPhysicsGravity, restitution: defaultPhysicsRestitution,
-		frictionCoeff: defaultPhysicsFrictionCoeff, paddleBoost: defaultPhysicsPaddleBoost,
-		brickBoost: defaultPhysicsBrickBoost, maxSpeed: defaultPhysicsMaxSpeed,
-		maxSpin: defaultPhysicsMaxSpin, stuckSpeedThreshold: defaultPhysicsStuckSpeedThreshold,
-		stuckDuration: defaultPhysicsStuckDuration, tiltUpSpeed: defaultPhysicsTiltUpSpeed,
-		tiltSideMin: defaultPhysicsTiltSideMin, tiltSideMax: defaultPhysicsTiltSideMax,
+		gravity:             defaultPhysicsGravity,
+		restitution:         defaultPhysicsRestitution,
+		frictionCoeff:       defaultPhysicsFrictionCoeff,
+		paddleBoost:         defaultPhysicsPaddleBoost,
+		brickBoost:          defaultPhysicsBrickBoost,
+		maxSpeed:            defaultPhysicsMaxSpeed,
+		maxSpin:             defaultPhysicsMaxSpin,
+		stuckSpeedThreshold: defaultPhysicsStuckSpeedThreshold,
+		stuckDuration:       defaultPhysicsStuckDuration,
+		tiltUpSpeed:         defaultPhysicsTiltUpSpeed,
+		tiltSideMin:         defaultPhysicsTiltSideMin,
+		tiltSideMax:         defaultPhysicsTiltSideMax,
+
+		magnusCoefficient:       defaultPhysicsMagnusCoefficient,
+		magnusAccelerationScale: defaultPhysicsMagnusAccelerationScale,
+		spinDrag:                defaultPhysicsSpinDrag,
+		airDrag:                 defaultPhysicsAirDrag,
+
+		wallFrictionScale:        defaultPhysicsWallFrictionScale,
+		brickFrictionScale:       defaultPhysicsBrickFrictionScale,
+		unbreakableFrictionScale: defaultPhysicsUnbreakableFrictionScale,
+		paddleFrictionScale:      defaultPhysicsPaddleFrictionScale,
+		paddleSpinTransfer:       defaultPhysicsPaddleSpinTransfer,
+		collisionSpinCoupling:    defaultPhysicsCollisionSpinCoupling,
+		minimumCollisionGrip:     defaultPhysicsMinimumCollisionGrip,
+		minimumPaddleGrip:        defaultPhysicsMinimumPaddleGrip,
+		collisionSlop:            defaultPhysicsCollisionSlop,
+		paddleSpinGraceSeconds:   defaultPhysicsPaddleSpinGraceSeconds,
+		overspeedHalfLife:        defaultPhysicsOverspeedHalfLife,
+
+		wallNoiseCellSize:      defaultPhysicsWallNoiseCellSize,
+		wallSideTiltDegrees:    defaultPhysicsWallSideTiltDegrees,
+		wallTopTiltDegrees:     defaultPhysicsWallTopTiltDegrees,
+		wallCornerFadeDistance: defaultPhysicsWallCornerFadeDistance,
+
+		brickTiltMinDegrees: defaultPhysicsBrickTiltMinDegrees,
+		brickTiltMaxDegrees: defaultPhysicsBrickTiltMaxDegrees,
+		drawBrickTilt:       defaultPhysicsDrawBrickTilt,
+
+		orbitMinimumSpeed:         defaultPhysicsOrbitMinimumSpeed,
+		orbitMinimumHitSpeed:      defaultPhysicsOrbitMinimumHitSpeed,
+		orbitMinorSpeedRatio:      defaultPhysicsOrbitMinorSpeedRatio,
+		orbitMinorSpeedFloor:      defaultPhysicsOrbitMinorSpeedFloor,
+		orbitRequiredHits:         defaultPhysicsOrbitRequiredHits,
+		orbitDetectionWindow:      defaultPhysicsOrbitDetectionWindow,
+		orbitMaximumMinorProgress: defaultPhysicsOrbitMaximumMinorProgress,
+		orbitHitCooldown:          defaultPhysicsOrbitHitCooldown,
+		orbitEscapeSpeed:          defaultPhysicsOrbitEscapeSpeed,
+		orbitEscapeDuration:       defaultPhysicsOrbitEscapeDuration,
 	}
 }
 
 var physicsConfig = defaultPhysicsSettings()
 
-func setPhysicsSetting(settings *physicsSettings, key string, value float64) {
+func setPhysicsFloatSetting(settings *physicsSettings, key string, value float64) {
 	switch key {
 	case "gravity":
 		settings.gravity = value
@@ -269,6 +162,66 @@ func setPhysicsSetting(settings *physicsSettings, key string, value float64) {
 		settings.tiltSideMin = value
 	case "tiltSideMax":
 		settings.tiltSideMax = value
+	case "magnusCoefficient":
+		settings.magnusCoefficient = value
+	case "magnusAccelerationScale":
+		settings.magnusAccelerationScale = value
+	case "spinDrag":
+		settings.spinDrag = value
+	case "airDrag":
+		settings.airDrag = value
+	case "wallFrictionScale":
+		settings.wallFrictionScale = value
+	case "brickFrictionScale":
+		settings.brickFrictionScale = value
+	case "unbreakableFrictionScale":
+		settings.unbreakableFrictionScale = value
+	case "paddleFrictionScale":
+		settings.paddleFrictionScale = value
+	case "paddleSpinTransfer":
+		settings.paddleSpinTransfer = value
+	case "collisionSpinCoupling":
+		settings.collisionSpinCoupling = value
+	case "minimumCollisionGrip":
+		settings.minimumCollisionGrip = value
+	case "minimumPaddleGrip":
+		settings.minimumPaddleGrip = value
+	case "collisionSlop":
+		settings.collisionSlop = value
+	case "paddleSpinGraceSeconds":
+		settings.paddleSpinGraceSeconds = value
+	case "overspeedHalfLife":
+		settings.overspeedHalfLife = value
+	case "wallNoiseCellSize":
+		settings.wallNoiseCellSize = value
+	case "wallSideTiltDegrees":
+		settings.wallSideTiltDegrees = value
+	case "wallTopTiltDegrees":
+		settings.wallTopTiltDegrees = value
+	case "wallCornerFadeDistance":
+		settings.wallCornerFadeDistance = value
+	case "brickTiltMinDegrees":
+		settings.brickTiltMinDegrees = value
+	case "brickTiltMaxDegrees":
+		settings.brickTiltMaxDegrees = value
+	case "orbitMinimumSpeed":
+		settings.orbitMinimumSpeed = value
+	case "orbitMinimumHitSpeed":
+		settings.orbitMinimumHitSpeed = value
+	case "orbitMinorSpeedRatio":
+		settings.orbitMinorSpeedRatio = value
+	case "orbitMinorSpeedFloor":
+		settings.orbitMinorSpeedFloor = value
+	case "orbitDetectionWindow":
+		settings.orbitDetectionWindow = value
+	case "orbitMaximumMinorProgress":
+		settings.orbitMaximumMinorProgress = value
+	case "orbitHitCooldown":
+		settings.orbitHitCooldown = value
+	case "orbitEscapeSpeed":
+		settings.orbitEscapeSpeed = value
+	case "orbitEscapeDuration":
+		settings.orbitEscapeDuration = value
 	}
 }
 
@@ -317,11 +270,11 @@ var (
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
 	enableBigPaddle        = defaultEnableBigPaddle
 
-	enableSounds = true
+	enableSounds = defaultEnableSounds
 
 	// Per-level room settings. A negative dry value means use the preset default.
-	currentAudioRoom    = "none"
-	currentAudioRoomDry = -1.0
+	currentAudioRoom    = defaultAudioRoom
+	currentAudioRoomDry = defaultAudioRoomDry
 
 	paused       bool
 	leftPressed  bool
@@ -335,7 +288,7 @@ var (
 	mousePaddleTargetX float64
 
 	mobileControlsEnabled  bool
-	mobileControlMode      = "vertical"
+	mobileControlMode      = defaultMobileControlMode
 	mobileSelectorVisible  bool
 	mobileLeftHeld         bool
 	mobileRightHeld        bool
@@ -356,27 +309,10 @@ var (
 	getPausedCallback         js.Func
 )
 
-// ---- Color palette ----
-var defaultPalette = []string{
-	"#1d3557", // background (0)
-	"#f1faee", // paddle (1) & magic bricks
-	"#a8dadc", // normal bricks (2)
-	"#e63946", // ball (3)
-	"#f1faee", // text (4)
-	"#e63946", // spin marker (5)
-	"#f4a261", // unbreakable bricks (6)
-	"#e63946", // second ball (7)
-	"#e63946", // second ball spin marker (8)
-}
-
+// ---- Color palette runtime state ----
 var palette = append([]string(nil), defaultPalette...)
 
 var (
-	defaultMagicColor             = "#f1faee"
-	defaultMagicStrokeColor       = "#ffd700"
-	defaultUnbreakableStrokeColor = "#e76f51"
-	defaultBrickStrokeColor       = "#27ae60"
-
 	magicColor             = defaultMagicColor
 	magicStrokeColor       = defaultMagicStrokeColor
 	unbreakableStrokeColor = defaultUnbreakableStrokeColor
@@ -707,8 +643,8 @@ func brickMicroTiltRadians(levelIndex, row, col int) float64 {
 	hash ^= hash >> 16
 
 	unit := float64(hash&0x00ffffff) / float64(0x00ffffff)
-	magnitudeDegrees := brickTiltMinDegrees +
-		unit*(brickTiltMaxDegrees-brickTiltMinDegrees)
+	magnitudeDegrees := physicsConfig.brickTiltMinDegrees +
+		unit*(physicsConfig.brickTiltMaxDegrees-physicsConfig.brickTiltMinDegrees)
 	if hash&0x80000000 != 0 {
 		magnitudeDegrees = -magnitudeDegrees
 	}
@@ -735,11 +671,11 @@ func wallNoiseHash(cell, wallID int) float64 {
 
 // wallNoise returns smooth deterministic one-dimensional value noise.
 func wallNoise(position float64, wallID int) float64 {
-	if wallNoiseCellSize <= 0 {
+	if physicsConfig.wallNoiseCellSize <= 0 {
 		return 0
 	}
 
-	x := position / wallNoiseCellSize
+	x := position / physicsConfig.wallNoiseCellSize
 	cell := int(math.Floor(x))
 	t := x - float64(cell)
 	t = t * t * (3 - 2*t)
@@ -749,12 +685,12 @@ func wallNoise(position float64, wallID int) float64 {
 }
 
 func wallCornerFade(position, wallLength float64) float64 {
-	if wallCornerFadeDistance <= 0 || wallLength <= 0 {
+	if physicsConfig.wallCornerFadeDistance <= 0 || wallLength <= 0 {
 		return 1
 	}
 
 	edgeDistance := math.Min(position, wallLength-position)
-	t := clampFloat(edgeDistance/wallCornerFadeDistance, 0, 1)
+	t := clampFloat(edgeDistance/physicsConfig.wallCornerFadeDistance, 0, 1)
 	return t * t * (3 - 2*t)
 }
 
@@ -791,11 +727,11 @@ func resetFastOrbitState(b *Ball) {
 
 func fastOrbitAxis(b *Ball) int {
 	speed := math.Hypot(b.vx, b.vy)
-	if speed < physicsOrbitMinimumSpeed {
+	if speed < physicsConfig.orbitMinimumSpeed {
 		return orbitAxisNone
 	}
 
-	minorLimit := math.Max(physicsOrbitMinorSpeedFloor, speed*physicsOrbitMinorSpeedRatio)
+	minorLimit := math.Max(physicsConfig.orbitMinorSpeedFloor, speed*physicsConfig.orbitMinorSpeedRatio)
 	nearVertical := math.Abs(b.vx) <= minorLimit
 	nearHorizontal := math.Abs(b.vy) <= minorLimit
 	if nearVertical && !nearHorizontal {
@@ -848,7 +784,7 @@ func enforceFastOrbitEscape(b *Ball) {
 	if speed <= 0 {
 		return
 	}
-	minorSpeed := math.Min(physicsOrbitEscapeSpeed, speed*0.35)
+	minorSpeed := math.Min(physicsConfig.orbitEscapeSpeed, speed*0.35)
 	majorSpeed := math.Sqrt(math.Max(0, speed*speed-minorSpeed*minorSpeed))
 
 	if b.orbitEscapeAxis == orbitAxisVertical {
@@ -872,7 +808,7 @@ func enforceFastOrbitEscape(b *Ball) {
 func activateFastOrbitEscape(b *Ball, axis int) {
 	b.orbitEscapeAxis = axis
 	b.orbitEscapeDirection = chooseOrbitEscapeDirection(b, axis)
-	b.orbitEscapeTimer = physicsOrbitEscapeDuration
+	b.orbitEscapeTimer = physicsConfig.orbitEscapeDuration
 	resetFastOrbitCandidate(b)
 	enforceFastOrbitEscape(b)
 	showStatusUnique("Orbital tilt!", physicsOrbitMessageDuration)
@@ -892,8 +828,8 @@ func recordUnbreakableOrbitHit(b *Ball) {
 	minorPosition := orbitMinorPosition(b, axis)
 	newCandidate := b.orbitCandidateAxis != axis ||
 		b.orbitCandidateHits == 0 ||
-		b.orbitCandidateTimer > physicsOrbitDetectionWindow ||
-		math.Abs(minorPosition-b.orbitAnchorMinor) > physicsOrbitMaximumMinorProgress
+		b.orbitCandidateTimer > physicsConfig.orbitDetectionWindow ||
+		math.Abs(minorPosition-b.orbitAnchorMinor) > physicsConfig.orbitMaximumMinorProgress
 
 	if newCandidate {
 		b.orbitCandidateAxis = axis
@@ -903,9 +839,9 @@ func recordUnbreakableOrbitHit(b *Ball) {
 	} else {
 		b.orbitCandidateHits++
 	}
-	b.orbitHitCooldown = physicsOrbitHitCooldown
+	b.orbitHitCooldown = physicsConfig.orbitHitCooldown
 
-	if b.orbitCandidateHits >= physicsOrbitRequiredHits {
+	if b.orbitCandidateHits >= physicsConfig.orbitRequiredHits {
 		activateFastOrbitEscape(b, axis)
 	}
 }
@@ -916,7 +852,7 @@ func updateFastOrbitDetector(b *Ball, dt float64) {
 	}
 	if b.orbitCandidateHits > 0 {
 		b.orbitCandidateTimer += dt
-		if b.orbitCandidateTimer > physicsOrbitDetectionWindow {
+		if b.orbitCandidateTimer > physicsConfig.orbitDetectionWindow {
 			resetFastOrbitCandidate(b)
 		}
 	}
@@ -1055,7 +991,7 @@ func resetPaddleSpinHistory() {
 }
 
 func updatePaddleSpinHistory(dt float64) {
-	if dt <= 0 || paddleSpinGraceSeconds <= 0 {
+	if dt <= 0 || physicsConfig.paddleSpinGraceSeconds <= 0 {
 		resetPaddleSpinHistory()
 		return
 	}
@@ -1063,7 +999,7 @@ func updatePaddleSpinHistory(dt float64) {
 	kept := paddleSpinHistory[:0]
 	for _, sample := range paddleSpinHistory {
 		sample.age += dt
-		if sample.age <= paddleSpinGraceSeconds {
+		if sample.age <= physicsConfig.paddleSpinGraceSeconds {
 			kept = append(kept, sample)
 		}
 	}
@@ -1073,10 +1009,10 @@ func updatePaddleSpinHistory(dt float64) {
 func effectivePaddleSpinVelocity() float64 {
 	best := paddle.vx
 	for _, sample := range paddleSpinHistory {
-		if sample.age < 0 || sample.age > paddleSpinGraceSeconds {
+		if sample.age < 0 || sample.age > physicsConfig.paddleSpinGraceSeconds {
 			continue
 		}
-		weight := 1 - sample.age/paddleSpinGraceSeconds
+		weight := 1 - sample.age/physicsConfig.paddleSpinGraceSeconds
 		candidate := sample.vx * weight
 		if math.Abs(candidate) > math.Abs(best) {
 			best = candidate
@@ -1118,11 +1054,6 @@ func maybeShowHighSpin(before, after float64) {
 		showHighSpinStatus()
 	}
 }
-
-const (
-	minimumCollisionSoundSpeed = 35.0
-	collisionSoundCooldown     = 0.045
-)
 
 func playImpactSound(b *Ball, impactSpeed float64, play func()) {
 	if impactSpeed < minimumCollisionSoundSpeed || b.soundCooldown > 0 {
@@ -1482,81 +1413,8 @@ func normalizeAudioRoomName(name string) string {
 
 func audioRoomPresetForName(name string) (audioRoomPreset, bool) {
 	name = normalizeAudioRoomName(name)
-	switch name {
-	case "none":
-		return audioRoomPreset{
-			name: "none", defaultDry: 1,
-			inputFilterType: "lowpass", inputFrequency: 20000, inputQ: 0.0001,
-			outputFilterType: "lowpass", outputFrequency: 20000, outputQ: 0.0001,
-			delay1: 0.01, delay2: 0.02, delay3: 0.04,
-		}, true
-	case "smallroom":
-		return audioRoomPreset{
-			name: "smallroom", defaultDry: 0.78,
-			inputFilterType: "highpass", inputFrequency: 80, inputQ: 0.35,
-			outputFilterType: "lowpass", outputFrequency: 9000, outputQ: 0.45,
-			delay1: 0.011, delay2: 0.023, delay3: 0.041,
-			tapGain1: 0.40, tapGain2: 0.28, tapGain3: 0.20, feedback: 0.08,
-		}, true
-	case "bigopenroom":
-		return audioRoomPreset{
-			name: "bigopenroom", defaultDry: 0.82,
-			inputFilterType: "highpass", inputFrequency: 70, inputQ: 0.30,
-			outputFilterType: "lowpass", outputFrequency: 11000, outputQ: 0.35,
-			delay1: 0.070, delay2: 0.150, delay3: 0.310,
-			tapGain1: 0.28, tapGain2: 0.20, tapGain3: 0.15, feedback: 0.08,
-		}, true
-	case "smallhall":
-		return audioRoomPreset{
-			name: "smallhall", defaultDry: 0.68,
-			inputFilterType: "highpass", inputFrequency: 90, inputQ: 0.35,
-			outputFilterType: "lowpass", outputFrequency: 7000, outputQ: 0.50,
-			delay1: 0.028, delay2: 0.061, delay3: 0.115,
-			tapGain1: 0.38, tapGain2: 0.30, tapGain3: 0.24, feedback: 0.22,
-		}, true
-	case "bighall":
-		return audioRoomPreset{
-			name: "bighall", defaultDry: 0.55,
-			inputFilterType: "highpass", inputFrequency: 80, inputQ: 0.35,
-			outputFilterType: "lowpass", outputFrequency: 5400, outputQ: 0.55,
-			delay1: 0.055, delay2: 0.125, delay3: 0.260,
-			tapGain1: 0.34, tapGain2: 0.28, tapGain3: 0.24, feedback: 0.36,
-		}, true
-	case "cave":
-		return audioRoomPreset{
-			name: "cave", defaultDry: 0.42,
-			inputFilterType: "highpass", inputFrequency: 65, inputQ: 0.30,
-			outputFilterType: "lowpass", outputFrequency: 3000, outputQ: 0.65,
-			delay1: 0.075, delay2: 0.190, delay3: 0.420,
-			tapGain1: 0.36, tapGain2: 0.30, tapGain3: 0.26, feedback: 0.50,
-		}, true
-	case "space":
-		return audioRoomPreset{
-			name: "space", defaultDry: 0.58,
-			inputFilterType: "highpass", inputFrequency: 160, inputQ: 0.40,
-			outputFilterType: "lowpass", outputFrequency: 7000, outputQ: 0.35,
-			delay1: 0.110, delay2: 0.290, delay3: 0.520,
-			tapGain1: 0.22, tapGain2: 0.18, tapGain3: 0.14, feedback: 0.26,
-		}, true
-	case "matrix":
-		return audioRoomPreset{
-			name: "matrix", defaultDry: 0.60,
-			inputFilterType: "bandpass", inputFrequency: 1800, inputQ: 2.80,
-			outputFilterType: "lowpass", outputFrequency: 6500, outputQ: 1.20,
-			delay1: 0.011, delay2: 0.023, delay3: 0.047,
-			tapGain1: 0.32, tapGain2: 0.27, tapGain3: 0.22, feedback: 0.58,
-		}, true
-	case "underwater":
-		return audioRoomPreset{
-			name: "underwater", defaultDry: 0.10,
-			inputFilterType: "lowpass", inputFrequency: 600, inputQ: 0.80,
-			outputFilterType: "lowpass", outputFrequency: 750, outputQ: 0.55,
-			delay1: 0.008, delay2: 0.022, delay3: 0.041,
-			tapGain1: 0.40, tapGain2: 0.30, tapGain3: 0.23, feedback: 0.18,
-		}, true
-	default:
-		return audioRoomPreset{}, false
-	}
+	preset, ok := defaultAudioRoomPresets[name]
+	return preset, ok
 }
 
 func smoothAudioParam(param js.Value, value, now float64) {
@@ -1579,7 +1437,7 @@ func applyAudioRoomSettings() {
 	if !found {
 		log("Unknown audioRoom preset: " + currentAudioRoom + "; using none")
 		preset, _ = audioRoomPresetForName("none")
-		currentAudioRoom = "none"
+		currentAudioRoom = defaultAudioRoom
 	}
 
 	dry := preset.defaultDry
@@ -2377,7 +2235,7 @@ func resetGlobals() {
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
 	enableBigPaddle = defaultEnableBigPaddle
 	currentAudioRoom = "none"
-	currentAudioRoomDry = -1
+	currentAudioRoomDry = defaultAudioRoomDry
 	palette = append([]string(nil), defaultPalette...)
 	magicColor = defaultMagicColor
 	magicStrokeColor = defaultMagicStrokeColor
@@ -2395,6 +2253,16 @@ func applyConfig(config map[string]string) {
 
 	for _, key := range keys {
 		val := config[key]
+		if field, physicsKey := parsePhysicsFloatConfigKey(key); physicsKey {
+			f, err := strconv.ParseFloat(val, 64)
+			if err != nil || !validPhysicsFloatSetting(field, f) {
+				log("Invalid physics level variable: " + key + "=" + val)
+				continue
+			}
+			setPhysicsFloatSetting(&physicsConfig, field, f)
+			continue
+		}
+
 		switch key {
 		case "audioRoom":
 			currentAudioRoom = normalizeAudioRoomName(val)
@@ -2430,23 +2298,17 @@ func applyConfig(config map[string]string) {
 			unbreakableStrokeColor = val
 		case "brickStrokeColor":
 			brickStrokeColor = val
-		case "gravity", "restitution", "frictionCoeff", "paddleBoost", "brickBoost",
-			"maxSpeed", "maxSpin", "stuckSpeedThreshold", "stuckDuration",
-			"tiltUpSpeed", "tiltSideMin", "tiltSideMax":
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				valid := true
-				switch key {
-				case "restitution":
-					valid = f >= 0 && f <= 1
-				case "frictionCoeff", "stuckSpeedThreshold", "stuckDuration",
-					"tiltUpSpeed", "tiltSideMin", "tiltSideMax":
-					valid = f >= 0
-				case "maxSpeed", "maxSpin":
-					valid = f > 0
-				}
-				if valid {
-					setPhysicsSetting(&physicsConfig, key, f)
-				}
+		case "orbitRequiredHits":
+			if i, err := strconv.Atoi(val); err == nil && i > 0 {
+				physicsConfig.orbitRequiredHits = i
+			} else {
+				log("orbitRequiredHits must be a positive integer")
+			}
+		case "drawBrickTilt":
+			if b, err := strconv.ParseBool(val); err == nil {
+				physicsConfig.drawBrickTilt = b
+			} else {
+				log("drawBrickTilt must be true or false")
 			}
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
@@ -2599,7 +2461,7 @@ func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy, frictionScale float64
 	ty := nx
 	translationVt := (b.vx-surfVx)*tx + (b.vy-surfVy)*ty
 	spinSurfaceSpeed := -b.omega * b.r
-	vt := translationVt + spinSurfaceSpeed*physicsCollisionSpinCoupling
+	vt := translationVt + spinSurfaceSpeed*physics.collisionSpinCoupling
 	if vn >= 0 {
 		return 0, false
 	}
@@ -2612,7 +2474,7 @@ func resolveCollisionBall(b *Ball, nx, ny, surfVx, surfVy, frictionScale float64
 	// different friction scales: paddle strongest, bricks medium, walls weak.
 	effectiveFriction := math.Max(
 		physics.frictionCoeff*frictionScale,
-		physicsMinimumCollisionGrip,
+		physics.minimumCollisionGrip,
 	)
 	maxFriction := effectiveFriction * math.Abs(deltaVn)
 	desiredDeltaVt := -vt / 3.0
@@ -3888,15 +3750,15 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 	}
 	best := contacts[bestIndex]
 
-	b.x += best.nx * (best.penetration + physicsCollisionSlop)
-	b.y += best.ny * (best.penetration + physicsCollisionSlop)
+	b.x += best.nx * (best.penetration + physicsConfig.collisionSlop)
+	b.y += best.ny * (best.penetration + physicsConfig.collisionSlop)
 	bestWasUnbreakable := bricks[best.index].unbreakable
-	frictionScale := physicsBrickFrictionScale
+	frictionScale := physicsConfig.brickFrictionScale
 	if bestWasUnbreakable {
-		frictionScale = physicsUnbreakableFrictionScale
+		frictionScale = physicsConfig.unbreakableFrictionScale
 	}
 	resolveCollisionDebug(b, best.nx, best.ny, 0, 0, frictionScale, "BRICK", isPrimary)
-	if bestWasUnbreakable && best.impact >= physicsOrbitMinimumHitSpeed {
+	if bestWasUnbreakable && best.impact >= physicsConfig.orbitMinimumHitSpeed {
 		recordUnbreakableOrbitHit(b)
 	}
 
@@ -3972,10 +3834,10 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	}
 
 	// Magnus effect: spin bends the flight path perpendicular to velocity.
-	magnusAx := -b.vy * b.omega * physicsMagnusCoefficient
-	magnusAy := b.vx * b.omega * physicsMagnusCoefficient
+	magnusAx := -b.vy * b.omega * physics.magnusCoefficient
+	magnusAy := b.vx * b.omega * physics.magnusCoefficient
 	magnusMagnitude := math.Hypot(magnusAx, magnusAy)
-	maxMagnusAcceleration := math.Max(100.0, physics.maxSpeed*physicsMagnusAccelerationScale)
+	maxMagnusAcceleration := math.Max(100.0, physics.maxSpeed*physics.magnusAccelerationScale)
 	if magnusMagnitude > maxMagnusAcceleration {
 		scale := maxMagnusAcceleration / magnusMagnitude
 		magnusAx *= scale
@@ -3984,8 +3846,8 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	b.vx += magnusAx * dt
 	b.vy += magnusAy * dt
 
-	airDamping := math.Exp(-physicsAirDrag * dt)
-	spinDamping := math.Exp(-physicsSpinDrag * dt)
+	airDamping := math.Exp(-physics.airDrag * dt)
+	spinDamping := math.Exp(-physics.spinDrag * dt)
 	b.vx *= airDamping
 	b.vy *= airDamping
 	b.omega *= spinDamping
@@ -3999,23 +3861,23 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	// Walls.
 	if b.x-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vx)
-		b.x = b.r + physicsCollisionSlop
-		nx, ny := roughWallNormal(1, 0, b.y, canvasHeight, wallNoiseIDLeft, wallSideTiltDegrees)
-		resolveCollisionDebug(b, nx, ny, 0, 0, physicsWallFrictionScale, "WALL LEFT", isPrimary)
+		b.x = b.r + physics.collisionSlop
+		nx, ny := roughWallNormal(1, 0, b.y, canvasHeight, wallNoiseIDLeft, physics.wallSideTiltDegrees)
+		resolveCollisionDebug(b, nx, ny, 0, 0, physics.wallFrictionScale, "WALL LEFT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.x+b.r > canvasWidth {
 		impactSpeed := math.Max(0, b.vx)
-		b.x = canvasWidth - b.r - physicsCollisionSlop
-		nx, ny := roughWallNormal(-1, 0, b.y, canvasHeight, wallNoiseIDRight, wallSideTiltDegrees)
-		resolveCollisionDebug(b, nx, ny, 0, 0, physicsWallFrictionScale, "WALL RIGHT", isPrimary)
+		b.x = canvasWidth - b.r - physics.collisionSlop
+		nx, ny := roughWallNormal(-1, 0, b.y, canvasHeight, wallNoiseIDRight, physics.wallSideTiltDegrees)
+		resolveCollisionDebug(b, nx, ny, 0, 0, physics.wallFrictionScale, "WALL RIGHT", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y-b.r < 0 {
 		impactSpeed := math.Max(0, -b.vy)
-		b.y = b.r + physicsCollisionSlop
-		nx, ny := roughWallNormal(0, 1, b.x, canvasWidth, wallNoiseIDTop, wallTopTiltDegrees)
-		resolveCollisionDebug(b, nx, ny, 0, 0, physicsWallFrictionScale, "WALL TOP", isPrimary)
+		b.y = b.r + physics.collisionSlop
+		nx, ny := roughWallNormal(0, 1, b.x, canvasWidth, wallNoiseIDTop, physics.wallTopTiltDegrees)
+		resolveCollisionDebug(b, nx, ny, 0, 0, physics.wallFrictionScale, "WALL TOP", isPrimary)
 		playImpactSound(b, impactSpeed, playWallHit)
 	}
 	if b.y+b.r > canvasHeight {
@@ -4029,7 +3891,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 		b.x+b.r > pLeft && b.x-b.r < pRight &&
 		b.y+b.r > pTop && b.y+b.r < pBottom {
 		recordIncomingCollisionSpeed(math.Hypot(b.vx, b.vy))
-		b.y = pTop - b.r - physicsCollisionSlop
+		b.y = pTop - b.r - physics.collisionSlop
 		resetFastOrbitState(b)
 
 		spinBeforePaddle := b.omega
@@ -4048,15 +3910,15 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 		relativeSlip := b.vx - b.omega*b.r - effectivePaddleVx
 		normalDeltaSpeed := math.Abs(b.vy - incomingVy)
 		effectivePaddleFriction := math.Max(
-			physics.frictionCoeff*physicsPaddleFrictionScale,
-			physicsMinimumPaddleGrip,
+			physics.frictionCoeff*physics.paddleFrictionScale,
+			physics.minimumPaddleGrip,
 		)
 		maxFrictionDelta := effectivePaddleFriction * normalDeltaSpeed
 		desiredDeltaVx := -relativeSlip / 3.0
 		deltaVx := clampFloat(desiredDeltaVx, -maxFrictionDelta, maxFrictionDelta)
 		b.vx += deltaVx
 		b.omega -= 2 * deltaVx / b.r
-		b.omega += -effectivePaddleVx * physicsPaddleSpinTransfer / math.Max(b.r, 1)
+		b.omega += -effectivePaddleVx * physics.paddleSpinTransfer / math.Max(b.r, 1)
 
 		preferredDirection := incomingVx
 		if preferredDirection == 0 {
@@ -4567,10 +4429,10 @@ func applyPhoneTiltControl(dt float64) bool {
 	return true
 }
 
-// applyMousePaddleControl advances the paddle toward the latest mouse target.
-// The target speed is limited by the remaining stopping distance, so the paddle
-// brakes before the target instead of crossing it and oscillating. Pointer event
-// frequency and monitor refresh rate therefore do not affect the motion model.
+// applyMousePaddleControl places the paddle at the latest mouse target in one
+// physics step. The shared post-control velocity measurement below still derives
+// paddle.vx from the real position delta, so paddle-to-ball spin transfer remains
+// active even though the visible position no longer eases toward the cursor.
 func applyMousePaddleControl(dt float64) bool {
 	if !mouseControlActive || dt <= 0 {
 		return false
@@ -4578,35 +4440,7 @@ func applyMousePaddleControl(dt float64) bool {
 
 	maxX := math.Max(0, canvasWidth-paddle.w)
 	mousePaddleTargetX = clampFloat(mousePaddleTargetX, 0, maxX)
-	distance := mousePaddleTargetX - paddle.x
-
-	if math.Abs(distance) <= defaultMousePaddleSnapDistance {
-		paddle.x = mousePaddleTargetX
-		paddle.vx = 0
-		return true
-	}
-
-	direction := sign(distance)
-	stoppingSpeed := math.Sqrt(2 * defaultMousePaddleBraking * math.Abs(distance))
-	targetSpeed := direction * math.Min(defaultMousePaddleMaxSpeed, stoppingSpeed)
-
-	changeRate := defaultMousePaddleAcceleration
-	if sign(paddle.vx) != 0 && sign(paddle.vx) != direction {
-		changeRate = defaultMousePaddleBraking
-	} else if math.Abs(targetSpeed) < math.Abs(paddle.vx) {
-		changeRate = defaultMousePaddleBraking
-	}
-
-	nextVelocity := moveToward(paddle.vx, targetSpeed, changeRate*dt)
-	step := nextVelocity * dt
-	if sign(step) == direction && math.Abs(step) >= math.Abs(distance) {
-		paddle.x = mousePaddleTargetX
-		paddle.vx = 0
-		return true
-	}
-
-	paddle.vx = nextVelocity
-	paddle.x += step
+	paddle.x = mousePaddleTargetX
 	return true
 }
 
@@ -4666,7 +4500,7 @@ func update(dt float64) {
 		paddle.vx = moveToward(paddle.vx, targetSpeed, changeRate*dt)
 		paddle.x += paddle.vx * dt
 	} else if applyMousePaddleControl(dt) {
-		// Mouse movement is already integrated by the fixed-step controller.
+		// Mouse position is direct; velocity is measured below for spin transfer.
 	} else if mobileControlsEnabled {
 		switch mobileControlMode {
 		case "vertical", "follow":
@@ -4695,6 +4529,13 @@ func update(dt float64) {
 
 	if dt > 0 {
 		paddle.vx = (paddle.x - paddlePreviousX) / dt
+		if mouseControlActive && mousePaddleSpinVelocityLimit > 0 {
+			paddle.vx = clampFloat(
+				paddle.vx,
+				-mousePaddleSpinVelocityLimit,
+				mousePaddleSpinVelocityLimit,
+			)
+		}
 	} else {
 		paddle.vx = 0
 	}
@@ -4919,7 +4760,7 @@ func drawBrickGroup(target js.Value, kind int) {
 		}
 		target.Call("save")
 		target.Call("beginPath")
-		if drawBrickTilt {
+		if physicsConfig.drawBrickTilt {
 			centerX := br.x + br.w/2
 			centerY := br.y + br.h/2
 			target.Call("translate", centerX, centerY)
@@ -5022,7 +4863,7 @@ func drawZapperBolts() {
 	}
 }
 
-func physicsSettingValue(settings *physicsSettings, key string) float64 {
+func physicsFloatSettingValue(settings *physicsSettings, key string) float64 {
 	switch key {
 	case "gravity":
 		return settings.gravity
@@ -5048,15 +4889,85 @@ func physicsSettingValue(settings *physicsSettings, key string) float64 {
 		return settings.tiltSideMin
 	case "tiltSideMax":
 		return settings.tiltSideMax
+	case "magnusCoefficient":
+		return settings.magnusCoefficient
+	case "magnusAccelerationScale":
+		return settings.magnusAccelerationScale
+	case "spinDrag":
+		return settings.spinDrag
+	case "airDrag":
+		return settings.airDrag
+	case "wallFrictionScale":
+		return settings.wallFrictionScale
+	case "brickFrictionScale":
+		return settings.brickFrictionScale
+	case "unbreakableFrictionScale":
+		return settings.unbreakableFrictionScale
+	case "paddleFrictionScale":
+		return settings.paddleFrictionScale
+	case "paddleSpinTransfer":
+		return settings.paddleSpinTransfer
+	case "collisionSpinCoupling":
+		return settings.collisionSpinCoupling
+	case "minimumCollisionGrip":
+		return settings.minimumCollisionGrip
+	case "minimumPaddleGrip":
+		return settings.minimumPaddleGrip
+	case "collisionSlop":
+		return settings.collisionSlop
+	case "paddleSpinGraceSeconds":
+		return settings.paddleSpinGraceSeconds
+	case "overspeedHalfLife":
+		return settings.overspeedHalfLife
+	case "wallNoiseCellSize":
+		return settings.wallNoiseCellSize
+	case "wallSideTiltDegrees":
+		return settings.wallSideTiltDegrees
+	case "wallTopTiltDegrees":
+		return settings.wallTopTiltDegrees
+	case "wallCornerFadeDistance":
+		return settings.wallCornerFadeDistance
+	case "brickTiltMinDegrees":
+		return settings.brickTiltMinDegrees
+	case "brickTiltMaxDegrees":
+		return settings.brickTiltMaxDegrees
+	case "orbitMinimumSpeed":
+		return settings.orbitMinimumSpeed
+	case "orbitMinimumHitSpeed":
+		return settings.orbitMinimumHitSpeed
+	case "orbitMinorSpeedRatio":
+		return settings.orbitMinorSpeedRatio
+	case "orbitMinorSpeedFloor":
+		return settings.orbitMinorSpeedFloor
+	case "orbitDetectionWindow":
+		return settings.orbitDetectionWindow
+	case "orbitMaximumMinorProgress":
+		return settings.orbitMaximumMinorProgress
+	case "orbitHitCooldown":
+		return settings.orbitHitCooldown
+	case "orbitEscapeSpeed":
+		return settings.orbitEscapeSpeed
+	case "orbitEscapeDuration":
+		return settings.orbitEscapeDuration
 	}
 	return 0
 }
 
-func parsePhysicsConfigKey(key string) (field string, ok bool) {
+func parsePhysicsFloatConfigKey(key string) (field string, ok bool) {
 	fields := []string{
 		"gravity", "restitution", "frictionCoeff", "paddleBoost", "brickBoost",
 		"maxSpeed", "maxSpin", "stuckSpeedThreshold", "stuckDuration",
 		"tiltUpSpeed", "tiltSideMin", "tiltSideMax",
+		"magnusCoefficient", "magnusAccelerationScale", "spinDrag", "airDrag",
+		"wallFrictionScale", "brickFrictionScale", "unbreakableFrictionScale",
+		"paddleFrictionScale", "paddleSpinTransfer", "collisionSpinCoupling",
+		"minimumCollisionGrip", "minimumPaddleGrip", "collisionSlop",
+		"paddleSpinGraceSeconds", "overspeedHalfLife",
+		"wallNoiseCellSize", "wallSideTiltDegrees", "wallTopTiltDegrees",
+		"wallCornerFadeDistance", "brickTiltMinDegrees", "brickTiltMaxDegrees",
+		"orbitMinimumSpeed", "orbitMinimumHitSpeed", "orbitMinorSpeedRatio",
+		"orbitMinorSpeedFloor", "orbitDetectionWindow", "orbitMaximumMinorProgress",
+		"orbitHitCooldown", "orbitEscapeSpeed", "orbitEscapeDuration",
 	}
 	for _, candidate := range fields {
 		if key == candidate {
@@ -5066,11 +4977,32 @@ func parsePhysicsConfigKey(key string) (field string, ok bool) {
 	return "", false
 }
 
+func validPhysicsFloatSetting(key string, value float64) bool {
+	switch key {
+	case "restitution":
+		return value >= 0 && value <= 1
+	case "maxSpeed", "maxSpin":
+		return value > 0
+	case "gravity", "paddleBoost", "brickBoost":
+		return true
+	default:
+		return value >= 0
+	}
+}
+
 func configState(key string) (effective, defaultValue, kind string, ok bool) {
-	if field, physicsKey := parsePhysicsConfigKey(key); physicsKey {
-		defaults := defaultPhysicsSettings()
-		return formatConfigFloat(physicsSettingValue(&physicsConfig, field)),
-			formatConfigFloat(physicsSettingValue(&defaults, field)), "float", true
+	defaults := defaultPhysicsSettings()
+	if field, physicsKey := parsePhysicsFloatConfigKey(key); physicsKey {
+		return formatConfigFloat(physicsFloatSettingValue(&physicsConfig, field)),
+			formatConfigFloat(physicsFloatSettingValue(&defaults, field)), "float", true
+	}
+	if key == "orbitRequiredHits" {
+		return strconv.Itoa(physicsConfig.orbitRequiredHits),
+			strconv.Itoa(defaults.orbitRequiredHits), "int", true
+	}
+	if key == "drawBrickTilt" {
+		return strconv.FormatBool(physicsConfig.drawBrickTilt),
+			strconv.FormatBool(defaults.drawBrickTilt), "bool", true
 	}
 	switch key {
 	case "audioRoom":
@@ -5791,11 +5723,16 @@ func interpolatedRenderSnapshot(alpha float64) renderSnapshot {
 	}
 
 	alpha = clampFloat(alpha, 0, 1)
+	paddleRenderX := lerpFloat(previousRenderSnapshot.paddleX, current.paddleX, alpha)
+	if mouseControlActive {
+		paddleRenderX = current.paddleX
+	}
+
 	result := renderSnapshot{
 		ballX:            lerpFloat(previousRenderSnapshot.ballX, current.ballX, alpha),
 		ballY:            lerpFloat(previousRenderSnapshot.ballY, current.ballY, alpha),
 		ballAngle:        lerpFloat(previousRenderSnapshot.ballAngle, current.ballAngle, alpha),
-		paddleX:          lerpFloat(previousRenderSnapshot.paddleX, current.paddleX, alpha),
+		paddleX:          paddleRenderX,
 		blackHoleX:       lerpFloat(previousRenderSnapshot.blackHoleX, current.blackHoleX, alpha),
 		blackHoleY:       lerpFloat(previousRenderSnapshot.blackHoleY, current.blackHoleY, alpha),
 		secondBallActive: current.secondBallActive,
@@ -5821,7 +5758,7 @@ func interpolatedRenderSnapshot(alpha float64) renderSnapshot {
 }
 
 func applyOverspeedDrag(b *Ball, dt float64, settings *physicsSettings) {
-	if b == nil || settings == nil || dt <= 0 || settings.maxSpeed <= 0 || physicsOverspeedHalfLife <= 0 {
+	if b == nil || settings == nil || dt <= 0 || settings.maxSpeed <= 0 || settings.overspeedHalfLife <= 0 {
 		return
 	}
 
@@ -5831,7 +5768,7 @@ func applyOverspeedDrag(b *Ball, dt float64, settings *physicsSettings) {
 	}
 
 	excess := speed - settings.maxSpeed
-	excess *= math.Exp(-math.Ln2 * dt / physicsOverspeedHalfLife)
+	excess *= math.Exp(-math.Ln2 * dt / settings.overspeedHalfLife)
 	targetSpeed := settings.maxSpeed + excess
 	scale := targetSpeed / speed
 	b.vx *= scale
@@ -5878,6 +5815,13 @@ func setMousePaddleTarget(e js.Value) {
 	}
 	mousePaddleTargetX = x
 	mouseControlActive = true
+
+	// Position immediately for mouse responsiveness. Do not update
+	// paddlePreviousX here: the fixed-step update needs the displacement to
+	// calculate a physically useful paddle velocity for spin transfer.
+	if !paused && !gameOver && !waitingForStart && !levelAdvancePending {
+		paddle.x = x
+	}
 }
 
 // Touch-follow mode intentionally remains direct: its physics update branch does

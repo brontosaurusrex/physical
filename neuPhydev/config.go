@@ -1,0 +1,267 @@
+//go:build js && wasm
+
+package main
+
+// config.go contains compile-time defaults and tuning values. Runtime state and
+// game behavior stay in main.go. Build the package (not main.go alone) so this
+// file is included:
+//
+//   GOOS=js GOARCH=wasm go build -o main.wasm .
+
+const (
+	buildID = "20260730-47f0c2a91d"
+
+	// Audio mixer.
+	audioMixerMaster = 1.00
+	audioMixerBricks = 0.20 // was 0.30
+	audioMixerMagic  = 0.20
+	audioMixerSynths = 0.80
+
+	audioRoomTransitionSeconds = 0.16
+
+	brickHitSampleDirectory = "sounds/brickHits/runtime"
+	brickHitPlaybackRateMin = 0.94
+	brickHitPlaybackRateMax = 1.07
+	brickHitFilterMinHz     = 2400.0
+	brickHitFilterMaxHz     = 12900.0
+	brickHitGainMin         = 0.16
+	brickHitGainMax         = 0.40
+
+	magicFeatureSampleDirectory = "sounds/magicBrickHits/runtime"
+	magicFeaturePlaybackRateMin = 0.96
+	magicFeaturePlaybackRateMax = 1.04
+	magicFeatureFilterMinHz     = 3000.0
+	magicFeatureFilterMaxHz     = 16000.0
+	magicFeatureHardMaxHz       = 500.0
+	magicFeatureGainMin         = 0.15
+	magicFeatureGainMax         = 0.32
+	magicFeatureMaxActiveVoices = 4
+	magicFeatureRetriggerFade   = 0.018
+
+	brickHitMaxActiveVoices    = 8
+	brickHitMaxStartsPerFrame  = 3
+	brickSoundPanLimit         = 0.75
+	embeddedAudioDecodeYieldMS = 12
+
+	minimumCollisionSoundSpeed = 35.0
+	collisionSoundCooldown     = 0.045
+
+	zapperBrickPitchScale = 1.32
+	zapperBrickStrength   = 0.72
+
+	// Fixed-step engine scheduling. These intentionally remain global and are not
+	// level-overridable because levels should not change simulation stability.
+	physicsStepHz             = 240.0
+	physicsStepSeconds        = 1.0 / physicsStepHz
+	physicsMaxCatchUpSteps    = 32
+	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
+	physicsWarningHoldSeconds = 3.0
+
+	// Default geometry and gameplay.
+	defaultCanvasWidth    = 1800.0
+	defaultCanvasHeight   = 900.0
+	defaultPaddleWidth    = 220.0
+	defaultPaddleHeight   = 30.0
+	defaultBallRadius     = 8.0
+	defaultBrickRows      = 10
+	defaultBrickCols      = 18
+	defaultBrickWidth     = 60.0
+	defaultBrickHeight    = 20.0
+	defaultBrickPadding   = 20.0
+	defaultBrickOffsetTop = -1.0
+
+	defaultDigitalPaddleMaxSpeed     = 2800.0
+	defaultDigitalPaddleAcceleration = 9000.0
+	defaultDigitalPaddleBraking      = 40000.0
+
+	defaultEnableSounds      = true
+	defaultAudioRoom         = "none"
+	defaultAudioRoomDry      = -1.0
+	defaultMobileControlMode = "vertical"
+
+	// Mouse position is direct. This only caps the measured surface velocity used
+	// for collision/spin calculations after a large cursor jump.
+	mousePaddleSpinVelocityLimit = 3200.0 // was 6000.0
+
+	defaultPaddleRadius         = 12.0
+	defaultBrickRadius          = 6.0
+	defaultUnbreakableChance    = 0.15
+	defaultMagicChance          = 0.3
+	defaultPowerUpDuration      = 10.0
+	defaultBlackHoleStrength    = 800.0
+	defaultBlackHoleRange       = 200.0
+	defaultMagnetStrength       = 600.0
+	defaultMagnetRange          = 300.0
+	defaultInfluencerMultiplier = 5.0
+	defaultLives                = 7
+	defaultZapperHitTime        = 0.1
+	defaultZapperRange          = 320.0
+
+	// Base physics defaults. Every value in this section that changes level
+	// behavior is represented in physicsSettings and may be overridden by a level.
+	defaultPhysicsGravity             = 300.0
+	defaultPhysicsRestitution         = 0.90
+	defaultPhysicsFrictionCoeff       = 0.14 // was 0.10
+	defaultPhysicsPaddleBoost         = 900.0
+	defaultPhysicsBrickBoost          = 100.0
+	defaultPhysicsMaxSpeed            = 1000.0 // was 1170.0
+	defaultPhysicsMaxSpin             = 1530.0
+	defaultPhysicsStuckSpeedThreshold = 85.0
+	defaultPhysicsStuckDuration       = 1.2 // was 3.0
+	defaultPhysicsTiltUpSpeed         = 520.0
+	defaultPhysicsTiltSideMin         = 180.0
+	defaultPhysicsTiltSideMax         = 340.0
+
+	defaultPhysicsMagnusCoefficient       = 0.0030 // was 0.0015
+	defaultPhysicsMagnusAccelerationScale = 0.25
+	defaultPhysicsSpinDrag                = 0.04 // was 0.10
+	defaultPhysicsAirDrag                 = 0.010
+
+	defaultPhysicsWallFrictionScale        = 2.00 // was 0.35
+	defaultPhysicsBrickFrictionScale       = 2.00 // was 1.00
+	defaultPhysicsUnbreakableFrictionScale = 1.80 // was 0.35
+	defaultPhysicsPaddleFrictionScale      = 3.20 // was 2.60
+	defaultPhysicsPaddleSpinTransfer       = 1.80 // was 2.25
+	defaultPhysicsCollisionSpinCoupling    = 2.00
+	defaultPhysicsMinimumCollisionGrip     = 0.08
+	defaultPhysicsMinimumPaddleGrip        = 0.55 // was 0.45
+	defaultPhysicsCollisionSlop            = 0.05
+	defaultPhysicsPaddleSpinGraceSeconds   = 0.050
+	defaultPhysicsOverspeedHalfLife        = 0.35
+
+	defaultPhysicsWallNoiseCellSize      = 20.0 // was 120.0
+	defaultPhysicsWallSideTiltDegrees    = 0.15
+	defaultPhysicsWallTopTiltDegrees     = 3.45 // was 0.45
+	defaultPhysicsWallCornerFadeDistance = 40.0
+
+	wallNoiseIDLeft  int = 1
+	wallNoiseIDRight int = 2
+	wallNoiseIDTop   int = 3
+
+	defaultPhysicsBrickTiltMinDegrees = 0.2
+	defaultPhysicsBrickTiltMaxDegrees = 2.0 // was 1.0
+	defaultPhysicsDrawBrickTilt       = true
+
+	defaultPhysicsOrbitMinimumSpeed         = 300.0
+	defaultPhysicsOrbitMinimumHitSpeed      = 80.0
+	defaultPhysicsOrbitMinorSpeedRatio      = 0.08
+	defaultPhysicsOrbitMinorSpeedFloor      = 45.0
+	defaultPhysicsOrbitRequiredHits         = 3
+	defaultPhysicsOrbitDetectionWindow      = 4.0
+	defaultPhysicsOrbitMaximumMinorProgress = 40.0
+	defaultPhysicsOrbitHitCooldown          = 0.08
+	defaultPhysicsOrbitEscapeSpeed          = 110.0
+	defaultPhysicsOrbitEscapeDuration       = 0.90
+	physicsOrbitMessageDuration             = 1.5
+
+	statusMessageLimit = 10
+
+	enableHighSpinMessage   = true
+	highSpinThreshold       = 100.0
+	highSpinMessageDuration = 3.5
+
+	defaultPhoneTiltDeadZone  = 1.0
+	defaultPhoneTiltMaxAngle  = 10.0
+	defaultPhoneTiltSmoothing = 18.0
+
+	defaultStartBallX  = 1000.0
+	defaultStartBallY  = 600.0
+	defaultStartBallVx = 180.0
+	defaultStartBallVy = -350.0
+
+	defaultEnableLowGravity       = true
+	defaultEnablePassThrough      = true
+	defaultEnableNuke             = true
+	defaultEnableReverseGravity   = true
+	defaultEnableDualBalls        = true
+	defaultEnableBlackHole        = true
+	defaultEnableMagnet           = true
+	defaultEnableInfluencer       = true
+	defaultEnableZapper           = false
+	defaultEnableBreakUnbreakable = true
+	defaultEnableBigPaddle        = true
+
+	showBlackHole = false
+
+	defaultMagicColor             = "#f1faee"
+	defaultMagicStrokeColor       = "#ffd700"
+	defaultUnbreakableStrokeColor = "#e76f51"
+	defaultBrickStrokeColor       = "#27ae60"
+)
+
+var defaultPalette = []string{
+	"#1d3557", // background
+	"#f1faee", // paddle and magic bricks
+	"#a8dadc", // normal bricks
+	"#e63946", // ball
+	"#f1faee", // text
+	"#e63946", // spin marker
+	"#f4a261", // unbreakable bricks
+	"#e63946", // second ball
+	"#e63946", // second-ball spin marker
+}
+
+var defaultAudioRoomPresets = map[string]audioRoomPreset{
+	"none": {
+		name: "none", defaultDry: 1,
+		inputFilterType: "lowpass", inputFrequency: 20000, inputQ: 0.0001,
+		outputFilterType: "lowpass", outputFrequency: 20000, outputQ: 0.0001,
+		delay1: 0.01, delay2: 0.02, delay3: 0.04,
+	},
+	"smallroom": {
+		name: "smallroom", defaultDry: 0.78,
+		inputFilterType: "highpass", inputFrequency: 80, inputQ: 0.35,
+		outputFilterType: "lowpass", outputFrequency: 9000, outputQ: 0.45,
+		delay1: 0.011, delay2: 0.023, delay3: 0.041,
+		tapGain1: 0.40, tapGain2: 0.28, tapGain3: 0.20, feedback: 0.08,
+	},
+	"bigopenroom": {
+		name: "bigopenroom", defaultDry: 0.82,
+		inputFilterType: "highpass", inputFrequency: 70, inputQ: 0.30,
+		outputFilterType: "lowpass", outputFrequency: 11000, outputQ: 0.35,
+		delay1: 0.070, delay2: 0.150, delay3: 0.310,
+		tapGain1: 0.28, tapGain2: 0.20, tapGain3: 0.15, feedback: 0.08,
+	},
+	"smallhall": {
+		name: "smallhall", defaultDry: 0.68,
+		inputFilterType: "highpass", inputFrequency: 90, inputQ: 0.35,
+		outputFilterType: "lowpass", outputFrequency: 7000, outputQ: 0.50,
+		delay1: 0.028, delay2: 0.061, delay3: 0.115,
+		tapGain1: 0.38, tapGain2: 0.30, tapGain3: 0.24, feedback: 0.22,
+	},
+	"bighall": {
+		name: "bighall", defaultDry: 0.55,
+		inputFilterType: "highpass", inputFrequency: 80, inputQ: 0.35,
+		outputFilterType: "lowpass", outputFrequency: 5400, outputQ: 0.55,
+		delay1: 0.055, delay2: 0.125, delay3: 0.260,
+		tapGain1: 0.34, tapGain2: 0.28, tapGain3: 0.24, feedback: 0.36,
+	},
+	"cave": {
+		name: "cave", defaultDry: 0.42,
+		inputFilterType: "highpass", inputFrequency: 65, inputQ: 0.30,
+		outputFilterType: "lowpass", outputFrequency: 3000, outputQ: 0.65,
+		delay1: 0.075, delay2: 0.190, delay3: 0.420,
+		tapGain1: 0.36, tapGain2: 0.30, tapGain3: 0.26, feedback: 0.50,
+	},
+	"space": {
+		name: "space", defaultDry: 0.58,
+		inputFilterType: "highpass", inputFrequency: 160, inputQ: 0.40,
+		outputFilterType: "lowpass", outputFrequency: 7000, outputQ: 0.35,
+		delay1: 0.110, delay2: 0.290, delay3: 0.520,
+		tapGain1: 0.22, tapGain2: 0.18, tapGain3: 0.14, feedback: 0.26,
+	},
+	"matrix": {
+		name: "matrix", defaultDry: 0.60,
+		inputFilterType: "bandpass", inputFrequency: 1800, inputQ: 2.80,
+		outputFilterType: "lowpass", outputFrequency: 6500, outputQ: 1.20,
+		delay1: 0.011, delay2: 0.023, delay3: 0.047,
+		tapGain1: 0.32, tapGain2: 0.27, tapGain3: 0.22, feedback: 0.58,
+	},
+	"underwater": {
+		name: "underwater", defaultDry: 0.10,
+		inputFilterType: "lowpass", inputFrequency: 600, inputQ: 0.80,
+		outputFilterType: "lowpass", outputFrequency: 750, outputQ: 0.55,
+		delay1: 0.008, delay2: 0.022, delay3: 0.041,
+		tapGain1: 0.40, tapGain2: 0.30, tapGain3: 0.23, feedback: 0.18,
+	},
+}
