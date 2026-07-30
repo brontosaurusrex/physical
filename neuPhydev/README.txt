@@ -1,16 +1,38 @@
-Breakout WASM — instant mouse + config.go + per-level physics (v47)
-Build ID: 20260730-47f0c2a91d
+Breakout WASM — instant mouse + config.go + physics tuner (v48)
+Build ID: 20260730-8e4d2b7f61
 
 BUILD
 
-All compile-time defaults and tuning values now live in config.go. Build the
-package so both Go files are included:
+All compile-time defaults and tuning values live in config.go. Build the package
+so both Go files are included:
 
   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 Equivalent explicit-file build:
 
   GOOS=js GOARCH=wasm go build -o main.wasm main.go config.go
+
+IN-GAME PHYSICS TUNER
+
+Press E to open the physics tuner. While it is open:
+
+  the game is completely paused
+  sliders change the active physics settings
+  keyboard and canvas game controls are ignored
+  E closes the panel
+
+Closing the panel restores the pause state from before it was opened and copies
+the selected export format to the clipboard. Choose in the panel:
+
+  Level-file lines
+  config.go defaults
+  Both formats
+
+The panel includes the most useful motion, spin, contact, boost, drag, wall and
+brick-geometry controls. "Opening values" restores the values present when the
+panel was opened. "Built-in defaults" restores defaultPhysicsSettings().
+
+See PHYSICS_TUNER.txt for the complete slider list and clipboard behavior.
 
 MOUSE PADDLE
 
@@ -20,16 +42,18 @@ interpolation is bypassed for the mouse-driven paddle.
 
 Spin is preserved. Each fixed physics step still measures the real paddle
 position delta and stores that velocity in the existing spin-history system.
-Very large cursor jumps are capped only for collision/spin calculations by:
+Very large cursor jumps are capped only for collision/spin calculations by the
+level-overridable physics value:
 
-  mousePaddleSpinVelocityLimit = 6000.0
+  mousePaddleSpinVelocityLimit=6000
 
-The visible paddle position itself is not speed-limited.
+The visible paddle position itself is not speed-limited. This value is also in
+the E-key physics tuner.
 
 CONFIG.GO
 
-config.go contains the compile-time defaults and tunable values that were
-previously concentrated at the top of main.go, including:
+config.go contains compile-time defaults, tunable values and the physics-tuner
+slider definitions, including:
 
   audio mixer and sample tuning
   room preset parameters
@@ -37,6 +61,7 @@ previously concentrated at the top of main.go, including:
   dimensions and gameplay defaults
   keyboard/mouse/mobile control tuning
   physics defaults
+  physics-tuner slider ranges
   colors and palette
   power-up defaults
 
@@ -44,9 +69,9 @@ Runtime state and behavior remain in main.go.
 
 PER-LEVEL PHYSICS
 
-The existing physics level keys remain supported. The newer contact, flight,
-spin, wall-roughness, brick-tilt, overspeed, and orbit-escape values are now
-level settings too. See LEVEL_PHYSICS_SETTINGS.txt for the complete list.
+The existing physics level keys remain supported. Contact, flight, spin,
+mouse-spin limiting, wall-roughness, brick-tilt, overspeed and orbit-escape
+values are level settings. See LEVEL_PHYSICS_SETTINGS.txt for the complete list.
 
 Example level header:
 
@@ -55,6 +80,7 @@ Example level header:
   spinDrag=0.04
   wallTopTiltDegrees=3.45
   paddleSpinTransfer=2.8
+  mousePaddleSpinVelocityLimit=3200
   overspeedHalfLife=0.35
   drawBrickTilt=true
   orbitRequiredHits=3

@@ -26,6 +26,7 @@ FLIGHT / SPIN
   spinDrag=0.04                    # >= 0
   airDrag=0.010                    # >= 0
   paddleSpinGraceSeconds=0.050     # >= 0; 0 disables history
+  mousePaddleSpinVelocityLimit=6000 # >= 0; 0 disables mouse spin cap
   overspeedHalfLife=0.35           # >= 0; 0 disables overspeed easing
 
 COLLISION / SURFACE GRIP

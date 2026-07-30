@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260730-47f0c2a91d"
+	buildID = "20260730-8e4d2b7f61"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -80,8 +80,9 @@ const (
 	defaultMobileControlMode = "vertical"
 
 	// Mouse position is direct. This only caps the measured surface velocity used
-	// for collision/spin calculations after a large cursor jump.
-	mousePaddleSpinVelocityLimit = 3200.0 // was 6000.0
+	// for collision/spin calculations after a large cursor jump. It is part of
+	// physicsSettings so levels and the in-game physics editor may override it.
+	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
 
 	defaultPaddleRadius         = 12.0
 	defaultBrickRadius          = 6.0
@@ -121,7 +122,7 @@ const (
 	defaultPhysicsBrickFrictionScale       = 2.00 // was 1.00
 	defaultPhysicsUnbreakableFrictionScale = 1.80 // was 0.35
 	defaultPhysicsPaddleFrictionScale      = 3.20 // was 2.60
-	defaultPhysicsPaddleSpinTransfer       = 1.80 // was 2.25
+	defaultPhysicsPaddleSpinTransfer       = 2.80 // was 2.25
 	defaultPhysicsCollisionSpinCoupling    = 2.00
 	defaultPhysicsMinimumCollisionGrip     = 0.08
 	defaultPhysicsMinimumPaddleGrip        = 0.55 // was 0.45
@@ -188,6 +189,36 @@ const (
 	defaultUnbreakableStrokeColor = "#e76f51"
 	defaultBrickStrokeColor       = "#27ae60"
 )
+
+// physicsEditorSliderSpecs controls which important physics settings appear in
+// the E-key tuning panel. Ranges affect only the editor UI; level files may still
+// use any value accepted by the level parser.
+var physicsEditorSliderSpecs = []physicsSliderSpec{
+	{group: "Motion", key: "gravity", label: "Gravity", configName: "defaultPhysicsGravity", min: -1000, max: 1500, step: 10, precision: 0},
+	{group: "Motion", key: "restitution", label: "Restitution", configName: "defaultPhysicsRestitution", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Motion", key: "airDrag", label: "Air drag", configName: "defaultPhysicsAirDrag", min: 0, max: 0.10, step: 0.001, precision: 3},
+	{group: "Motion", key: "magnusCoefficient", label: "Magnus coefficient", configName: "defaultPhysicsMagnusCoefficient", min: 0, max: 0.010, step: 0.0001, precision: 4},
+	{group: "Motion", key: "magnusAccelerationScale", label: "Magnus acceleration", configName: "defaultPhysicsMagnusAccelerationScale", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Motion", key: "spinDrag", label: "Spin drag", configName: "defaultPhysicsSpinDrag", min: 0, max: 0.30, step: 0.005, precision: 3},
+	{group: "Limits and boosts", key: "maxSpeed", label: "Maximum speed", configName: "defaultPhysicsMaxSpeed", min: 200, max: 2500, step: 25, precision: 0},
+	{group: "Limits and boosts", key: "maxSpin", label: "Maximum spin", configName: "defaultPhysicsMaxSpin", min: 100, max: 3000, step: 25, precision: 0},
+	{group: "Limits and boosts", key: "paddleBoost", label: "Paddle boost", configName: "defaultPhysicsPaddleBoost", min: 0, max: 2000, step: 25, precision: 0},
+	{group: "Limits and boosts", key: "brickBoost", label: "Brick boost", configName: "defaultPhysicsBrickBoost", min: 0, max: 800, step: 10, precision: 0},
+	{group: "Paddle and spin", key: "paddleSpinTransfer", label: "Paddle spin transfer", configName: "defaultPhysicsPaddleSpinTransfer", min: 0, max: 5, step: 0.05, precision: 2},
+	{group: "Paddle and spin", key: "mousePaddleSpinVelocityLimit", label: "Mouse spin velocity limit", configName: "defaultPhysicsMousePaddleSpinVelocityLimit", min: 500, max: 8000, step: 100, precision: 0},
+	{group: "Paddle and spin", key: "paddleFrictionScale", label: "Paddle friction", configName: "defaultPhysicsPaddleFrictionScale", min: 0, max: 6, step: 0.05, precision: 2},
+	{group: "Paddle and spin", key: "minimumPaddleGrip", label: "Minimum paddle grip", configName: "defaultPhysicsMinimumPaddleGrip", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Paddle and spin", key: "collisionSpinCoupling", label: "Collision spin coupling", configName: "defaultPhysicsCollisionSpinCoupling", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Paddle and spin", key: "paddleSpinGraceSeconds", label: "Paddle spin memory", configName: "defaultPhysicsPaddleSpinGraceSeconds", min: 0, max: 0.20, step: 0.005, precision: 3},
+	{group: "Surface contact", key: "frictionCoeff", label: "Base friction", configName: "defaultPhysicsFrictionCoeff", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Surface contact", key: "wallFrictionScale", label: "Wall friction", configName: "defaultPhysicsWallFrictionScale", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Surface contact", key: "brickFrictionScale", label: "Brick friction", configName: "defaultPhysicsBrickFrictionScale", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Surface contact", key: "unbreakableFrictionScale", label: "Unbreakable friction", configName: "defaultPhysicsUnbreakableFrictionScale", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Surface contact", key: "overspeedHalfLife", label: "Overspeed half-life", configName: "defaultPhysicsOverspeedHalfLife", min: 0.05, max: 2, step: 0.05, precision: 2},
+	{group: "Geometry", key: "wallTopTiltDegrees", label: "Top-wall roughness", configName: "defaultPhysicsWallTopTiltDegrees", min: 0, max: 8, step: 0.05, precision: 2},
+	{group: "Geometry", key: "wallSideTiltDegrees", label: "Side-wall roughness", configName: "defaultPhysicsWallSideTiltDegrees", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Geometry", key: "brickTiltMaxDegrees", label: "Maximum brick tilt", configName: "defaultPhysicsBrickTiltMaxDegrees", min: 0, max: 5, step: 0.05, precision: 2},
+}
 
 var defaultPalette = []string{
 	"#1d3557", // background

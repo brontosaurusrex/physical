@@ -47,17 +47,18 @@ type physicsSettings struct {
 	spinDrag                float64
 	airDrag                 float64
 
-	wallFrictionScale        float64
-	brickFrictionScale       float64
-	unbreakableFrictionScale float64
-	paddleFrictionScale      float64
-	paddleSpinTransfer       float64
-	collisionSpinCoupling    float64
-	minimumCollisionGrip     float64
-	minimumPaddleGrip        float64
-	collisionSlop            float64
-	paddleSpinGraceSeconds   float64
-	overspeedHalfLife        float64
+	wallFrictionScale            float64
+	brickFrictionScale           float64
+	unbreakableFrictionScale     float64
+	paddleFrictionScale          float64
+	paddleSpinTransfer           float64
+	collisionSpinCoupling        float64
+	minimumCollisionGrip         float64
+	minimumPaddleGrip            float64
+	collisionSlop                float64
+	paddleSpinGraceSeconds       float64
+	mousePaddleSpinVelocityLimit float64
+	overspeedHalfLife            float64
 
 	wallNoiseCellSize      float64
 	wallSideTiltDegrees    float64
@@ -80,6 +81,17 @@ type physicsSettings struct {
 	orbitEscapeDuration       float64
 }
 
+type physicsSliderSpec struct {
+	group      string
+	key        string
+	label      string
+	configName string
+	min        float64
+	max        float64
+	step       float64
+	precision  int
+}
+
 func defaultPhysicsSettings() physicsSettings {
 	return physicsSettings{
 		gravity:             defaultPhysicsGravity,
@@ -100,17 +112,18 @@ func defaultPhysicsSettings() physicsSettings {
 		spinDrag:                defaultPhysicsSpinDrag,
 		airDrag:                 defaultPhysicsAirDrag,
 
-		wallFrictionScale:        defaultPhysicsWallFrictionScale,
-		brickFrictionScale:       defaultPhysicsBrickFrictionScale,
-		unbreakableFrictionScale: defaultPhysicsUnbreakableFrictionScale,
-		paddleFrictionScale:      defaultPhysicsPaddleFrictionScale,
-		paddleSpinTransfer:       defaultPhysicsPaddleSpinTransfer,
-		collisionSpinCoupling:    defaultPhysicsCollisionSpinCoupling,
-		minimumCollisionGrip:     defaultPhysicsMinimumCollisionGrip,
-		minimumPaddleGrip:        defaultPhysicsMinimumPaddleGrip,
-		collisionSlop:            defaultPhysicsCollisionSlop,
-		paddleSpinGraceSeconds:   defaultPhysicsPaddleSpinGraceSeconds,
-		overspeedHalfLife:        defaultPhysicsOverspeedHalfLife,
+		wallFrictionScale:            defaultPhysicsWallFrictionScale,
+		brickFrictionScale:           defaultPhysicsBrickFrictionScale,
+		unbreakableFrictionScale:     defaultPhysicsUnbreakableFrictionScale,
+		paddleFrictionScale:          defaultPhysicsPaddleFrictionScale,
+		paddleSpinTransfer:           defaultPhysicsPaddleSpinTransfer,
+		collisionSpinCoupling:        defaultPhysicsCollisionSpinCoupling,
+		minimumCollisionGrip:         defaultPhysicsMinimumCollisionGrip,
+		minimumPaddleGrip:            defaultPhysicsMinimumPaddleGrip,
+		collisionSlop:                defaultPhysicsCollisionSlop,
+		paddleSpinGraceSeconds:       defaultPhysicsPaddleSpinGraceSeconds,
+		mousePaddleSpinVelocityLimit: defaultPhysicsMousePaddleSpinVelocityLimit,
+		overspeedHalfLife:            defaultPhysicsOverspeedHalfLife,
 
 		wallNoiseCellSize:      defaultPhysicsWallNoiseCellSize,
 		wallSideTiltDegrees:    defaultPhysicsWallSideTiltDegrees,
@@ -190,6 +203,8 @@ func setPhysicsFloatSetting(settings *physicsSettings, key string, value float64
 		settings.collisionSlop = value
 	case "paddleSpinGraceSeconds":
 		settings.paddleSpinGraceSeconds = value
+	case "mousePaddleSpinVelocityLimit":
+		settings.mousePaddleSpinVelocityLimit = value
 	case "overspeedHalfLife":
 		settings.overspeedHalfLife = value
 	case "wallNoiseCellSize":
@@ -507,6 +522,15 @@ var (
 	devAllLevelsUnlocked  bool
 	debugOverlayVisible   bool
 	physicsOverlayVisible bool
+
+	physicsEditorVisible        bool
+	physicsEditorPreviousPaused bool
+	physicsEditorOpeningConfig  physicsSettings
+	physicsEditorPanel          js.Value
+	physicsEditorExportSelect   js.Value
+	physicsEditorInputs         = make(map[string]js.Value)
+	physicsEditorValueLabels    = make(map[string]js.Value)
+	physicsEditorCallbacks      []js.Func
 
 	physicsAccumulator       float64
 	physicsStepRateCurrent   float64
@@ -2764,7 +2788,7 @@ func clearTimedPowerUps() {
 	refreshCurrentGravity()
 }
 
-// Activate a magic-brick feature and play the WAV whose basename exactly
+// Activate a magic-brick feature and play the compressed sample whose basename
 // matches that feature. Missing/failed samples use the established generator.
 func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 
@@ -4529,11 +4553,11 @@ func update(dt float64) {
 
 	if dt > 0 {
 		paddle.vx = (paddle.x - paddlePreviousX) / dt
-		if mouseControlActive && mousePaddleSpinVelocityLimit > 0 {
+		if mouseControlActive && physicsConfig.mousePaddleSpinVelocityLimit > 0 {
 			paddle.vx = clampFloat(
 				paddle.vx,
-				-mousePaddleSpinVelocityLimit,
-				mousePaddleSpinVelocityLimit,
+				-physicsConfig.mousePaddleSpinVelocityLimit,
+				physicsConfig.mousePaddleSpinVelocityLimit,
 			)
 		}
 	} else {
@@ -4917,6 +4941,8 @@ func physicsFloatSettingValue(settings *physicsSettings, key string) float64 {
 		return settings.collisionSlop
 	case "paddleSpinGraceSeconds":
 		return settings.paddleSpinGraceSeconds
+	case "mousePaddleSpinVelocityLimit":
+		return settings.mousePaddleSpinVelocityLimit
 	case "overspeedHalfLife":
 		return settings.overspeedHalfLife
 	case "wallNoiseCellSize":
@@ -4962,7 +4988,7 @@ func parsePhysicsFloatConfigKey(key string) (field string, ok bool) {
 		"wallFrictionScale", "brickFrictionScale", "unbreakableFrictionScale",
 		"paddleFrictionScale", "paddleSpinTransfer", "collisionSpinCoupling",
 		"minimumCollisionGrip", "minimumPaddleGrip", "collisionSlop",
-		"paddleSpinGraceSeconds", "overspeedHalfLife",
+		"paddleSpinGraceSeconds", "mousePaddleSpinVelocityLimit", "overspeedHalfLife",
 		"wallNoiseCellSize", "wallSideTiltDegrees", "wallTopTiltDegrees",
 		"wallCornerFadeDistance", "brickTiltMinDegrees", "brickTiltMaxDegrees",
 		"orbitMinimumSpeed", "orbitMinimumHitSpeed", "orbitMinorSpeedRatio",
@@ -5364,6 +5390,337 @@ func copyTextToClipboard(text string) bool {
 	return success
 }
 
+func keepPhysicsEditorCallback(callback js.Func) {
+	physicsEditorCallbacks = append(physicsEditorCallbacks, callback)
+}
+
+func setStyle(element js.Value, property, value string) {
+	element.Get("style").Set(property, value)
+}
+
+func formatPhysicsSliderValue(spec physicsSliderSpec, value float64) string {
+	return strconv.FormatFloat(value, 'f', spec.precision, 64)
+}
+
+func physicsEditorSpecValue(spec physicsSliderSpec) float64 {
+	return physicsFloatSettingValue(&physicsConfig, spec.key)
+}
+
+func refreshPhysicsEditorControls() {
+	for _, spec := range physicsEditorSliderSpecs {
+		input, inputOK := physicsEditorInputs[spec.key]
+		label, labelOK := physicsEditorValueLabels[spec.key]
+		if !inputOK || !labelOK || input.IsUndefined() || input.IsNull() {
+			continue
+		}
+		value := physicsEditorSpecValue(spec)
+		text := formatPhysicsSliderValue(spec, value)
+		input.Set("value", text)
+		label.Set("textContent", text)
+	}
+}
+
+func recomputeBrickTilts() {
+	for i := range bricks {
+		bricks[i].tiltRadians = brickMicroTiltRadians(currentLevelIndex, bricks[i].row, bricks[i].col)
+	}
+	bricksDirty = true
+}
+
+func applyPhysicsEditorValue(spec physicsSliderSpec, value float64) {
+	value = clampFloat(value, spec.min, spec.max)
+	if !validPhysicsFloatSetting(spec.key, value) {
+		return
+	}
+	setPhysicsFloatSetting(&physicsConfig, spec.key, value)
+
+	switch spec.key {
+	case "gravity":
+		refreshCurrentGravity()
+	case "maxSpin":
+		ball.omega = clampFloat(ball.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+		secondBall.omega = clampFloat(secondBall.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+	case "brickTiltMinDegrees", "brickTiltMaxDegrees":
+		recomputeBrickTilts()
+	}
+}
+
+func physicsEditorLevelText() string {
+	lines := make([]string, 0, len(physicsEditorSliderSpecs))
+	for _, spec := range physicsEditorSliderSpecs {
+		value := physicsEditorSpecValue(spec)
+		lines = append(lines, spec.key+"="+formatPhysicsSliderValue(spec, value))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func physicsEditorConfigText() string {
+	lines := []string{"// Physics values copied from the in-game E panel."}
+	for _, spec := range physicsEditorSliderSpecs {
+		value := physicsEditorSpecValue(spec)
+		lines = append(lines, spec.configName+" = "+formatPhysicsSliderValue(spec, value))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func physicsEditorClipboardText() string {
+	mode := "level"
+	if !physicsEditorExportSelect.IsUndefined() && !physicsEditorExportSelect.IsNull() {
+		mode = physicsEditorExportSelect.Get("value").String()
+	}
+	switch mode {
+	case "config":
+		return physicsEditorConfigText()
+	case "both":
+		return "# LEVEL FILE\n" + physicsEditorLevelText() +
+			"\n\n// CONFIG.GO\n" + physicsEditorConfigText()
+	default:
+		return physicsEditorLevelText()
+	}
+}
+
+func resetPhysicsEditorTo(settings physicsSettings) {
+	physicsConfig = settings
+	refreshCurrentGravity()
+	ball.omega = clampFloat(ball.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+	secondBall.omega = clampFloat(secondBall.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+	recomputeBrickTilts()
+	refreshPhysicsEditorControls()
+}
+
+func createPhysicsEditorButton(text string, handler func()) js.Value {
+	button := doc.Call("createElement", "button")
+	button.Set("textContent", text)
+	setStyle(button, "background", "#252525")
+	setStyle(button, "color", "#ffffff")
+	setStyle(button, "border", "1px solid rgba(255,255,255,0.35)")
+	setStyle(button, "borderRadius", "5px")
+	setStyle(button, "padding", "7px 11px")
+	setStyle(button, "cursor", "pointer")
+	callback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) > 0 {
+			args[0].Call("preventDefault")
+			args[0].Call("stopPropagation")
+		}
+		handler()
+		return nil
+	})
+	keepPhysicsEditorCallback(callback)
+	button.Call("addEventListener", "click", callback)
+	return button
+}
+
+func ensurePhysicsEditorPanel() {
+	if !physicsEditorPanel.IsUndefined() && !physicsEditorPanel.IsNull() {
+		return
+	}
+
+	panel := doc.Call("createElement", "div")
+	panel.Set("id", "breakoutPhysicsEditor")
+	setStyle(panel, "position", "fixed")
+	setStyle(panel, "left", "50%")
+	setStyle(panel, "top", "50%")
+	setStyle(panel, "transform", "translate(-50%, -50%)")
+	setStyle(panel, "width", "min(760px, 92vw)")
+	setStyle(panel, "maxHeight", "88vh")
+	setStyle(panel, "overflowY", "auto")
+	setStyle(panel, "boxSizing", "border-box")
+	setStyle(panel, "padding", "18px 20px")
+	setStyle(panel, "background", "rgba(10, 10, 12, 0.96)")
+	setStyle(panel, "color", "#ffffff")
+	setStyle(panel, "border", "1px solid rgba(255,255,255,0.38)")
+	setStyle(panel, "borderRadius", "10px")
+	setStyle(panel, "boxShadow", "0 18px 70px rgba(0,0,0,0.70)")
+	setStyle(panel, "fontFamily", "GameFont, ui-monospace, monospace")
+	setStyle(panel, "zIndex", "2147483647")
+	setStyle(panel, "display", "none")
+
+	header := doc.Call("createElement", "div")
+	setStyle(header, "display", "flex")
+	setStyle(header, "alignItems", "baseline")
+	setStyle(header, "justifyContent", "space-between")
+	setStyle(header, "gap", "16px")
+
+	title := doc.Call("createElement", "div")
+	title.Set("textContent", "PHYSICS TUNER")
+	setStyle(title, "fontSize", "23px")
+	setStyle(title, "fontWeight", "700")
+	header.Call("appendChild", title)
+
+	hint := doc.Call("createElement", "div")
+	hint.Set("textContent", "E closes + copies")
+	setStyle(hint, "fontSize", "13px")
+	setStyle(hint, "opacity", "0.70")
+	header.Call("appendChild", hint)
+	panel.Call("appendChild", header)
+
+	description := doc.Call("createElement", "div")
+	description.Set("textContent", "Game paused. Changes apply immediately when play resumes.")
+	setStyle(description, "margin", "7px 0 14px")
+	setStyle(description, "fontSize", "13px")
+	setStyle(description, "opacity", "0.78")
+	panel.Call("appendChild", description)
+
+	toolbar := doc.Call("createElement", "div")
+	setStyle(toolbar, "display", "flex")
+	setStyle(toolbar, "alignItems", "center")
+	setStyle(toolbar, "flexWrap", "wrap")
+	setStyle(toolbar, "gap", "9px")
+	setStyle(toolbar, "marginBottom", "16px")
+
+	exportLabel := doc.Call("createElement", "label")
+	exportLabel.Set("textContent", "Copy on close:")
+	setStyle(exportLabel, "fontSize", "13px")
+	toolbar.Call("appendChild", exportLabel)
+
+	selectElement := doc.Call("createElement", "select")
+	for _, optionData := range [][2]string{{"level", "Level-file lines"}, {"config", "config.go defaults"}, {"both", "Both formats"}} {
+		option := doc.Call("createElement", "option")
+		option.Set("value", optionData[0])
+		option.Set("textContent", optionData[1])
+		selectElement.Call("appendChild", option)
+	}
+	setStyle(selectElement, "background", "#202024")
+	setStyle(selectElement, "color", "#ffffff")
+	setStyle(selectElement, "border", "1px solid rgba(255,255,255,0.35)")
+	setStyle(selectElement, "borderRadius", "5px")
+	setStyle(selectElement, "padding", "6px")
+	physicsEditorExportSelect = selectElement
+	toolbar.Call("appendChild", selectElement)
+
+	toolbar.Call("appendChild", createPhysicsEditorButton("Opening values", func() {
+		resetPhysicsEditorTo(physicsEditorOpeningConfig)
+	}))
+	toolbar.Call("appendChild", createPhysicsEditorButton("Built-in defaults", func() {
+		resetPhysicsEditorTo(defaultPhysicsSettings())
+	}))
+	panel.Call("appendChild", toolbar)
+
+	lastGroup := ""
+	for _, spec := range physicsEditorSliderSpecs {
+		specCopy := spec
+		if spec.group != lastGroup {
+			group := doc.Call("createElement", "div")
+			group.Set("textContent", spec.group)
+			setStyle(group, "margin", "15px 0 7px")
+			setStyle(group, "paddingBottom", "4px")
+			setStyle(group, "borderBottom", "1px solid rgba(255,255,255,0.18)")
+			setStyle(group, "fontSize", "14px")
+			setStyle(group, "fontWeight", "700")
+			setStyle(group, "letterSpacing", "0.04em")
+			panel.Call("appendChild", group)
+			lastGroup = spec.group
+		}
+
+		row := doc.Call("createElement", "label")
+		setStyle(row, "display", "grid")
+		setStyle(row, "gridTemplateColumns", "minmax(185px, 1fr) minmax(220px, 2fr) 82px")
+		setStyle(row, "alignItems", "center")
+		setStyle(row, "gap", "12px")
+		setStyle(row, "padding", "5px 0")
+
+		name := doc.Call("createElement", "span")
+		name.Set("textContent", spec.label)
+		setStyle(name, "fontSize", "13px")
+		row.Call("appendChild", name)
+
+		input := doc.Call("createElement", "input")
+		input.Set("type", "range")
+		input.Set("min", formatConfigFloat(spec.min))
+		input.Set("max", formatConfigFloat(spec.max))
+		input.Set("step", formatConfigFloat(spec.step))
+		setStyle(input, "width", "100%")
+		physicsEditorInputs[spec.key] = input
+		row.Call("appendChild", input)
+
+		valueLabel := doc.Call("createElement", "span")
+		setStyle(valueLabel, "textAlign", "right")
+		setStyle(valueLabel, "fontVariantNumeric", "tabular-nums")
+		setStyle(valueLabel, "fontSize", "13px")
+		physicsEditorValueLabels[spec.key] = valueLabel
+		row.Call("appendChild", valueLabel)
+
+		callback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			value, err := strconv.ParseFloat(input.Get("value").String(), 64)
+			if err != nil {
+				return nil
+			}
+			applyPhysicsEditorValue(specCopy, value)
+			valueLabel.Set("textContent", formatPhysicsSliderValue(specCopy, physicsEditorSpecValue(specCopy)))
+			return nil
+		})
+		keepPhysicsEditorCallback(callback)
+		input.Call("addEventListener", "input", callback)
+		panel.Call("appendChild", row)
+	}
+
+	closeRow := doc.Call("createElement", "div")
+	setStyle(closeRow, "display", "flex")
+	setStyle(closeRow, "justifyContent", "flex-end")
+	setStyle(closeRow, "marginTop", "18px")
+	closeRow.Call("appendChild", createPhysicsEditorButton("Close and copy (E)", func() {
+		closePhysicsEditor()
+	}))
+	panel.Call("appendChild", closeRow)
+
+	doc.Get("body").Call("appendChild", panel)
+	physicsEditorPanel = panel
+	refreshPhysicsEditorControls()
+}
+
+func openPhysicsEditor() {
+	if physicsEditorVisible {
+		return
+	}
+	ensurePhysicsEditorPanel()
+	physicsEditorPreviousPaused = paused
+	physicsEditorOpeningConfig = physicsConfig
+	physicsEditorVisible = true
+	paused = true
+	leftPressed = false
+	rightPressed = false
+	mobileLeftHeld = false
+	mobileRightHeld = false
+	touchControlActive = false
+	mouseControlActive = false
+	paddle.vx = 0
+	resetPaddleSpinHistory()
+	debugOverlayVisible = false
+	physicsOverlayVisible = false
+	refreshPhysicsEditorControls()
+	physicsEditorPanel.Get("style").Set("display", "block")
+}
+
+func closePhysicsEditor() {
+	if !physicsEditorVisible {
+		return
+	}
+	text := physicsEditorClipboardText()
+	physicsEditorVisible = false
+	if !physicsEditorPanel.IsUndefined() && !physicsEditorPanel.IsNull() {
+		physicsEditorPanel.Get("style").Set("display", "none")
+	}
+	paused = physicsEditorPreviousPaused
+	leftPressed = false
+	rightPressed = false
+	paddle.vx = 0
+	resetPaddleSpinHistory()
+	syncRenderInterpolation()
+	if copyTextToClipboard(text) {
+		showStatus("Physics settings copied", 2.0)
+	} else {
+		showStatus("Clipboard unavailable", 2.0)
+	}
+}
+
+func togglePhysicsEditor() {
+	if physicsEditorVisible {
+		closePhysicsEditor()
+	} else {
+		openPhysicsEditor()
+	}
+}
+
 func drawOverlayLines(lines []string) {
 	panelX, panelY, panelWidth, panelHeight, maxRows := debugOverlayGeometry(len(lines))
 
@@ -5522,7 +5879,7 @@ func draw(alpha float64) {
 		ctx.Set("textAlign", "start")
 	}
 
-	if paused && !gameOver && !waitingForStart && !levelAdvancePending {
+	if paused && !physicsEditorVisible && !gameOver && !waitingForStart && !levelAdvancePending {
 		drawCenteredOverlay()
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
@@ -5868,14 +6225,36 @@ func setupInput() {
 			return nil
 		}
 		e := args[0]
-		e.Call("preventDefault")
 		key := e.Get("key").String()
 		code := e.Get("code").String()
+		targetTag := ""
+		target := e.Get("target")
+		if !target.IsUndefined() && !target.IsNull() {
+			tagName := target.Get("tagName")
+			if !tagName.IsUndefined() && !tagName.IsNull() {
+				targetTag = strings.ToLower(tagName.String())
+			}
+		}
+		editorControlFocused := physicsEditorVisible &&
+			(targetTag == "input" || targetTag == "select" || targetTag == "button")
+		if !editorControlFocused {
+			e.Call("preventDefault")
+		}
 
 		// Unlock/resume audio on the first keyboard gesture, including the key
 		// that leaves the waiting screen. Embedded sample decoding is already
 		// asynchronous, so this path never waits for a sample.
 		unlockAudioFromGesture()
+
+		// E opens the interactive physics tuner. The tuner forces the game into a
+		// paused state and consumes all other game keys until E closes it again.
+		if (key == "e" || key == "E") && !e.Get("repeat").Bool() {
+			togglePhysicsEditor()
+			return nil
+		}
+		if physicsEditorVisible {
+			return nil
+		}
 
 		// Temporary development unlock. It is deliberately not stored.
 		if (key == "u" || key == "U") && !e.Get("repeat").Bool() {
@@ -6049,6 +6428,9 @@ func setupInput() {
 			return nil
 		}
 		e := args[0]
+		if physicsEditorVisible {
+			return nil
+		}
 		e.Call("preventDefault")
 		key := e.Get("key").String()
 		code := e.Get("code").String()
@@ -6083,6 +6465,9 @@ func setupInput() {
 
 		e := args[0]
 		e.Call("preventDefault")
+		if physicsEditorVisible {
+			return nil
+		}
 
 		// Clicking or tapping the visible debug panel copies its complete text.
 		// Consume the event so it does not also launch, unpause, or move the paddle.
@@ -6301,7 +6686,7 @@ func setupInput() {
 	canvas.Call("addEventListener", "mouseleave", mouseLeave)
 
 	bindMobileButton("pauseButton", func() {
-		if gameOver {
+		if physicsEditorVisible || gameOver {
 			return
 		}
 		paused = !paused
@@ -6393,6 +6778,10 @@ func main() {
 
 	setPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) == 0 || gameOver {
+			return nil
+		}
+		if physicsEditorVisible {
+			paused = true
 			return nil
 		}
 
