@@ -1,0 +1,80 @@
+PER-LEVEL PHYSICS SETTINGS
+==========================
+
+Put overrides before the --- separator in a level file. Omitted values use the
+matching defaults from config.go. Names are case-sensitive.
+
+CORE PHYSICS
+
+  gravity=300
+  restitution=0.90                 # 0..1
+  frictionCoeff=0.14               # >= 0
+  paddleBoost=900
+  brickBoost=100
+  maxSpeed=1000                    # > 0
+  maxSpin=1530                     # > 0
+  stuckSpeedThreshold=85           # >= 0
+  stuckDuration=1.2                # >= 0
+  tiltUpSpeed=520                  # >= 0
+  tiltSideMin=180                  # >= 0
+  tiltSideMax=340                  # >= 0
+
+FLIGHT / SPIN
+
+  magnusCoefficient=0.003          # >= 0
+  magnusAccelerationScale=0.25     # >= 0
+  spinDrag=0.04                    # >= 0
+  airDrag=0.010                    # >= 0
+  paddleSpinGraceSeconds=0.050     # >= 0; 0 disables history
+  mousePaddleSpinVelocityLimit=6000 # >= 0; 0 disables mouse spin cap
+  overspeedHalfLife=0.35           # >= 0; 0 disables overspeed easing
+
+COLLISION / SURFACE GRIP
+
+  wallFrictionScale=2.00           # >= 0
+  brickFrictionScale=2.00          # >= 0
+  unbreakableFrictionScale=1.80    # >= 0
+  paddleFrictionScale=3.20         # >= 0
+  paddleSpinTransfer=2.80          # >= 0
+  collisionSpinCoupling=2.00       # >= 0
+  minimumCollisionGrip=0.08        # >= 0
+  minimumPaddleGrip=0.55           # >= 0
+  collisionSlop=0.05               # >= 0
+
+WALL ROUGHNESS
+
+  wallNoiseCellSize=20             # >= 0; 0 disables variation
+  wallSideTiltDegrees=0.15         # >= 0
+  wallTopTiltDegrees=3.45          # >= 0
+  wallCornerFadeDistance=40        # >= 0
+
+BRICK MICRO-TILT
+
+  brickTiltMinDegrees=0.2          # >= 0
+  brickTiltMaxDegrees=2.0          # >= 0
+  drawBrickTilt=true               # true/false
+
+UNBREAKABLE ORBIT ESCAPE
+
+  orbitMinimumSpeed=300            # >= 0
+  orbitMinimumHitSpeed=80          # >= 0
+  orbitMinorSpeedRatio=0.08        # >= 0
+  orbitMinorSpeedFloor=45          # >= 0
+  orbitRequiredHits=3              # positive integer
+  orbitDetectionWindow=4.0         # >= 0
+  orbitMaximumMinorProgress=40     # >= 0
+  orbitHitCooldown=0.08            # >= 0
+  orbitEscapeSpeed=110             # >= 0
+  orbitEscapeDuration=0.90         # >= 0
+
+NOT LEVEL SETTINGS
+
+The following remain compile-time-only in config.go because they control engine
+scheduling or global presentation rather than one level's physical behavior:
+
+  physicsStepHz
+  physicsMaxCatchUpSteps
+  physicsWarningHoldSeconds
+  physicsOrbitMessageDuration
+  high-spin message settings
+  wall noise IDs
