@@ -295,6 +295,15 @@ var (
 	leftPressed  bool
 	rightPressed bool
 
+	// Raw-mapped browser joystick state. The Vivanco controller reports its
+	// horizontal stick on axis 0, primary fire as B0, and secondary fire as B1.
+	gamepadAxisX                float64
+	gamepadFireWasPressed       bool
+	gamepadFullscreenWasPressed bool
+	gamepadActiveIndex          = -1
+	gamepadActiveID             string
+	gamepadFullscreenCallbacks  []js.Func
+
 	touchControlActive bool
 	touchPointerID     int
 	touchLastY         float64
@@ -4495,6 +4504,242 @@ func applyMousePaddleControl(dt float64) bool {
 	return true
 }
 
+func normalizedGamepadAxis(value float64) float64 {
+	value = clampFloat(value, -1, 1)
+	magnitude := math.Abs(value)
+	if magnitude <= defaultGamepadDeadZone {
+		return 0
+	}
+
+	usableRange := 1 - defaultGamepadDeadZone
+	if usableRange <= 0 {
+		return math.Copysign(1, value)
+	}
+
+	normalized := (magnitude - defaultGamepadDeadZone) / usableRange
+	return math.Copysign(clampFloat(normalized, 0, 1), value)
+}
+
+func gamepadButtonPressed(button js.Value) bool {
+	if button.IsUndefined() || button.IsNull() {
+		return false
+	}
+
+	if button.Type() == js.TypeNumber {
+		return button.Float() >= 0.5
+	}
+
+	pressed := button.Get("pressed")
+	if !pressed.IsUndefined() && !pressed.IsNull() && pressed.Type() == js.TypeBoolean {
+		return pressed.Bool()
+	}
+
+	value := button.Get("value")
+	return !value.IsUndefined() && !value.IsNull() && value.Type() == js.TypeNumber && value.Float() >= 0.5
+}
+
+func handleGamepadFirePress() {
+	if physicsEditorVisible || gameOver || levelAdvancePending {
+		return
+	}
+
+	// B0 starts a level from its READY/title screen. Gamepad polling is not a
+	// guaranteed browser user-activation event, but attempting to resume audio is
+	// harmless and works in browsers that accept gamepad input for audio unlock.
+	if waitingForStart {
+		waitingForStart = false
+		paused = false
+		leftPressed = false
+		rightPressed = false
+		mobileLeftHeld = false
+		mobileRightHeld = false
+		touchControlActive = false
+		paddle.vx = 0
+		resetPaddleSpinHistory()
+		syncRenderInterpolation()
+		unlockAudioFromGesture()
+		showStatus("Go!", 1.0)
+		return
+	}
+
+	paused = !paused
+	leftPressed = false
+	rightPressed = false
+	mobileLeftHeld = false
+	mobileRightHeld = false
+	touchControlActive = false
+	paddle.vx = 0
+	resetPaddleSpinHistory()
+	syncRenderInterpolation()
+}
+
+func keepGamepadFullscreenCallback(callback js.Func) {
+	gamepadFullscreenCallbacks = append(gamepadFullscreenCallbacks, callback)
+}
+
+func trackFullscreenPromise(promise js.Value, action string) {
+	if promise.IsUndefined() || promise.IsNull() || promise.Type() != js.TypeObject {
+		return
+	}
+	catchMethod := promise.Get("catch")
+	if catchMethod.IsUndefined() || catchMethod.IsNull() || catchMethod.Type() != js.TypeFunction {
+		return
+	}
+
+	failureCallback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		reason := "request rejected"
+		if len(args) > 0 {
+			reason = fmt.Sprint(args[0])
+		}
+		log("Fullscreen " + action + " failed: " + reason)
+		showStatus("Fullscreen blocked by browser", 2.0)
+		return nil
+	})
+	keepGamepadFullscreenCallback(failureCallback)
+	promise.Call("catch", failureCallback)
+}
+
+func fullscreenElement() js.Value {
+	element := doc.Get("fullscreenElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	element = doc.Get("webkitFullscreenElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	return js.Null()
+}
+
+func callFullscreenMethod(target js.Value, standardMethod, webkitMethod, action string) bool {
+	if target.IsUndefined() || target.IsNull() {
+		return false
+	}
+
+	method := standardMethod
+	fn := target.Get(method)
+	if fn.IsUndefined() || fn.IsNull() || fn.Type() != js.TypeFunction {
+		method = webkitMethod
+		fn = target.Get(method)
+	}
+	if fn.IsUndefined() || fn.IsNull() || fn.Type() != js.TypeFunction {
+		return false
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log("Fullscreen " + action + " panic: " + fmt.Sprint(recovered))
+			showStatus("Fullscreen unavailable", 2.0)
+		}
+	}()
+	promise := target.Call(method)
+	trackFullscreenPromise(promise, action)
+	return true
+}
+
+func handleGamepadFullscreenPress() {
+	// Fullscreen the document rather than only the canvas so the physics tuner and
+	// any surrounding controls remain visible. B1 is edge-triggered in the poller.
+	if !fullscreenElement().IsNull() {
+		if !callFullscreenMethod(doc, "exitFullscreen", "webkitExitFullscreen", "exit") {
+			showStatus("Fullscreen unavailable", 2.0)
+		}
+		return
+	}
+
+	target := doc.Get("documentElement")
+	if !callFullscreenMethod(target, "requestFullscreen", "webkitRequestFullscreen", "request") {
+		showStatus("Fullscreen unavailable", 2.0)
+	}
+}
+
+// pollGamepadInput reads the first connected controller with axis 0 available.
+// This intentionally uses the raw mapping reported by the Vivanco USB device:
+// axis 0 moves the paddle, B0 starts/toggles pause, and B1 toggles fullscreen.
+func pollGamepadInput() {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			gamepadAxisX = 0
+		}
+	}()
+
+	navigator := js.Global().Get("navigator")
+	getGamepads := navigator.Get("getGamepads")
+	if getGamepads.IsUndefined() || getGamepads.IsNull() {
+		gamepadAxisX = 0
+		gamepadFireWasPressed = false
+		gamepadFullscreenWasPressed = false
+		return
+	}
+
+	gamepads := navigator.Call("getGamepads")
+	selected := js.Null()
+	selectedIndex := -1
+	for index := 0; index < gamepads.Length(); index++ {
+		gamepad := gamepads.Index(index)
+		if gamepad.IsUndefined() || gamepad.IsNull() {
+			continue
+		}
+
+		axes := gamepad.Get("axes")
+		if axes.IsUndefined() || axes.IsNull() || axes.Length() <= defaultGamepadHorizontalAxis {
+			continue
+		}
+
+		selected = gamepad
+		selectedIndex = index
+		break
+	}
+
+	if selectedIndex < 0 {
+		if gamepadActiveIndex >= 0 {
+			log("Gamepad disconnected")
+		}
+		gamepadActiveIndex = -1
+		gamepadActiveID = ""
+		gamepadAxisX = 0
+		gamepadFireWasPressed = false
+		gamepadFullscreenWasPressed = false
+		return
+	}
+
+	id := selected.Get("id").String()
+	if selectedIndex != gamepadActiveIndex || id != gamepadActiveID {
+		gamepadActiveIndex = selectedIndex
+		gamepadActiveID = id
+		log(fmt.Sprintf("Gamepad connected: index=%d id=%s axis=%d fire=B%d fullscreen=B%d",
+			selectedIndex, id, defaultGamepadHorizontalAxis, defaultGamepadFireButton,
+			defaultGamepadFullscreenButton))
+	}
+
+	axisValue := selected.Get("axes").Index(defaultGamepadHorizontalAxis).Float()
+	gamepadAxisX = normalizedGamepadAxis(axisValue)
+	if gamepadAxisX != 0 {
+		// Moving the stick takes control from the absolute-position mouse path.
+		mouseControlActive = false
+	}
+
+	firePressed := false
+	fullscreenPressed := false
+	buttons := selected.Get("buttons")
+	if !buttons.IsUndefined() && !buttons.IsNull() {
+		if buttons.Length() > defaultGamepadFireButton {
+			firePressed = gamepadButtonPressed(buttons.Index(defaultGamepadFireButton))
+		}
+		if buttons.Length() > defaultGamepadFullscreenButton {
+			fullscreenPressed = gamepadButtonPressed(buttons.Index(defaultGamepadFullscreenButton))
+		}
+	}
+	if firePressed && !gamepadFireWasPressed {
+		handleGamepadFirePress()
+	}
+	if fullscreenPressed && !gamepadFullscreenWasPressed {
+		handleGamepadFullscreenPress()
+	}
+	gamepadFireWasPressed = firePressed
+	gamepadFullscreenWasPressed = fullscreenPressed
+}
+
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
@@ -4542,7 +4787,12 @@ func update(dt float64) {
 		}
 	}
 
-	if digitalControl {
+	if gamepadAxisX != 0 {
+		// Analog joystick movement is immediate and proportional to stick travel.
+		// The resulting paddle velocity continues through the normal spin history.
+		paddle.vx = gamepadAxisX * defaultDigitalPaddleMaxSpeed
+		paddle.x += paddle.vx * dt
+	} else if digitalControl {
 		targetSpeed := digitalDirection * defaultDigitalPaddleMaxSpeed
 		changeRate := defaultDigitalPaddleAcceleration
 		if digitalDirection == 0 {
@@ -5975,6 +6225,11 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 			js.Global().Get("console").Call("error", "Panic in gameLoop:", r)
 		}
 	}()
+
+	// Gamepads are polled once per visual frame, as recommended by the browser
+	// Gamepad API. Polling continues while paused so B0 can resume and B1 can
+	// toggle fullscreen.
+	pollGamepadInput()
 
 	now := js.Global().Get("performance").Call("now").Float()
 	rawDt := 0.0

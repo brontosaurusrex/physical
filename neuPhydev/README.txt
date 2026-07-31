@@ -108,3 +108,26 @@ Supported runtime extensions:
   .opus .ogg .oga .mp3 .webm .m4a .aac .flac
 
 No manifests are used. Runtime samples are decoded sequentially at startup.
+
+LEVEL START TITLE
+-----------------
+Put this before the --- separator in a level file:
+
+    title="S L A Y"
+
+Quoted and unquoted values are accepted. If title is absent or empty, the
+start overlay displays READY.
+
+JOYSTICK / GAMEPAD
+------------------
+The browser Gamepad API is polled automatically. For the Vivanco
+0663-9807 USB Game Device (raw mapping):
+
+  Axis 0   paddle left/right
+  Button 0 pause/unpause (one toggle per press)
+
+The center dead zone is configured in config.go as
+defaultGamepadDeadZone. Keyboard, mouse, touch and phone tilt remain available.
+
+
+Joystick: axis 0 moves left/right, B0 starts/pauses, B1 toggles fullscreen.

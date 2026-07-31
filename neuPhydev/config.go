@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260730-8e4d2b7f61"
+	buildID = "20260731-51d781fa20"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -74,6 +74,13 @@ const (
 	defaultDigitalPaddleAcceleration = 9000.0
 	defaultDigitalPaddleBraking      = 40000.0
 
+	// Raw Gamepad API mapping for the Vivanco 0663-9807 USB Game Device.
+	// Axis 0 is horizontal; B0 starts/toggles pause; B1 toggles fullscreen.
+	defaultGamepadHorizontalAxis   = 0
+	defaultGamepadFireButton       = 0
+	defaultGamepadFullscreenButton = 1
+	defaultGamepadDeadZone         = 0.12
+
 	defaultEnableSounds      = true
 	defaultAudioRoom         = "none"
 	defaultAudioRoomDry      = -1.0
@@ -82,7 +89,7 @@ const (
 	// Mouse position is direct. This only caps the measured surface velocity used
 	// for collision/spin calculations after a large cursor jump. It is part of
 	// physicsSettings so levels and the in-game physics editor may override it.
-	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
+	defaultPhysicsMousePaddleSpinVelocityLimit = 6000.0
 
 	defaultPaddleRadius         = 12.0
 	defaultBrickRadius          = 6.0
