@@ -1,71 +1,81 @@
-IN-GAME PHYSICS TUNER
-=====================
+IN-GAME PHYSICS + DEBRIS TUNER — v60
+====================================
 
-Press E to open or close the tuner.
+Press E to open or close the tuner. The panel is docked to the right so most of
+the playfield remains visible.
 
-PAUSING
+LIVE INSPECTION
 
-Opening the panel remembers the previous pause state, then pauses the game.
-Closing it restores that previous state. Therefore:
+Opening the panel preserves the current pause state:
 
-  playing -> E -> tuner paused -> E -> playing
-  paused  -> E -> tuner paused -> E -> still paused
+  playing -> E -> game keeps running
+  paused  -> E -> game remains paused
 
-While the panel is open, normal game keys and canvas pointer controls are
-ignored. Range inputs and the export selector still accept keyboard input.
+The panel has live checkboxes for simulation, auto paddle and debris. O remains
+available while the panel is open.
+
+AUTO PADDLE
+
+  autoPaddleHitVariation
+
+This controls how far from the paddle center automatic hits may be planned. A
+new stable random offset is selected for each return. 0 always centers; 0.90
+uses almost the full paddle width.
+
+DEBRIS GENERATION
+
+  debrisPiecesMin
+  debrisPiecesMax
+  debrisMaxActivePieces
+  debrisLifetime
+  debrisLifetimeVariationPercent
+  debrisFadeDuration
+
+`debrisLifetimeVariationPercent` applies independently to newly created pieces:
+
+  actual lifetime = base lifetime * (1 +/- percentage/100)
+
+At the default 9 seconds and 16.7%, pieces live approximately 7.5..10.5 seconds.
+Changing the percentage affects newly spawned debris. Changing the base lifetime
+continues to rescale pieces already in flight while preserving their individual
+variation ratio and lifetime progress.
+
+DEBRIS APPEARANCE
+
+  debrisStartOpacity
+  debrisStartOpacityVariation
+  debrisFlashDuration
+  debrisFlashOpacity
+  debrisSizeScale
+  debrisBallPieceChance
+  debrisSliverPieceChance
+  debrisMaxChunkAspectRatio
+
+DEBRIS LAUNCH
+
+  debrisExplosionSpeedMin
+  debrisExplosionSpeedMax
+  debrisImpactSpeedFactor
+  debrisAngularSpeedMin
+  debrisAngularSpeedMax
+
+DEBRIS MOTION / CONTACT
+
+  debrisGravityScale
+  debrisAirDrag
+  debrisAngularDrag
+  debrisAngularStopSpeed
+  debrisMaxSpeed
+  debrisOffscreenMargin
+  debrisBrickCollisionDelay
+  debrisRestitution
+  debrisFriction
+  debrisBallInfluence
+  debrisFieldScale
+  debrisMagnetScale
 
 CLIPBOARD EXPORT
 
-Closing with E or the Close and copy button copies one selected format:
-
-  Level-file lines   key=value lines ready above a level's --- separator
-  config.go defaults defaultPhysics... assignments for the const block
-  Both formats       both blocks with headings
-
-SLIDERS
-
-Motion:
-  gravity
-  restitution
-  airDrag
-  magnusCoefficient
-  magnusAccelerationScale
-  spinDrag
-
-Limits and boosts:
-  maxSpeed
-  maxSpin
-  paddleBoost
-  brickBoost
-
-Paddle and spin:
-  paddleSpinTransfer
-  mousePaddleSpinVelocityLimit
-  paddleFrictionScale
-  minimumPaddleGrip
-  collisionSpinCoupling
-  paddleSpinGraceSeconds
-
-Surface contact:
-  frictionCoeff
-  wallFrictionScale
-  brickFrictionScale
-  unbreakableFrictionScale
-  overspeedHalfLife
-
-Geometry:
-  wallTopTiltDegrees
-  wallSideTiltDegrees
-  brickTiltMaxDegrees
-
-The slider min/max/step values are defined in physicsEditorSliderSpecs in
-config.go. They affect only the tuner UI. The normal level parser remains the
-authority for accepted level-file values.
-
-RESET BUTTONS
-
-Opening values:
-  Restores the complete physicsSettings snapshot from when E opened the panel.
-
-Built-in defaults:
-  Restores defaultPhysicsSettings(), including values from config.go.
+Closing with E exports auto-paddle, physics and debris values in the selected
+level-file, config.go, or combined format. Opening values and Built-in defaults
+also restore the auto hit-variation slider.

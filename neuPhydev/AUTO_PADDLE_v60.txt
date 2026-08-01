@@ -1,0 +1,49 @@
+AUTOMATIC INSPECTION PADDLE — v60
+================================
+
+Press O to toggle automatic paddle control. The same option is available in the
+E live tuner.
+
+PURPOSE
+
+This mode lets the game play while you inspect debris, collisions, effects,
+level layouts and live tuner changes without manually controlling the paddle.
+
+BEHAVIOR
+
+  * O on a READY screen starts the level.
+  * The setting remains enabled across subsequent levels.
+  * With two balls, the controller prioritizes the ball predicted to reach the
+    paddle line first.
+  * It predicts the horizontal landing position and reflects the prediction at
+    the side walls.
+  * It moves with bounded speed, acceleration and braking; it does not teleport.
+  * Manual paddle inputs are ignored while auto paddle is enabled.
+
+VARIABLE HIT POSITION
+
+The controller no longer aims for the center of the paddle every time. It keeps
+one randomized target offset stable while approaching a ball, then chooses a new
+offset after paddle contact or after switching to the other ball.
+
+  defaultAutoPaddleHitVariation = 0.65
+
+The value is normalized relative to half the paddle width:
+
+  0.00  always aims at the center
+  0.65  targets approximately 17.5%..82.5% across the paddle
+  0.90  targets approximately 5%..95% across the paddle
+
+The maximum accepted value is 0.90, leaving a safety margin near both edges.
+This value is available live in the E panel and may also be set per level:
+
+  autoPaddleHitVariation=0.65
+
+COMPILE-TIME TUNING
+
+  defaultAutoPaddleMaxSpeed             = 2400
+  defaultAutoPaddleAcceleration         = 14000
+  defaultAutoPaddleBraking              = 22000
+  defaultAutoPaddlePredictionMaxSeconds = 6
+  defaultAutoPaddleDeadZone             = 3
+  defaultAutoPaddleHitVariation         = 0.65

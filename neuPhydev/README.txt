@@ -1,5 +1,5 @@
-Breakout WASM — gamepad + physics tuner + debris + ball rescue (v57)
-Build ID: 20260801-57e8b63f20
+Breakout WASM — variable auto hits + lifetime variation (v60)
+Build ID: 20260801-60c6a91e4b
 
 BUILD
 
@@ -12,27 +12,24 @@ Equivalent explicit-file build:
 
   GOOS=js GOARCH=wasm go build -o main.wasm main.go config.go
 
-IN-GAME PHYSICS TUNER
+IN-GAME PHYSICS + DEBRIS TUNER
 
-Press E to open the physics tuner. While it is open:
+Press E to open the right-docked live tuner. When opened during play, the game
+keeps running. The panel includes Live simulation, Auto paddle (O), and Debris
+enabled checkboxes plus the existing ball-physics controls and a complete debris
+section. Closing restores the pause state from before E was opened and copies
+physics + debris settings in level, config.go, or combined format.
 
-  the game is completely paused
-  sliders change the active physics settings
-  keyboard and canvas game controls are ignored
-  E closes the panel
+See PHYSICS_TUNER.txt for the complete control list and live/new-piece behavior.
 
-Closing the panel restores the pause state from before it was opened and copies
-the selected export format to the clipboard. Choose in the panel:
+AUTOMATIC INSPECTION PADDLE
 
-  Level-file lines
-  config.go defaults
-  Both formats
+Press O to toggle automatic gameplay. It starts from READY, follows the predicted
+paddle-line crossing with bounded acceleration, prioritizes the earliest-arriving
+ball in dual-ball play, and stays enabled across levels. It is intended for visual
+inspection while tuning effects rather than competitive play.
 
-The panel includes the most useful motion, spin, contact, boost, drag, wall and
-brick-geometry controls. "Opening values" restores the values present when the
-panel was opened. "Built-in defaults" restores defaultPhysicsSettings().
-
-See PHYSICS_TUNER.txt for the complete slider list and clipboard behavior.
+See AUTO_PADDLE_v60.txt for details and compile-time tuning.
 
 MOUSE PADDLE
 
@@ -144,7 +141,7 @@ collide with the ball, paddle, top/side walls, and—after the configured delay�
 living bricks without damaging them. They do not collide with one another.
 Pieces are removed when their lifetime ends or they fall outside the playfield.
 
-The attached config defaults to a cap of 100 active pieces. Mass destruction
+The attached config defaults to a cap of 150 active pieces. Mass destruction
 removes the oldest pieces rather than allowing the physics workload to grow
 without bound. See BRICK_DEBRIS.txt for all config.go defaults and level-file
 overrides.
@@ -184,3 +181,33 @@ New debris begins with a short configurable opacity flash, default 0.10 seconds,
 then settles smoothly into each piece's randomized normal opacity. Brick impact
 speed now contributes to debris launch speed through debrisImpactSpeedFactor.
 The existing debrisMaxSpeed remains the final safety cap.
+
+
+V58: LARGER DEBRIS + ROTATION SETTLING
+--------------------------------------
+Debris size/settling support includes debrisSizeScale, debrisAngularDrag, and
+debrisAngularStopSpeed=0.10. Size scaling affects drawing, collision radius and
+mass. Angular drag gradually slows rotation, and the stop threshold snaps very
+slow rotation to zero. Collisions can naturally start a piece rotating again.
+
+The attached custom config.go is the source of truth in this build. Its 2..16
+piece range, 9-second lifetime, 0.35 +/- 0.25 opacity, 6 rad/s angular maximum,
+1.35 size scale, 0.25-second brick-collision delay, 1.00 debris friction and
+150-piece cap are preserved.
+
+
+V59: LIVE DEBRIS TUNER + AUTOMATIC INSPECTION
+---------------------------------------------
+The E panel is now live and docked to the right. It exposes debris on/off and the
+main debris settings while the game runs. O toggles a predictive automatic paddle
+that starts READY screens and continues across levels, allowing hands-off visual
+inspection.
+
+
+V60: VARIABLE AUTO HITS + DEBRIS LIFETIME VARIATION
+----------------------------------------------------
+The automatic paddle now chooses a stable randomized hit position for each
+return instead of centering every contact. The E panel exposes the maximum hit
+offset. Debris lifetime variation is now percentage-based and independently
+randomized per new piece; 16.7% around the attached 9-second default produces
+approximately 7.5..10.5-second lifetimes.

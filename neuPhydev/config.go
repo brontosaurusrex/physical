@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260801-57e8b63f20"
+	buildID = "20260801-60c6a91e4b"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -81,6 +81,18 @@ const (
 	defaultGamepadFullscreenButton = 1
 	defaultGamepadDeadZone         = 0.12
 
+	// Automatic inspection paddle. O toggles it at runtime. The controller predicts
+	// the next paddle-line crossing and approaches it with bounded acceleration.
+	defaultAutoPaddleMaxSpeed             = 2400.0
+	defaultAutoPaddleAcceleration         = 14000.0
+	defaultAutoPaddleBraking              = 22000.0
+	defaultAutoPaddlePredictionMaxSeconds = 6.0
+	defaultAutoPaddleDeadZone             = 3.0
+	// Maximum randomized impact offset from paddle center. 0 always centers;
+	// 1 may aim at the extreme left/right edge. A new offset is chosen after
+	// every paddle contact and whenever the controller switches target balls.
+	defaultAutoPaddleHitVariation = 0.65
+
 	defaultEnableSounds      = true
 	defaultAudioRoom         = "none"
 	defaultAudioRoomDry      = -1.0
@@ -89,34 +101,40 @@ const (
 	// Dynamic brick debris. Fragments use bounded lightweight rigid-body physics
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
 	// effects from turning one frame into thousands of collision bodies.
-	defaultDebrisEnabled               = true
-	defaultDebrisPiecesMin             = 2
-	defaultDebrisPiecesMax             = 12   //12
-	defaultDebrisLifetime              = 17.0 //7.0
-	defaultDebrisFadeDuration          = 3.0
-	defaultDebrisStartOpacity          = 0.45
-	defaultDebrisStartOpacityVariation = 0.15
-	defaultDebrisFlashDuration         = 0.30
-	defaultDebrisFlashOpacity          = 1.00
-	defaultDebrisImpactSpeedFactor     = 0.15
-	defaultDebrisBallPieceChance       = 0.18
-	defaultDebrisSliverPieceChance     = 0.015
-	defaultDebrisMaxChunkAspectRatio   = 1.45
-	defaultDebrisBrickCollisionDelay   = 0.10 //0.30
-	defaultDebrisGravityScale          = 0.7  //1.0
-	defaultDebrisAirDrag               = 0.15
-	defaultDebrisRestitution           = 0.48
-	defaultDebrisFriction              = 1.24
-	defaultDebrisExplosionSpeedMin     = 50.0
-	defaultDebrisExplosionSpeedMax     = 1150.0
-	defaultDebrisAngularSpeedMin       = 2.0
-	defaultDebrisAngularSpeedMax       = 12.0
-	defaultDebrisBallInfluence         = 0.25 //0.35
-	defaultDebrisFieldScale            = 0.80
-	defaultDebrisMagnetScale           = 0.65
-	defaultDebrisMaxSpeed              = 1100.0
-	defaultDebrisMaxActivePieces       = 100 //100
-	defaultDebrisOffscreenMargin       = 120.0
+	defaultDebrisEnabled   = true
+	defaultDebrisPiecesMin = 2
+	defaultDebrisPiecesMax = 16
+	defaultDebrisLifetime  = 9.0
+	// Each new piece receives lifetime × (1 ± variation/100). At 16.7% and
+	// a 9-second base lifetime, the approximate range is 7.5–10.5 seconds.
+	defaultDebrisLifetimeVariationPercent = 16.7
+	defaultDebrisFadeDuration             = 3.0
+	defaultDebrisStartOpacity             = 0.35
+	defaultDebrisStartOpacityVariation    = 0.25
+	defaultDebrisFlashDuration            = 0.10
+	defaultDebrisFlashOpacity             = 1.00
+	defaultDebrisImpactSpeedFactor        = 0.35
+	defaultDebrisBallPieceChance          = 0.18
+	defaultDebrisSliverPieceChance        = 0.015
+	defaultDebrisMaxChunkAspectRatio      = 1.45
+	defaultDebrisSizeScale                = 1.35
+	defaultDebrisBrickCollisionDelay      = 0.25 //0.30
+	defaultDebrisGravityScale             = 0.7  //1.0
+	defaultDebrisAirDrag                  = 0.15
+	defaultDebrisRestitution              = 0.48
+	defaultDebrisFriction                 = 1.00
+	defaultDebrisExplosionSpeedMin        = 150.0
+	defaultDebrisExplosionSpeedMax        = 1200.0
+	defaultDebrisAngularSpeedMin          = 2.0
+	defaultDebrisAngularSpeedMax          = 6.0
+	defaultDebrisAngularDrag              = 1.10
+	defaultDebrisAngularStopSpeed         = 0.10
+	defaultDebrisBallInfluence            = 0.35
+	defaultDebrisFieldScale               = 0.80
+	defaultDebrisMagnetScale              = 0.65
+	defaultDebrisMaxSpeed                 = 1100.0
+	defaultDebrisMaxActivePieces          = 150
+	defaultDebrisOffscreenMargin          = 120.0
 
 	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
 	// tilt measures movement along the orbit's minor axis. Only healthy fixed-step
@@ -242,6 +260,11 @@ const (
 	defaultBrickStrokeColor       = "#27ae60"
 )
 
+// autoPaddleEditorSliderSpecs controls the live automatic-paddle section.
+var autoPaddleEditorSliderSpecs = []autoPaddleSliderSpec{
+	{group: "Aim", key: "autoPaddleHitVariation", label: "Hit-position variation", configName: "defaultAutoPaddleHitVariation", min: 0, max: 0.90, step: 0.01, precision: 2},
+}
+
 // physicsEditorSliderSpecs controls which important physics settings appear in
 // the E-key tuning panel. Ranges affect only the editor UI; level files may still
 // use any value accepted by the level parser.
@@ -270,6 +293,47 @@ var physicsEditorSliderSpecs = []physicsSliderSpec{
 	{group: "Geometry", key: "wallTopTiltDegrees", label: "Top-wall roughness", configName: "defaultPhysicsWallTopTiltDegrees", min: 0, max: 8, step: 0.05, precision: 2},
 	{group: "Geometry", key: "wallSideTiltDegrees", label: "Side-wall roughness", configName: "defaultPhysicsWallSideTiltDegrees", min: 0, max: 4, step: 0.05, precision: 2},
 	{group: "Geometry", key: "brickTiltMaxDegrees", label: "Maximum brick tilt", configName: "defaultPhysicsBrickTiltMaxDegrees", min: 0, max: 5, step: 0.05, precision: 2},
+}
+
+// debrisEditorSliderSpecs controls the live debris section of the E tuner.
+// Settings marked "new pieces" affect future fragments; motion/contact settings
+// also affect fragments already in flight.
+var debrisEditorSliderSpecs = []debrisSliderSpec{
+	{group: "Generation", key: "debrisPiecesMin", label: "Pieces minimum (new)", configName: "defaultDebrisPiecesMin", min: 1, max: 32, step: 1, precision: 0, integer: true},
+	{group: "Generation", key: "debrisPiecesMax", label: "Pieces maximum (new)", configName: "defaultDebrisPiecesMax", min: 1, max: 32, step: 1, precision: 0, integer: true},
+	{group: "Generation", key: "debrisMaxActivePieces", label: "Active-piece cap", configName: "defaultDebrisMaxActivePieces", min: 0, max: 500, step: 1, precision: 0, integer: true},
+	{group: "Generation", key: "debrisLifetime", label: "Lifetime", configName: "defaultDebrisLifetime", min: 0.1, max: 30, step: 0.1, precision: 1},
+	{group: "Generation", key: "debrisLifetimeVariationPercent", label: "Lifetime variation % (new)", configName: "defaultDebrisLifetimeVariationPercent", min: 0, max: 95, step: 0.5, precision: 1},
+	{group: "Generation", key: "debrisFadeDuration", label: "Fade duration", configName: "defaultDebrisFadeDuration", min: 0, max: 15, step: 0.1, precision: 1},
+
+	{group: "Appearance", key: "debrisStartOpacity", label: "Starting opacity", configName: "defaultDebrisStartOpacity", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisStartOpacityVariation", label: "Opacity variation (new)", configName: "defaultDebrisStartOpacityVariation", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisFlashDuration", label: "Bright flash duration", configName: "defaultDebrisFlashDuration", min: 0, max: 0.75, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisFlashOpacity", label: "Bright flash opacity", configName: "defaultDebrisFlashOpacity", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisSizeScale", label: "Piece size (new + live)", configName: "defaultDebrisSizeScale", min: 0.25, max: 3, step: 0.05, precision: 2},
+	{group: "Appearance", key: "debrisBallPieceChance", label: "Round-piece chance (new)", configName: "defaultDebrisBallPieceChance", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisSliverPieceChance", label: "Sliver chance (new)", configName: "defaultDebrisSliverPieceChance", min: 0, max: 0.30, step: 0.005, precision: 3},
+	{group: "Appearance", key: "debrisMaxChunkAspectRatio", label: "Maximum chunk aspect (new)", configName: "defaultDebrisMaxChunkAspectRatio", min: 1, max: 4, step: 0.05, precision: 2},
+
+	{group: "Launch", key: "debrisExplosionSpeedMin", label: "Explosion speed minimum (new)", configName: "defaultDebrisExplosionSpeedMin", min: 0, max: 2000, step: 10, precision: 0},
+	{group: "Launch", key: "debrisExplosionSpeedMax", label: "Explosion speed maximum (new)", configName: "defaultDebrisExplosionSpeedMax", min: 0, max: 2500, step: 10, precision: 0},
+	{group: "Launch", key: "debrisImpactSpeedFactor", label: "Ball-impact speed factor (new)", configName: "defaultDebrisImpactSpeedFactor", min: 0, max: 2, step: 0.01, precision: 2},
+	{group: "Launch", key: "debrisAngularSpeedMin", label: "Angular speed minimum (new)", configName: "defaultDebrisAngularSpeedMin", min: 0, max: 50, step: 0.25, precision: 2},
+	{group: "Launch", key: "debrisAngularSpeedMax", label: "Angular speed maximum (new)", configName: "defaultDebrisAngularSpeedMax", min: 0, max: 50, step: 0.25, precision: 2},
+
+	{group: "Motion and settling", key: "debrisGravityScale", label: "Gravity scale", configName: "defaultDebrisGravityScale", min: 0, max: 3, step: 0.05, precision: 2},
+	{group: "Motion and settling", key: "debrisAirDrag", label: "Air drag", configName: "defaultDebrisAirDrag", min: 0, max: 5, step: 0.05, precision: 2},
+	{group: "Motion and settling", key: "debrisAngularDrag", label: "Angular drag", configName: "defaultDebrisAngularDrag", min: 0, max: 8, step: 0.05, precision: 2},
+	{group: "Motion and settling", key: "debrisAngularStopSpeed", label: "Angular stop threshold", configName: "defaultDebrisAngularStopSpeed", min: 0, max: 5, step: 0.05, precision: 2},
+	{group: "Motion and settling", key: "debrisMaxSpeed", label: "Maximum shard speed", configName: "defaultDebrisMaxSpeed", min: 0, max: 2500, step: 25, precision: 0},
+	{group: "Motion and settling", key: "debrisOffscreenMargin", label: "Offscreen cleanup margin", configName: "defaultDebrisOffscreenMargin", min: 0, max: 500, step: 5, precision: 0},
+
+	{group: "Contact and fields", key: "debrisBrickCollisionDelay", label: "Brick collision delay", configName: "defaultDebrisBrickCollisionDelay", min: 0, max: 2, step: 0.01, precision: 2},
+	{group: "Contact and fields", key: "debrisRestitution", label: "Restitution", configName: "defaultDebrisRestitution", min: 0, max: 1.5, step: 0.01, precision: 2},
+	{group: "Contact and fields", key: "debrisFriction", label: "Friction", configName: "defaultDebrisFriction", min: 0, max: 2, step: 0.01, precision: 2},
+	{group: "Contact and fields", key: "debrisBallInfluence", label: "Ball influence", configName: "defaultDebrisBallInfluence", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Contact and fields", key: "debrisFieldScale", label: "Black-hole / gravity field scale", configName: "defaultDebrisFieldScale", min: 0, max: 3, step: 0.05, precision: 2},
+	{group: "Contact and fields", key: "debrisMagnetScale", label: "Magnet scale", configName: "defaultDebrisMagnetScale", min: 0, max: 3, step: 0.05, precision: 2},
 }
 
 var defaultPalette = []string{

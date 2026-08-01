@@ -92,6 +92,34 @@ type physicsSliderSpec struct {
 	precision  int
 }
 
+type debrisSliderSpec struct {
+	group      string
+	key        string
+	label      string
+	configName string
+	min        float64
+	max        float64
+	step       float64
+	precision  int
+	integer    bool
+}
+
+type autoPaddleSliderSpec struct {
+	group      string
+	key        string
+	label      string
+	configName string
+	min        float64
+	max        float64
+	step       float64
+	precision  int
+}
+
+type debrisEditorSnapshot struct {
+	enabled bool
+	values  map[string]float64
+}
+
 func defaultPhysicsSettings() physicsSettings {
 	return physicsSettings{
 		gravity:             defaultPhysicsGravity,
@@ -292,34 +320,38 @@ var (
 	currentAudioRoomDry = defaultAudioRoomDry
 
 	// Per-level dynamic debris settings.
-	debrisEnabled               = defaultDebrisEnabled
-	debrisPiecesMin             = defaultDebrisPiecesMin
-	debrisPiecesMax             = defaultDebrisPiecesMax
-	debrisLifetime              = defaultDebrisLifetime
-	debrisFadeDuration          = defaultDebrisFadeDuration
-	debrisStartOpacity          = defaultDebrisStartOpacity
-	debrisStartOpacityVariation = defaultDebrisStartOpacityVariation
-	debrisFlashDuration         = defaultDebrisFlashDuration
-	debrisFlashOpacity          = defaultDebrisFlashOpacity
-	debrisImpactSpeedFactor     = defaultDebrisImpactSpeedFactor
-	debrisBallPieceChance       = defaultDebrisBallPieceChance
-	debrisSliverPieceChance     = defaultDebrisSliverPieceChance
-	debrisMaxChunkAspectRatio   = defaultDebrisMaxChunkAspectRatio
-	debrisBrickCollisionDelay   = defaultDebrisBrickCollisionDelay
-	debrisGravityScale          = defaultDebrisGravityScale
-	debrisAirDrag               = defaultDebrisAirDrag
-	debrisRestitution           = defaultDebrisRestitution
-	debrisFriction              = defaultDebrisFriction
-	debrisExplosionSpeedMin     = defaultDebrisExplosionSpeedMin
-	debrisExplosionSpeedMax     = defaultDebrisExplosionSpeedMax
-	debrisAngularSpeedMin       = defaultDebrisAngularSpeedMin
-	debrisAngularSpeedMax       = defaultDebrisAngularSpeedMax
-	debrisBallInfluence         = defaultDebrisBallInfluence
-	debrisFieldScale            = defaultDebrisFieldScale
-	debrisMagnetScale           = defaultDebrisMagnetScale
-	debrisMaxSpeed              = defaultDebrisMaxSpeed
-	debrisMaxActivePieces       = defaultDebrisMaxActivePieces
-	debrisOffscreenMargin       = defaultDebrisOffscreenMargin
+	debrisEnabled                  = defaultDebrisEnabled
+	debrisPiecesMin                = defaultDebrisPiecesMin
+	debrisPiecesMax                = defaultDebrisPiecesMax
+	debrisLifetime                 = defaultDebrisLifetime
+	debrisLifetimeVariationPercent = defaultDebrisLifetimeVariationPercent
+	debrisFadeDuration             = defaultDebrisFadeDuration
+	debrisStartOpacity             = defaultDebrisStartOpacity
+	debrisStartOpacityVariation    = defaultDebrisStartOpacityVariation
+	debrisFlashDuration            = defaultDebrisFlashDuration
+	debrisFlashOpacity             = defaultDebrisFlashOpacity
+	debrisImpactSpeedFactor        = defaultDebrisImpactSpeedFactor
+	debrisBallPieceChance          = defaultDebrisBallPieceChance
+	debrisSliverPieceChance        = defaultDebrisSliverPieceChance
+	debrisMaxChunkAspectRatio      = defaultDebrisMaxChunkAspectRatio
+	debrisSizeScale                = defaultDebrisSizeScale
+	debrisBrickCollisionDelay      = defaultDebrisBrickCollisionDelay
+	debrisGravityScale             = defaultDebrisGravityScale
+	debrisAirDrag                  = defaultDebrisAirDrag
+	debrisRestitution              = defaultDebrisRestitution
+	debrisFriction                 = defaultDebrisFriction
+	debrisExplosionSpeedMin        = defaultDebrisExplosionSpeedMin
+	debrisExplosionSpeedMax        = defaultDebrisExplosionSpeedMax
+	debrisAngularSpeedMin          = defaultDebrisAngularSpeedMin
+	debrisAngularSpeedMax          = defaultDebrisAngularSpeedMax
+	debrisAngularDrag              = defaultDebrisAngularDrag
+	debrisAngularStopSpeed         = defaultDebrisAngularStopSpeed
+	debrisBallInfluence            = defaultDebrisBallInfluence
+	debrisFieldScale               = defaultDebrisFieldScale
+	debrisMagnetScale              = defaultDebrisMagnetScale
+	debrisMaxSpeed                 = defaultDebrisMaxSpeed
+	debrisMaxActivePieces          = defaultDebrisMaxActivePieces
+	debrisOffscreenMargin          = defaultDebrisOffscreenMargin
 
 	ballRescueEnabled             = defaultBallRescueEnabled
 	ballRescueFailureLimit        = defaultBallRescueFailureLimit
@@ -583,14 +615,30 @@ var (
 	debugOverlayVisible   bool
 	physicsOverlayVisible bool
 
-	physicsEditorVisible        bool
-	physicsEditorPreviousPaused bool
-	physicsEditorOpeningConfig  physicsSettings
-	physicsEditorPanel          js.Value
-	physicsEditorExportSelect   js.Value
-	physicsEditorInputs         = make(map[string]js.Value)
-	physicsEditorValueLabels    = make(map[string]js.Value)
-	physicsEditorCallbacks      []js.Func
+	physicsEditorVisible                 bool
+	physicsEditorPreviousPaused          bool
+	physicsEditorLiveSimulation          bool
+	physicsEditorOpeningConfig           physicsSettings
+	physicsEditorOpeningDebris           debrisEditorSnapshot
+	physicsEditorOpeningAutoHitVariation float64
+	physicsEditorPanel                   js.Value
+	physicsEditorExportSelect            js.Value
+	physicsEditorLiveCheckbox            js.Value
+	physicsEditorDebrisCheckbox          js.Value
+	physicsEditorAutoPaddleCheck         js.Value
+	physicsEditorInputs                  = make(map[string]js.Value)
+	physicsEditorValueLabels             = make(map[string]js.Value)
+	physicsEditorCallbacks               []js.Func
+
+	// O toggles an automatic inspection paddle. It predicts the next crossing of
+	// the paddle line and moves with bounded acceleration instead of teleporting.
+	autoPaddleEnabled           bool
+	autoPaddleTargetX           float64
+	autoPaddleHitVariation      = defaultAutoPaddleHitVariation
+	autoPaddleHitOffset         float64
+	autoPaddleTargetBall        int
+	autoPaddleNeedsNewHitOffset = true
+	autoPaddleRNG               = rand.New(rand.NewSource(0x60a17f3d))
 
 	physicsAccumulator       float64
 	physicsStepRateCurrent   float64
@@ -1418,13 +1466,14 @@ func normalizeDebrisSettings() {
 	if debrisPiecesMin > debrisPiecesMax {
 		debrisPiecesMin, debrisPiecesMax = debrisPiecesMax, debrisPiecesMin
 	}
-	if debrisPiecesMax > 16 {
-		debrisPiecesMax = 16
+	if debrisPiecesMax > 32 {
+		debrisPiecesMax = 32
 	}
 	if debrisPiecesMin > debrisPiecesMax {
 		debrisPiecesMin = debrisPiecesMax
 	}
 	debrisLifetime = math.Max(0.05, debrisLifetime)
+	debrisLifetimeVariationPercent = clampFloat(debrisLifetimeVariationPercent, 0, 95)
 	debrisFadeDuration = clampFloat(debrisFadeDuration, 0, debrisLifetime)
 	debrisStartOpacity = clampFloat(debrisStartOpacity, 0, 1)
 	debrisStartOpacityVariation = clampFloat(debrisStartOpacityVariation, 0, 1)
@@ -1440,11 +1489,12 @@ func normalizeDebrisSettings() {
 		debrisSliverPieceChance *= scale
 	}
 	debrisMaxChunkAspectRatio = math.Max(1, debrisMaxChunkAspectRatio)
+	debrisSizeScale = clampFloat(debrisSizeScale, 0.25, 3.0)
 	debrisBrickCollisionDelay = math.Max(0, debrisBrickCollisionDelay)
 	debrisGravityScale = math.Max(0, debrisGravityScale)
 	debrisAirDrag = math.Max(0, debrisAirDrag)
 	debrisRestitution = clampFloat(debrisRestitution, 0, 1.5)
-	debrisFriction = clampFloat(debrisFriction, 0, 1)
+	debrisFriction = clampFloat(debrisFriction, 0, 2)
 	debrisExplosionSpeedMin = math.Max(0, debrisExplosionSpeedMin)
 	debrisExplosionSpeedMax = math.Max(0, debrisExplosionSpeedMax)
 	if debrisExplosionSpeedMin > debrisExplosionSpeedMax {
@@ -1455,6 +1505,8 @@ func normalizeDebrisSettings() {
 	if debrisAngularSpeedMin > debrisAngularSpeedMax {
 		debrisAngularSpeedMin, debrisAngularSpeedMax = debrisAngularSpeedMax, debrisAngularSpeedMin
 	}
+	debrisAngularDrag = math.Max(0, debrisAngularDrag)
+	debrisAngularStopSpeed = math.Max(0, debrisAngularStopSpeed)
 	debrisBallInfluence = clampFloat(debrisBallInfluence, 0, 1)
 	debrisFieldScale = math.Max(0, debrisFieldScale)
 	debrisMagnetScale = math.Max(0, debrisMagnetScale)
@@ -1700,6 +1752,14 @@ func spawnBrickDebris(br *brick, impactSpeed float64) {
 			worldOffsetX, worldOffsetY := rotateVector(localCenterX, localCenterY, br.tiltRadians)
 
 			points, pointCount, radius, shapeArea, roundness, circle := buildDebrisShape(cellWidth, cellHeight)
+			if debrisSizeScale != 1 {
+				for point := 0; point < pointCount; point++ {
+					points[point*2] *= debrisSizeScale
+					points[point*2+1] *= debrisSizeScale
+				}
+				radius *= debrisSizeScale
+				shapeArea *= debrisSizeScale * debrisSizeScale
+			}
 
 			directionX, directionY := worldOffsetX, worldOffsetY
 			// A small upward bias makes the break read as an explosion before gravity
@@ -1735,6 +1795,11 @@ func spawnBrickDebris(br *brick, impactSpeed float64) {
 				0,
 				1,
 			)
+			lifetimeVariation := debrisLifetimeVariationPercent / 100.0
+			pieceLifetime := math.Max(
+				0.05,
+				debrisLifetime*debrisRandomBetween(1-lifetimeVariation, 1+lifetimeVariation),
+			)
 			fragment := debrisFragment{
 				x:             brickCenterX + worldOffsetX,
 				y:             brickCenterY + worldOffsetY,
@@ -1748,7 +1813,7 @@ func spawnBrickDebris(br *brick, impactSpeed float64) {
 				radius:        radius,
 				mass:          mass,
 				age:           0,
-				lifetime:      debrisLifetime * debrisRandomBetween(0.90, 1.10),
+				lifetime:      pieceLifetime,
 				pointCount:    pointCount,
 				points:        points,
 				roundness:     roundness,
@@ -2933,6 +2998,7 @@ func resetGlobals() {
 	debrisPiecesMin = defaultDebrisPiecesMin
 	debrisPiecesMax = defaultDebrisPiecesMax
 	debrisLifetime = defaultDebrisLifetime
+	debrisLifetimeVariationPercent = defaultDebrisLifetimeVariationPercent
 	debrisFadeDuration = defaultDebrisFadeDuration
 	debrisStartOpacity = defaultDebrisStartOpacity
 	debrisStartOpacityVariation = defaultDebrisStartOpacityVariation
@@ -2942,6 +3008,7 @@ func resetGlobals() {
 	debrisBallPieceChance = defaultDebrisBallPieceChance
 	debrisSliverPieceChance = defaultDebrisSliverPieceChance
 	debrisMaxChunkAspectRatio = defaultDebrisMaxChunkAspectRatio
+	debrisSizeScale = defaultDebrisSizeScale
 	debrisBrickCollisionDelay = defaultDebrisBrickCollisionDelay
 	debrisGravityScale = defaultDebrisGravityScale
 	debrisAirDrag = defaultDebrisAirDrag
@@ -2951,12 +3018,18 @@ func resetGlobals() {
 	debrisExplosionSpeedMax = defaultDebrisExplosionSpeedMax
 	debrisAngularSpeedMin = defaultDebrisAngularSpeedMin
 	debrisAngularSpeedMax = defaultDebrisAngularSpeedMax
+	debrisAngularDrag = defaultDebrisAngularDrag
+	debrisAngularStopSpeed = defaultDebrisAngularStopSpeed
 	debrisBallInfluence = defaultDebrisBallInfluence
 	debrisFieldScale = defaultDebrisFieldScale
 	debrisMagnetScale = defaultDebrisMagnetScale
 	debrisMaxSpeed = defaultDebrisMaxSpeed
 	debrisMaxActivePieces = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin = defaultDebrisOffscreenMargin
+	autoPaddleHitVariation = defaultAutoPaddleHitVariation
+	autoPaddleNeedsNewHitOffset = true
+	autoPaddleTargetBall = 0
+	autoPaddleHitOffset = 0
 	ballRescueEnabled = defaultBallRescueEnabled
 	ballRescueFailureLimit = defaultBallRescueFailureLimit
 	ballRescueMinProgress = defaultBallRescueMinProgress
@@ -3192,6 +3265,13 @@ func applyConfig(config map[string]string) {
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
 				paddleHeight = f
 			}
+		case "autoPaddleHitVariation":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 0.90 {
+				autoPaddleHitVariation = f
+				autoPaddleNeedsNewHitOffset = true
+			} else {
+				log("autoPaddleHitVariation must be from 0 to 0.90")
+			}
 		case "debris", "debrisEnabled":
 			if b, err := strconv.ParseBool(val); err == nil {
 				debrisEnabled = b
@@ -3199,16 +3279,16 @@ func applyConfig(config map[string]string) {
 				log(key + " must be true or false")
 			}
 		case "debrisPiecesMin":
-			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 16 {
+			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 32 {
 				debrisPiecesMin = i
 			} else {
-				log("debrisPiecesMin must be from 1 to 16")
+				log("debrisPiecesMin must be from 1 to 32")
 			}
 		case "debrisPiecesMax":
-			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 16 {
+			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 32 {
 				debrisPiecesMax = i
 			} else {
-				log("debrisPiecesMax must be from 1 to 16")
+				log("debrisPiecesMax must be from 1 to 32")
 			}
 		case "debrisMaxActivePieces":
 			if i, err := strconv.Atoi(val); err == nil && i >= 0 && i <= 2000 {
@@ -3221,6 +3301,12 @@ func applyConfig(config map[string]string) {
 				debrisLifetime = f
 			} else {
 				log("debrisLifetime must be greater than zero")
+			}
+		case "debrisLifetimeVariationPercent":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 95 {
+				debrisLifetimeVariationPercent = f
+			} else {
+				log("debrisLifetimeVariationPercent must be from 0 to 95")
 			}
 		case "debrisFadeDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
@@ -3276,6 +3362,12 @@ func applyConfig(config map[string]string) {
 			} else {
 				log("debrisMaxChunkAspectRatio must be from 1 to 4")
 			}
+		case "debrisSizeScale":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0.25 && f <= 3 {
+				debrisSizeScale = f
+			} else {
+				log("debrisSizeScale must be from 0.25 to 3")
+			}
 		case "debrisBrickCollisionDelay":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
 				debrisBrickCollisionDelay = f
@@ -3295,7 +3387,7 @@ func applyConfig(config map[string]string) {
 				debrisRestitution = f
 			}
 		case "debrisFriction":
-			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 2 {
 				debrisFriction = f
 			}
 		case "debrisExplosionSpeedMin":
@@ -3313,6 +3405,18 @@ func applyConfig(config map[string]string) {
 		case "debrisAngularSpeedMax":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
 				debrisAngularSpeedMax = f
+			}
+		case "debrisAngularDrag":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisAngularDrag = f
+			} else {
+				log("debrisAngularDrag must be zero or greater")
+			}
+		case "debrisAngularStopSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisAngularStopSpeed = f
+			} else {
+				log("debrisAngularStopSpeed must be zero or greater")
 			}
 		case "debrisBallInfluence":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
@@ -4185,8 +4289,13 @@ func startLevel(index int) {
 	}
 
 	debrisRNG.Seed(int64(index+1)*0x52d3b715 + 1)
+	autoPaddleRNG.Seed(int64(index+1)*0x60a17f3d + 7)
+	resetAutoPaddleHitPlan()
 	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
+	if autoPaddleEnabled {
+		waitingForStart = false
+	}
 	syncRenderInterpolation()
 	saveCurrentLevel()
 	log("Level " + strconv.Itoa(index+1) + " started")
@@ -4842,6 +4951,10 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 		recordIncomingCollisionSpeed(math.Hypot(b.vx, b.vy))
 		b.y = pTop - b.r - physics.collisionSlop
 		resetFastOrbitState(b)
+		if autoPaddleEnabled {
+			autoPaddleNeedsNewHitOffset = true
+			autoPaddleTargetBall = 0
+		}
 
 		spinBeforePaddle := b.omega
 		incomingPaddleAngle := velocityAngleDegrees(b.vx, b.vy)
@@ -5737,7 +5850,10 @@ func applyDebrisFields(fragment *debrisFragment, dt float64, applyMagnet bool) {
 	damping := math.Exp(-debrisAirDrag * dt)
 	fragment.vx *= damping
 	fragment.vy *= damping
-	fragment.omega *= math.Exp(-debrisAirDrag * 0.35 * dt)
+	fragment.omega *= math.Exp(-debrisAngularDrag * dt)
+	if math.Abs(fragment.omega) < debrisAngularStopSpeed {
+		fragment.omega = 0
+	}
 	clampDebrisSpeed(fragment)
 }
 
@@ -6075,6 +6191,178 @@ func drawBrickDebris(alpha float64) {
 	ctx.Call("restore")
 }
 
+func reflectCoordinate(value, minimum, maximum float64) float64 {
+	width := maximum - minimum
+	if width <= 0 {
+		return minimum
+	}
+	period := 2 * width
+	position := math.Mod(value-minimum, period)
+	if position < 0 {
+		position += period
+	}
+	if position > width {
+		position = period - position
+	}
+	return minimum + position
+}
+
+func predictedPaddleCrossing(b *Ball) (x, seconds float64, ok bool) {
+	if b == nil {
+		return 0, 0, false
+	}
+	targetY := paddle.y - b.r
+	c := b.y - targetY
+	var candidates [2]float64
+	candidateCount := 0
+	if math.Abs(currentGravity) < 1e-9 {
+		if math.Abs(b.vy) < 1e-9 {
+			return 0, 0, false
+		}
+		t := -c / b.vy
+		if t > 0 {
+			candidates[candidateCount] = t
+			candidateCount++
+		}
+	} else {
+		a := 0.5 * currentGravity
+		discriminant := b.vy*b.vy - 4*a*c
+		if discriminant < 0 {
+			return 0, 0, false
+		}
+		root := math.Sqrt(discriminant)
+		for _, t := range []float64{(-b.vy - root) / (2 * a), (-b.vy + root) / (2 * a)} {
+			if t > 0 {
+				candidates[candidateCount] = t
+				candidateCount++
+			}
+		}
+	}
+	if candidateCount == 0 {
+		return 0, 0, false
+	}
+	seconds = candidates[0]
+	for i := 1; i < candidateCount; i++ {
+		if candidates[i] < seconds {
+			seconds = candidates[i]
+		}
+	}
+	if seconds <= 0 || seconds > defaultAutoPaddlePredictionMaxSeconds {
+		return 0, 0, false
+	}
+	unfoldedX := b.x + b.vx*seconds
+	x = reflectCoordinate(unfoldedX, b.r, canvasWidth-b.r)
+	return x, seconds, true
+}
+
+func resetAutoPaddleHitPlan() {
+	autoPaddleHitOffset = 0
+	autoPaddleTargetBall = 0
+	autoPaddleNeedsNewHitOffset = true
+}
+
+func chooseAutoPaddleHitOffset() float64 {
+	maximum := clampFloat(autoPaddleHitVariation, 0, 0.90)
+	if maximum <= 0 {
+		return 0
+	}
+	return (autoPaddleRNG.Float64()*2 - 1) * maximum
+}
+
+func autoPaddleAimX() float64 {
+	bestTime := math.Inf(1)
+	bestX := ball.x
+	bestBall := 0
+	consider := func(b *Ball, ballIndex int) {
+		if x, seconds, ok := predictedPaddleCrossing(b); ok && seconds < bestTime {
+			bestTime = seconds
+			bestX = x
+			bestBall = ballIndex
+		}
+	}
+	consider(&ball, 1)
+	if secondBallActive {
+		consider(&secondBall, 2)
+	}
+
+	if bestBall == 0 {
+		if secondBallActive && secondBall.y > ball.y {
+			bestX = secondBall.x
+			bestBall = 2
+		} else {
+			bestX = ball.x
+			bestBall = 1
+		}
+	}
+
+	if autoPaddleNeedsNewHitOffset || autoPaddleTargetBall != bestBall {
+		autoPaddleHitOffset = chooseAutoPaddleHitOffset()
+		autoPaddleTargetBall = bestBall
+		autoPaddleNeedsNewHitOffset = false
+	}
+
+	// Offset is normalized to half the paddle width: -1 aims at the far left,
+	// +1 at the far right. The configured 0.90 maximum leaves a safety margin.
+	desiredHitPosition := 0.5 + autoPaddleHitOffset*0.5
+	targetX := bestX - desiredHitPosition*paddle.w
+	return clampFloat(targetX, 0, math.Max(0, canvasWidth-paddle.w))
+}
+
+func applyAutoPaddleControl(dt float64) bool {
+	if !autoPaddleEnabled || dt <= 0 {
+		return false
+	}
+	autoPaddleTargetX = autoPaddleAimX()
+	errorX := autoPaddleTargetX - paddle.x
+	targetSpeed := clampFloat(errorX*10, -defaultAutoPaddleMaxSpeed, defaultAutoPaddleMaxSpeed)
+	if math.Abs(errorX) <= defaultAutoPaddleDeadZone {
+		targetSpeed = 0
+	}
+	changeRate := defaultAutoPaddleAcceleration
+	if targetSpeed == 0 || math.Signbit(targetSpeed) != math.Signbit(paddle.vx) {
+		changeRate = defaultAutoPaddleBraking
+	}
+	paddle.vx = moveToward(paddle.vx, targetSpeed, changeRate*dt)
+	paddle.x += paddle.vx * dt
+	return true
+}
+
+func refreshAutoPaddleControl() {
+	if !physicsEditorAutoPaddleCheck.IsUndefined() && !physicsEditorAutoPaddleCheck.IsNull() {
+		physicsEditorAutoPaddleCheck.Set("checked", autoPaddleEnabled)
+	}
+}
+
+func setAutoPaddleEnabled(enabled bool, announce bool) {
+	autoPaddleEnabled = enabled
+	resetAutoPaddleHitPlan()
+	if enabled && waitingForStart && !gameOver {
+		waitingForStart = false
+		paused = false
+	}
+	leftPressed = false
+	rightPressed = false
+	mobileLeftHeld = false
+	mobileRightHeld = false
+	touchControlActive = false
+	mouseControlActive = false
+	gamepadAxisX = 0
+	paddle.vx = 0
+	resetPaddleSpinHistory()
+	refreshAutoPaddleControl()
+	if announce {
+		if enabled {
+			showStatus("Auto paddle ON", 2.0)
+		} else {
+			showStatus("Auto paddle OFF", 2.0)
+		}
+	}
+}
+
+func toggleAutoPaddle() {
+	setAutoPaddleEnabled(!autoPaddleEnabled, true)
+}
+
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
@@ -6124,7 +6412,9 @@ func update(dt float64) {
 		}
 	}
 
-	if gamepadAxisX != 0 {
+	if autoPaddleEnabled {
+		applyAutoPaddleControl(dt)
+	} else if gamepadAxisX != 0 {
 		// Analog joystick movement is immediate and proportional to stick travel.
 		// The resulting paddle velocity continues through the normal spin history.
 		paddle.vx = gamepadAxisX * defaultDigitalPaddleMaxSpeed
@@ -6360,6 +6650,7 @@ func resetBalls() {
 	mousePaddleTargetX = paddle.x
 	clearLastPaddleSpinDebug()
 	clearLastCollisionDebug()
+	resetAutoPaddleHitPlan()
 	syncRenderInterpolation()
 }
 
@@ -6746,6 +7037,10 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return formatConfigFloat(paddleWidth), formatConfigFloat(defaultPaddleWidth), "float", true
 	case "paddleHeight":
 		return formatConfigFloat(paddleHeight), formatConfigFloat(defaultPaddleHeight), "float", true
+	case "autoPaddleHitVariation":
+		return formatConfigFloat(autoPaddleHitVariation), formatConfigFloat(defaultAutoPaddleHitVariation), "float", true
+	case "debrisLifetimeVariationPercent":
+		return formatConfigFloat(debrisLifetimeVariationPercent), formatConfigFloat(defaultDebrisLifetimeVariationPercent), "float", true
 	default:
 		return "", "", "", false
 	}
@@ -6851,8 +7146,15 @@ func physicsOverlayLines() []string {
 		rescueGate = "OK"
 	}
 
+	autoPaddleState := "OFF"
+	if autoPaddleEnabled {
+		autoPaddleState = "ON"
+	}
+
 	lines := []string{
 		"BUILD " + buildID,
+		"AUTO PADDLE        " + autoPaddleState,
+		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / ±%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
 		"PHYSICS FIXED STEP " + fmt.Sprintf("%.0f Hz / %.3f ms", physicsStepHz, physicsStepSeconds*1000),
 		"MAX TRAVEL / TICK  " + fmt.Sprintf("%.2f px", physicsConfig.maxSpeed*physicsStepSeconds),
 		"PHYSICS ACTUAL     " + fmt.Sprintf("%.1f Hz", physicsStepRateCurrent),
@@ -7029,6 +7331,400 @@ func setStyle(element js.Value, property, value string) {
 	element.Get("style").Set(property, value)
 }
 
+func formatAutoPaddleSliderValue(spec autoPaddleSliderSpec, value float64) string {
+	return strconv.FormatFloat(value, 'f', spec.precision, 64)
+}
+
+func autoPaddleEditorValue(key string) float64 {
+	switch key {
+	case "autoPaddleHitVariation":
+		return autoPaddleHitVariation
+	}
+	return 0
+}
+
+func defaultAutoPaddleEditorValue(key string) float64 {
+	switch key {
+	case "autoPaddleHitVariation":
+		return defaultAutoPaddleHitVariation
+	}
+	return 0
+}
+
+func applyAutoPaddleEditorValue(spec autoPaddleSliderSpec, value float64) {
+	value = clampFloat(value, spec.min, spec.max)
+	switch spec.key {
+	case "autoPaddleHitVariation":
+		autoPaddleHitVariation = value
+		resetAutoPaddleHitPlan()
+	}
+	refreshAutoPaddleEditorControls()
+}
+
+func refreshAutoPaddleEditorControls() {
+	for _, spec := range autoPaddleEditorSliderSpecs {
+		input, inputOK := physicsEditorInputs[spec.key]
+		label, labelOK := physicsEditorValueLabels[spec.key]
+		if !inputOK || !labelOK || input.IsUndefined() || input.IsNull() {
+			continue
+		}
+		value := autoPaddleEditorValue(spec.key)
+		text := formatAutoPaddleSliderValue(spec, value)
+		input.Set("value", text)
+		label.Set("textContent", text)
+	}
+}
+
+func formatDebrisSliderValue(spec debrisSliderSpec, value float64) string {
+	return strconv.FormatFloat(value, 'f', spec.precision, 64)
+}
+
+func debrisEditorValue(key string) float64 {
+	switch key {
+	case "debrisPiecesMin":
+		return float64(debrisPiecesMin)
+	case "debrisPiecesMax":
+		return float64(debrisPiecesMax)
+	case "debrisMaxActivePieces":
+		return float64(debrisMaxActivePieces)
+	case "debrisLifetime":
+		return debrisLifetime
+	case "debrisLifetimeVariationPercent":
+		return debrisLifetimeVariationPercent
+	case "debrisFadeDuration":
+		return debrisFadeDuration
+	case "debrisStartOpacity":
+		return debrisStartOpacity
+	case "debrisStartOpacityVariation":
+		return debrisStartOpacityVariation
+	case "debrisFlashDuration":
+		return debrisFlashDuration
+	case "debrisFlashOpacity":
+		return debrisFlashOpacity
+	case "debrisImpactSpeedFactor":
+		return debrisImpactSpeedFactor
+	case "debrisBallPieceChance":
+		return debrisBallPieceChance
+	case "debrisSliverPieceChance":
+		return debrisSliverPieceChance
+	case "debrisMaxChunkAspectRatio":
+		return debrisMaxChunkAspectRatio
+	case "debrisSizeScale":
+		return debrisSizeScale
+	case "debrisBrickCollisionDelay":
+		return debrisBrickCollisionDelay
+	case "debrisGravityScale":
+		return debrisGravityScale
+	case "debrisAirDrag":
+		return debrisAirDrag
+	case "debrisRestitution":
+		return debrisRestitution
+	case "debrisFriction":
+		return debrisFriction
+	case "debrisExplosionSpeedMin":
+		return debrisExplosionSpeedMin
+	case "debrisExplosionSpeedMax":
+		return debrisExplosionSpeedMax
+	case "debrisAngularSpeedMin":
+		return debrisAngularSpeedMin
+	case "debrisAngularSpeedMax":
+		return debrisAngularSpeedMax
+	case "debrisAngularDrag":
+		return debrisAngularDrag
+	case "debrisAngularStopSpeed":
+		return debrisAngularStopSpeed
+	case "debrisBallInfluence":
+		return debrisBallInfluence
+	case "debrisFieldScale":
+		return debrisFieldScale
+	case "debrisMagnetScale":
+		return debrisMagnetScale
+	case "debrisMaxSpeed":
+		return debrisMaxSpeed
+	case "debrisOffscreenMargin":
+		return debrisOffscreenMargin
+	}
+	return 0
+}
+
+func setDebrisEditorRawValue(key string, value float64) {
+	switch key {
+	case "debrisPiecesMin":
+		debrisPiecesMin = int(math.Round(value))
+	case "debrisPiecesMax":
+		debrisPiecesMax = int(math.Round(value))
+	case "debrisMaxActivePieces":
+		debrisMaxActivePieces = int(math.Round(value))
+	case "debrisLifetime":
+		debrisLifetime = value
+	case "debrisLifetimeVariationPercent":
+		debrisLifetimeVariationPercent = value
+	case "debrisFadeDuration":
+		debrisFadeDuration = value
+	case "debrisStartOpacity":
+		debrisStartOpacity = value
+	case "debrisStartOpacityVariation":
+		debrisStartOpacityVariation = value
+	case "debrisFlashDuration":
+		debrisFlashDuration = value
+	case "debrisFlashOpacity":
+		debrisFlashOpacity = value
+	case "debrisImpactSpeedFactor":
+		debrisImpactSpeedFactor = value
+	case "debrisBallPieceChance":
+		debrisBallPieceChance = value
+	case "debrisSliverPieceChance":
+		debrisSliverPieceChance = value
+	case "debrisMaxChunkAspectRatio":
+		debrisMaxChunkAspectRatio = value
+	case "debrisSizeScale":
+		debrisSizeScale = value
+	case "debrisBrickCollisionDelay":
+		debrisBrickCollisionDelay = value
+	case "debrisGravityScale":
+		debrisGravityScale = value
+	case "debrisAirDrag":
+		debrisAirDrag = value
+	case "debrisRestitution":
+		debrisRestitution = value
+	case "debrisFriction":
+		debrisFriction = value
+	case "debrisExplosionSpeedMin":
+		debrisExplosionSpeedMin = value
+	case "debrisExplosionSpeedMax":
+		debrisExplosionSpeedMax = value
+	case "debrisAngularSpeedMin":
+		debrisAngularSpeedMin = value
+	case "debrisAngularSpeedMax":
+		debrisAngularSpeedMax = value
+	case "debrisAngularDrag":
+		debrisAngularDrag = value
+	case "debrisAngularStopSpeed":
+		debrisAngularStopSpeed = value
+	case "debrisBallInfluence":
+		debrisBallInfluence = value
+	case "debrisFieldScale":
+		debrisFieldScale = value
+	case "debrisMagnetScale":
+		debrisMagnetScale = value
+	case "debrisMaxSpeed":
+		debrisMaxSpeed = value
+	case "debrisOffscreenMargin":
+		debrisOffscreenMargin = value
+	}
+}
+
+func captureDebrisEditorSnapshot() debrisEditorSnapshot {
+	values := make(map[string]float64, len(debrisEditorSliderSpecs))
+	for _, spec := range debrisEditorSliderSpecs {
+		values[spec.key] = debrisEditorValue(spec.key)
+	}
+	return debrisEditorSnapshot{enabled: debrisEnabled, values: values}
+}
+
+func defaultDebrisEditorValue(key string) float64 {
+	switch key {
+	case "debrisPiecesMin":
+		return float64(defaultDebrisPiecesMin)
+	case "debrisPiecesMax":
+		return float64(defaultDebrisPiecesMax)
+	case "debrisMaxActivePieces":
+		return float64(defaultDebrisMaxActivePieces)
+	case "debrisLifetime":
+		return defaultDebrisLifetime
+	case "debrisLifetimeVariationPercent":
+		return defaultDebrisLifetimeVariationPercent
+	case "debrisFadeDuration":
+		return defaultDebrisFadeDuration
+	case "debrisStartOpacity":
+		return defaultDebrisStartOpacity
+	case "debrisStartOpacityVariation":
+		return defaultDebrisStartOpacityVariation
+	case "debrisFlashDuration":
+		return defaultDebrisFlashDuration
+	case "debrisFlashOpacity":
+		return defaultDebrisFlashOpacity
+	case "debrisImpactSpeedFactor":
+		return defaultDebrisImpactSpeedFactor
+	case "debrisBallPieceChance":
+		return defaultDebrisBallPieceChance
+	case "debrisSliverPieceChance":
+		return defaultDebrisSliverPieceChance
+	case "debrisMaxChunkAspectRatio":
+		return defaultDebrisMaxChunkAspectRatio
+	case "debrisSizeScale":
+		return defaultDebrisSizeScale
+	case "debrisBrickCollisionDelay":
+		return defaultDebrisBrickCollisionDelay
+	case "debrisGravityScale":
+		return defaultDebrisGravityScale
+	case "debrisAirDrag":
+		return defaultDebrisAirDrag
+	case "debrisRestitution":
+		return defaultDebrisRestitution
+	case "debrisFriction":
+		return defaultDebrisFriction
+	case "debrisExplosionSpeedMin":
+		return defaultDebrisExplosionSpeedMin
+	case "debrisExplosionSpeedMax":
+		return defaultDebrisExplosionSpeedMax
+	case "debrisAngularSpeedMin":
+		return defaultDebrisAngularSpeedMin
+	case "debrisAngularSpeedMax":
+		return defaultDebrisAngularSpeedMax
+	case "debrisAngularDrag":
+		return defaultDebrisAngularDrag
+	case "debrisAngularStopSpeed":
+		return defaultDebrisAngularStopSpeed
+	case "debrisBallInfluence":
+		return defaultDebrisBallInfluence
+	case "debrisFieldScale":
+		return defaultDebrisFieldScale
+	case "debrisMagnetScale":
+		return defaultDebrisMagnetScale
+	case "debrisMaxSpeed":
+		return defaultDebrisMaxSpeed
+	case "debrisOffscreenMargin":
+		return defaultDebrisOffscreenMargin
+	}
+	return 0
+}
+
+func defaultDebrisEditorSnapshot() debrisEditorSnapshot {
+	values := make(map[string]float64, len(debrisEditorSliderSpecs))
+	for _, spec := range debrisEditorSliderSpecs {
+		values[spec.key] = defaultDebrisEditorValue(spec.key)
+	}
+	return debrisEditorSnapshot{enabled: defaultDebrisEnabled, values: values}
+}
+
+func applyDebrisEditorSnapshot(snapshot debrisEditorSnapshot) {
+	oldLifetime := debrisLifetime
+	oldOpacity := debrisStartOpacity
+	oldSize := debrisSizeScale
+	debrisEnabled = snapshot.enabled
+	for _, spec := range debrisEditorSliderSpecs {
+		if value, ok := snapshot.values[spec.key]; ok {
+			setDebrisEditorRawValue(spec.key, value)
+		}
+	}
+	normalizeDebrisSettings()
+	if !debrisEnabled {
+		brickDebris = brickDebris[:0]
+		return
+	}
+	if oldLifetime > 0 && debrisLifetime != oldLifetime {
+		for i := range brickDebris {
+			progress := clampFloat(brickDebris[i].age/brickDebris[i].lifetime, 0, 0.999)
+			variation := brickDebris[i].lifetime / oldLifetime
+			brickDebris[i].lifetime = math.Max(0.05, debrisLifetime*variation)
+			brickDebris[i].age = progress * brickDebris[i].lifetime
+		}
+	}
+	if debrisStartOpacity != oldOpacity {
+		delta := debrisStartOpacity - oldOpacity
+		for i := range brickDebris {
+			brickDebris[i].startOpacity = clampFloat(brickDebris[i].startOpacity+delta, 0, 1)
+		}
+	}
+	if oldSize > 0 && debrisSizeScale != oldSize {
+		ratio := debrisSizeScale / oldSize
+		for i := range brickDebris {
+			for point := 0; point < brickDebris[i].pointCount; point++ {
+				brickDebris[i].points[point*2] *= ratio
+				brickDebris[i].points[point*2+1] *= ratio
+			}
+			brickDebris[i].radius *= ratio
+			brickDebris[i].mass *= ratio * ratio
+		}
+	}
+	for i := range brickDebris {
+		speed := math.Hypot(brickDebris[i].vx, brickDebris[i].vy)
+		if debrisMaxSpeed > 0 && speed > debrisMaxSpeed {
+			scale := debrisMaxSpeed / speed
+			brickDebris[i].vx *= scale
+			brickDebris[i].vy *= scale
+		}
+		brickDebris[i].omega = clampFloat(brickDebris[i].omega, -debrisAngularSpeedMax, debrisAngularSpeedMax)
+	}
+	if len(brickDebris) > debrisMaxActivePieces {
+		brickDebris = brickDebris[len(brickDebris)-debrisMaxActivePieces:]
+	}
+}
+
+func refreshDebrisEditorControls() {
+	if !physicsEditorDebrisCheckbox.IsUndefined() && !physicsEditorDebrisCheckbox.IsNull() {
+		physicsEditorDebrisCheckbox.Set("checked", debrisEnabled)
+	}
+	for _, spec := range debrisEditorSliderSpecs {
+		input, inputOK := physicsEditorInputs[spec.key]
+		label, labelOK := physicsEditorValueLabels[spec.key]
+		if !inputOK || !labelOK || input.IsUndefined() || input.IsNull() {
+			continue
+		}
+		value := debrisEditorValue(spec.key)
+		text := formatDebrisSliderValue(spec, value)
+		input.Set("value", text)
+		label.Set("textContent", text)
+	}
+}
+
+func applyDebrisEditorValue(spec debrisSliderSpec, value float64) {
+	value = clampFloat(value, spec.min, spec.max)
+	oldLifetime := debrisLifetime
+	oldOpacity := debrisStartOpacity
+	oldSize := debrisSizeScale
+	setDebrisEditorRawValue(spec.key, value)
+	normalizeDebrisSettings()
+
+	switch spec.key {
+	case "debrisLifetime":
+		if oldLifetime > 0 {
+			for i := range brickDebris {
+				progress := clampFloat(brickDebris[i].age/brickDebris[i].lifetime, 0, 0.999)
+				variation := brickDebris[i].lifetime / oldLifetime
+				brickDebris[i].lifetime = math.Max(0.05, debrisLifetime*variation)
+				brickDebris[i].age = progress * brickDebris[i].lifetime
+			}
+		}
+	case "debrisStartOpacity":
+		delta := debrisStartOpacity - oldOpacity
+		for i := range brickDebris {
+			brickDebris[i].startOpacity = clampFloat(brickDebris[i].startOpacity+delta, 0, 1)
+		}
+	case "debrisSizeScale":
+		if oldSize > 0 {
+			ratio := debrisSizeScale / oldSize
+			for i := range brickDebris {
+				for p := 0; p < brickDebris[i].pointCount; p++ {
+					brickDebris[i].points[p*2] *= ratio
+					brickDebris[i].points[p*2+1] *= ratio
+				}
+				brickDebris[i].radius *= ratio
+				brickDebris[i].mass *= ratio * ratio
+			}
+		}
+	case "debrisMaxSpeed":
+		for i := range brickDebris {
+			speed := math.Hypot(brickDebris[i].vx, brickDebris[i].vy)
+			if debrisMaxSpeed > 0 && speed > debrisMaxSpeed {
+				scale := debrisMaxSpeed / speed
+				brickDebris[i].vx *= scale
+				brickDebris[i].vy *= scale
+			}
+		}
+	case "debrisAngularSpeedMax":
+		for i := range brickDebris {
+			brickDebris[i].omega = clampFloat(brickDebris[i].omega, -debrisAngularSpeedMax, debrisAngularSpeedMax)
+		}
+	case "debrisMaxActivePieces":
+		if len(brickDebris) > debrisMaxActivePieces {
+			brickDebris = brickDebris[len(brickDebris)-debrisMaxActivePieces:]
+		}
+	}
+	refreshDebrisEditorControls()
+}
+
 func formatPhysicsSliderValue(spec physicsSliderSpec, value float64) string {
 	return strconv.FormatFloat(value, 'f', spec.precision, 64)
 }
@@ -7048,6 +7744,12 @@ func refreshPhysicsEditorControls() {
 		text := formatPhysicsSliderValue(spec, value)
 		input.Set("value", text)
 		label.Set("textContent", text)
+	}
+	refreshDebrisEditorControls()
+	refreshAutoPaddleEditorControls()
+	refreshAutoPaddleControl()
+	if !physicsEditorLiveCheckbox.IsUndefined() && !physicsEditorLiveCheckbox.IsNull() {
+		physicsEditorLiveCheckbox.Set("checked", physicsEditorLiveSimulation)
 	}
 }
 
@@ -7077,19 +7779,33 @@ func applyPhysicsEditorValue(spec physicsSliderSpec, value float64) {
 }
 
 func physicsEditorLevelText() string {
-	lines := make([]string, 0, len(physicsEditorSliderSpecs))
+	lines := make([]string, 0, len(autoPaddleEditorSliderSpecs)+len(physicsEditorSliderSpecs)+len(debrisEditorSliderSpecs)+1)
+	for _, spec := range autoPaddleEditorSliderSpecs {
+		lines = append(lines, spec.key+"="+formatAutoPaddleSliderValue(spec, autoPaddleEditorValue(spec.key)))
+	}
 	for _, spec := range physicsEditorSliderSpecs {
 		value := physicsEditorSpecValue(spec)
 		lines = append(lines, spec.key+"="+formatPhysicsSliderValue(spec, value))
+	}
+	lines = append(lines, "debris="+strconv.FormatBool(debrisEnabled))
+	for _, spec := range debrisEditorSliderSpecs {
+		lines = append(lines, spec.key+"="+formatDebrisSliderValue(spec, debrisEditorValue(spec.key)))
 	}
 	return strings.Join(lines, "\n")
 }
 
 func physicsEditorConfigText() string {
-	lines := []string{"// Physics values copied from the in-game E panel."}
+	lines := []string{"// Auto-paddle, physics and debris values copied from the in-game E panel."}
+	for _, spec := range autoPaddleEditorSliderSpecs {
+		lines = append(lines, spec.configName+" = "+formatAutoPaddleSliderValue(spec, autoPaddleEditorValue(spec.key)))
+	}
 	for _, spec := range physicsEditorSliderSpecs {
 		value := physicsEditorSpecValue(spec)
 		lines = append(lines, spec.configName+" = "+formatPhysicsSliderValue(spec, value))
+	}
+	lines = append(lines, "defaultDebrisEnabled = "+strconv.FormatBool(debrisEnabled))
+	for _, spec := range debrisEditorSliderSpecs {
+		lines = append(lines, spec.configName+" = "+formatDebrisSliderValue(spec, debrisEditorValue(spec.key)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -7110,8 +7826,11 @@ func physicsEditorClipboardText() string {
 	}
 }
 
-func resetPhysicsEditorTo(settings physicsSettings) {
+func resetPhysicsEditorTo(settings physicsSettings, debris debrisEditorSnapshot, autoHitVariation float64) {
 	physicsConfig = settings
+	applyDebrisEditorSnapshot(debris)
+	autoPaddleHitVariation = clampFloat(autoHitVariation, 0, 0.90)
+	resetAutoPaddleHitPlan()
 	refreshCurrentGravity()
 	ball.omega = clampFloat(ball.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
 	secondBall.omega = clampFloat(secondBall.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
@@ -7141,6 +7860,41 @@ func createPhysicsEditorButton(text string, handler func()) js.Value {
 	return button
 }
 
+func createPhysicsEditorCheckbox(labelText string, initial bool, handler func(bool)) js.Value {
+	label := doc.Call("createElement", "label")
+	setStyle(label, "display", "inline-flex")
+	setStyle(label, "alignItems", "center")
+	setStyle(label, "gap", "7px")
+	setStyle(label, "fontSize", "13px")
+	setStyle(label, "cursor", "pointer")
+	input := doc.Call("createElement", "input")
+	input.Set("type", "checkbox")
+	input.Set("checked", initial)
+	label.Call("appendChild", input)
+	text := doc.Call("createElement", "span")
+	text.Set("textContent", labelText)
+	label.Call("appendChild", text)
+	callback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		handler(input.Get("checked").Bool())
+		return nil
+	})
+	keepPhysicsEditorCallback(callback)
+	input.Call("addEventListener", "change", callback)
+	return label
+}
+
+func appendPhysicsEditorGroup(panel js.Value, titleText string) {
+	group := doc.Call("createElement", "div")
+	group.Set("textContent", titleText)
+	setStyle(group, "margin", "15px 0 7px")
+	setStyle(group, "paddingBottom", "4px")
+	setStyle(group, "borderBottom", "1px solid rgba(255,255,255,0.18)")
+	setStyle(group, "fontSize", "14px")
+	setStyle(group, "fontWeight", "700")
+	setStyle(group, "letterSpacing", "0.04em")
+	panel.Call("appendChild", group)
+}
+
 func ensurePhysicsEditorPanel() {
 	if !physicsEditorPanel.IsUndefined() && !physicsEditorPanel.IsNull() {
 		return
@@ -7149,11 +7903,10 @@ func ensurePhysicsEditorPanel() {
 	panel := doc.Call("createElement", "div")
 	panel.Set("id", "breakoutPhysicsEditor")
 	setStyle(panel, "position", "fixed")
-	setStyle(panel, "left", "50%")
-	setStyle(panel, "top", "50%")
-	setStyle(panel, "transform", "translate(-50%, -50%)")
-	setStyle(panel, "width", "min(760px, 92vw)")
-	setStyle(panel, "maxHeight", "88vh")
+	setStyle(panel, "right", "12px")
+	setStyle(panel, "top", "12px")
+	setStyle(panel, "width", "min(640px, 94vw)")
+	setStyle(panel, "maxHeight", "calc(100vh - 24px)")
 	setStyle(panel, "overflowY", "auto")
 	setStyle(panel, "boxSizing", "border-box")
 	setStyle(panel, "padding", "18px 20px")
@@ -7173,20 +7926,20 @@ func ensurePhysicsEditorPanel() {
 	setStyle(header, "gap", "16px")
 
 	title := doc.Call("createElement", "div")
-	title.Set("textContent", "PHYSICS TUNER")
+	title.Set("textContent", "PHYSICS + DEBRIS TUNER")
 	setStyle(title, "fontSize", "23px")
 	setStyle(title, "fontWeight", "700")
 	header.Call("appendChild", title)
 
 	hint := doc.Call("createElement", "div")
-	hint.Set("textContent", "E closes + copies")
+	hint.Set("textContent", "E closes + copies · O auto paddle")
 	setStyle(hint, "fontSize", "13px")
 	setStyle(hint, "opacity", "0.70")
 	header.Call("appendChild", hint)
 	panel.Call("appendChild", header)
 
 	description := doc.Call("createElement", "div")
-	description.Set("textContent", "Game paused. Changes apply immediately when play resumes.")
+	description.Set("textContent", "Live tuning: run or freeze the game, vary automatic paddle hits, and adjust debris while watching it.")
 	setStyle(description, "margin", "7px 0 14px")
 	setStyle(description, "fontSize", "13px")
 	setStyle(description, "opacity", "0.78")
@@ -7220,13 +7973,98 @@ func ensurePhysicsEditorPanel() {
 	toolbar.Call("appendChild", selectElement)
 
 	toolbar.Call("appendChild", createPhysicsEditorButton("Opening values", func() {
-		resetPhysicsEditorTo(physicsEditorOpeningConfig)
+		resetPhysicsEditorTo(
+			physicsEditorOpeningConfig,
+			physicsEditorOpeningDebris,
+			physicsEditorOpeningAutoHitVariation,
+		)
 	}))
 	toolbar.Call("appendChild", createPhysicsEditorButton("Built-in defaults", func() {
-		resetPhysicsEditorTo(defaultPhysicsSettings())
+		resetPhysicsEditorTo(
+			defaultPhysicsSettings(),
+			defaultDebrisEditorSnapshot(),
+			defaultAutoPaddleHitVariation,
+		)
 	}))
 	panel.Call("appendChild", toolbar)
 
+	modeRow := doc.Call("createElement", "div")
+	setStyle(modeRow, "display", "flex")
+	setStyle(modeRow, "flexWrap", "wrap")
+	setStyle(modeRow, "gap", "18px")
+	setStyle(modeRow, "padding", "12px 0 2px")
+	liveLabel := createPhysicsEditorCheckbox("Live simulation", physicsEditorLiveSimulation, func(enabled bool) {
+		physicsEditorLiveSimulation = enabled
+		paused = !enabled
+		if enabled {
+			syncRenderInterpolation()
+		}
+	})
+	physicsEditorLiveCheckbox = liveLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", liveLabel)
+	autoLabel := createPhysicsEditorCheckbox("Auto paddle (O)", autoPaddleEnabled, func(enabled bool) {
+		setAutoPaddleEnabled(enabled, true)
+	})
+	physicsEditorAutoPaddleCheck = autoLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", autoLabel)
+	debrisLabel := createPhysicsEditorCheckbox("Debris enabled", debrisEnabled, func(enabled bool) {
+		debrisEnabled = enabled
+		if !enabled {
+			brickDebris = brickDebris[:0]
+		}
+		refreshDebrisEditorControls()
+	})
+	physicsEditorDebrisCheckbox = debrisLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", debrisLabel)
+	panel.Call("appendChild", modeRow)
+
+	appendPhysicsEditorGroup(panel, "AUTO PADDLE")
+	lastAutoGroup := ""
+	for _, spec := range autoPaddleEditorSliderSpecs {
+		specCopy := spec
+		if spec.group != lastAutoGroup {
+			appendPhysicsEditorGroup(panel, spec.group)
+			lastAutoGroup = spec.group
+		}
+		row := doc.Call("createElement", "label")
+		setStyle(row, "display", "grid")
+		setStyle(row, "gridTemplateColumns", "minmax(220px, 1fr) minmax(220px, 2fr) 82px")
+		setStyle(row, "alignItems", "center")
+		setStyle(row, "gap", "12px")
+		setStyle(row, "padding", "5px 0")
+		name := doc.Call("createElement", "span")
+		name.Set("textContent", spec.label)
+		setStyle(name, "fontSize", "13px")
+		row.Call("appendChild", name)
+		input := doc.Call("createElement", "input")
+		input.Set("type", "range")
+		input.Set("min", formatConfigFloat(spec.min))
+		input.Set("max", formatConfigFloat(spec.max))
+		input.Set("step", formatConfigFloat(spec.step))
+		setStyle(input, "width", "100%")
+		physicsEditorInputs[spec.key] = input
+		row.Call("appendChild", input)
+		valueLabel := doc.Call("createElement", "span")
+		setStyle(valueLabel, "textAlign", "right")
+		setStyle(valueLabel, "fontVariantNumeric", "tabular-nums")
+		setStyle(valueLabel, "fontSize", "13px")
+		physicsEditorValueLabels[spec.key] = valueLabel
+		row.Call("appendChild", valueLabel)
+		callback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			value, err := strconv.ParseFloat(input.Get("value").String(), 64)
+			if err != nil {
+				return nil
+			}
+			applyAutoPaddleEditorValue(specCopy, value)
+			valueLabel.Set("textContent", formatAutoPaddleSliderValue(specCopy, autoPaddleEditorValue(specCopy.key)))
+			return nil
+		})
+		keepPhysicsEditorCallback(callback)
+		input.Call("addEventListener", "input", callback)
+		panel.Call("appendChild", row)
+	}
+
+	appendPhysicsEditorGroup(panel, "BALL PHYSICS")
 	lastGroup := ""
 	for _, spec := range physicsEditorSliderSpecs {
 		specCopy := spec
@@ -7285,6 +8123,52 @@ func ensurePhysicsEditorPanel() {
 		panel.Call("appendChild", row)
 	}
 
+	appendPhysicsEditorGroup(panel, "DEBRIS")
+	lastDebrisGroup := ""
+	for _, spec := range debrisEditorSliderSpecs {
+		specCopy := spec
+		if spec.group != lastDebrisGroup {
+			appendPhysicsEditorGroup(panel, spec.group)
+			lastDebrisGroup = spec.group
+		}
+		row := doc.Call("createElement", "label")
+		setStyle(row, "display", "grid")
+		setStyle(row, "gridTemplateColumns", "minmax(220px, 1fr) minmax(220px, 2fr) 82px")
+		setStyle(row, "alignItems", "center")
+		setStyle(row, "gap", "12px")
+		setStyle(row, "padding", "5px 0")
+		name := doc.Call("createElement", "span")
+		name.Set("textContent", spec.label)
+		setStyle(name, "fontSize", "13px")
+		row.Call("appendChild", name)
+		input := doc.Call("createElement", "input")
+		input.Set("type", "range")
+		input.Set("min", formatConfigFloat(spec.min))
+		input.Set("max", formatConfigFloat(spec.max))
+		input.Set("step", formatConfigFloat(spec.step))
+		setStyle(input, "width", "100%")
+		physicsEditorInputs[spec.key] = input
+		row.Call("appendChild", input)
+		valueLabel := doc.Call("createElement", "span")
+		setStyle(valueLabel, "textAlign", "right")
+		setStyle(valueLabel, "fontVariantNumeric", "tabular-nums")
+		setStyle(valueLabel, "fontSize", "13px")
+		physicsEditorValueLabels[spec.key] = valueLabel
+		row.Call("appendChild", valueLabel)
+		callback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+			value, err := strconv.ParseFloat(input.Get("value").String(), 64)
+			if err != nil {
+				return nil
+			}
+			applyDebrisEditorValue(specCopy, value)
+			valueLabel.Set("textContent", formatDebrisSliderValue(specCopy, debrisEditorValue(specCopy.key)))
+			return nil
+		})
+		keepPhysicsEditorCallback(callback)
+		input.Call("addEventListener", "input", callback)
+		panel.Call("appendChild", row)
+	}
+
 	closeRow := doc.Call("createElement", "div")
 	setStyle(closeRow, "display", "flex")
 	setStyle(closeRow, "justifyContent", "flex-end")
@@ -7305,9 +8189,11 @@ func openPhysicsEditor() {
 	}
 	ensurePhysicsEditorPanel()
 	physicsEditorPreviousPaused = paused
+	physicsEditorLiveSimulation = !paused
 	physicsEditorOpeningConfig = physicsConfig
+	physicsEditorOpeningDebris = captureDebrisEditorSnapshot()
+	physicsEditorOpeningAutoHitVariation = autoPaddleHitVariation
 	physicsEditorVisible = true
-	paused = true
 	leftPressed = false
 	rightPressed = false
 	mobileLeftHeld = false
@@ -7338,7 +8224,7 @@ func closePhysicsEditor() {
 	resetPaddleSpinHistory()
 	syncRenderInterpolation()
 	if copyTextToClipboard(text) {
-		showStatus("Physics settings copied", 2.0)
+		showStatus("Physics + debris settings copied", 2.0)
 	} else {
 		showStatus("Clipboard unavailable", 2.0)
 	}
@@ -7884,10 +8770,14 @@ func setupInput() {
 		// asynchronous, so this path never waits for a sample.
 		unlockAudioFromGesture()
 
-		// E opens the interactive physics tuner. The tuner forces the game into a
-		// paused state and consumes all other game keys until E closes it again.
+		// E opens the live physics/debris tuner. It preserves the current pause state;
+		// the panel itself can run/freeze the simulation.
 		if (key == "e" || key == "E") && !e.Get("repeat").Bool() {
 			togglePhysicsEditor()
+			return nil
+		}
+		if (key == "o" || key == "O") && !e.Get("repeat").Bool() && targetTag != "select" && targetTag != "button" {
+			toggleAutoPaddle()
 			return nil
 		}
 		if physicsEditorVisible {

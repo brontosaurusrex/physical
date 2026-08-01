@@ -79,37 +79,46 @@ scheduling or global presentation rather than one level's physical behavior:
   high-spin message settings
   wall noise IDs
 
+AUTOMATIC INSPECTION PADDLE
+---------------------------
+
+  autoPaddleHitVariation=0.65 # 0=center only; max 0.90
+
 DYNAMIC BRICK DEBRIS
 --------------------
 These are separate gameplay/fragment settings rather than ball physics fields:
 
   debris=true
-  debrisPiecesMin=5
-  debrisPiecesMax=24
-  debrisLifetime=7
+  debrisPiecesMin=2
+  debrisPiecesMax=16
+  debrisLifetime=9
+  debrisLifetimeVariationPercent=16.7 # random +/- percent for new pieces
   debrisFadeDuration=3
-  debrisStartOpacity=0.70          # settled base, 0..1
-  debrisStartOpacityVariation=0.10 # random +/- range, 0..1
+  debrisStartOpacity=0.35          # settled base, 0..1
+  debrisStartOpacityVariation=0.25 # random +/- range, 0..1
   debrisFlashDuration=0.10         # bright opening transition in seconds
   debrisFlashOpacity=1.00          # opening opacity, 0..1
   debrisImpactSpeedFactor=0.35     # impact speed added to launch energy
   debrisBallPieceChance=0.18       # true circular pieces, 0..1
   debrisSliverPieceChance=0.015     # deliberate thin pieces, 0..1
   debrisMaxChunkAspectRatio=1.45    # compact non-sliver shapes, >=1
-  debrisBrickCollisionDelay=0.15
+  debrisSizeScale=1.35               # draw/collision size multiplier, 0.25..3
+  debrisBrickCollisionDelay=0.25
   debrisGravityScale=0.7
   debrisAirDrag=0.15
   debrisRestitution=0.48
-  debrisFriction=1.24
+  debrisFriction=1.00
   debrisExplosionSpeedMin=150
   debrisExplosionSpeedMax=1200
   debrisAngularSpeedMin=2
-  debrisAngularSpeedMax=90
+  debrisAngularSpeedMax=6
+  debrisAngularDrag=1.10             # exponential rotational damping, >=0
+  debrisAngularStopSpeed=0.10        # snap omega to zero below this, >=0
   debrisBallInfluence=0.35
   debrisFieldScale=0.80
   debrisMagnetScale=0.65
   debrisMaxSpeed=1100
-  debrisMaxActivePieces=100
+  debrisMaxActivePieces=150
   debrisOffscreenMargin=120
 
 See BRICK_DEBRIS.txt for collision behavior and performance notes.
