@@ -299,6 +299,9 @@ var (
 	debrisFadeDuration          = defaultDebrisFadeDuration
 	debrisStartOpacity          = defaultDebrisStartOpacity
 	debrisStartOpacityVariation = defaultDebrisStartOpacityVariation
+	debrisFlashDuration         = defaultDebrisFlashDuration
+	debrisFlashOpacity          = defaultDebrisFlashOpacity
+	debrisImpactSpeedFactor     = defaultDebrisImpactSpeedFactor
 	debrisBallPieceChance       = defaultDebrisBallPieceChance
 	debrisSliverPieceChance     = defaultDebrisSliverPieceChance
 	debrisMaxChunkAspectRatio   = defaultDebrisMaxChunkAspectRatio
@@ -317,6 +320,16 @@ var (
 	debrisMaxSpeed              = defaultDebrisMaxSpeed
 	debrisMaxActivePieces       = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin       = defaultDebrisOffscreenMargin
+
+	ballRescueEnabled             = defaultBallRescueEnabled
+	ballRescueFailureLimit        = defaultBallRescueFailureLimit
+	ballRescueMinProgress         = defaultBallRescueMinProgress
+	ballRescueCheckDuration       = defaultBallRescueCheckDuration
+	ballRescueUpperScreenFraction = defaultBallRescueUpperScreenFraction
+	ballRescueClearance           = defaultBallRescueClearance
+	ballRescueLaunchSpeed         = defaultBallRescueLaunchSpeed
+	ballRescueMinRealtimePercent  = defaultBallRescueMinRealtimePercent
+	ballRescueMaxComputeLoad      = defaultBallRescueMaxComputeLoad
 
 	paused       bool
 	leftPressed  bool
@@ -402,6 +415,13 @@ type Ball struct {
 	orbitEscapeAxis      int
 	orbitEscapeDirection float64
 	orbitEscapeTimer     float64
+
+	rescueAttemptActive  bool
+	rescueAttemptAxis    int
+	rescueAttemptElapsed float64
+	rescueStartX         float64
+	rescueStartY         float64
+	rescueFailureCount   int
 }
 
 type statusMessage struct {
@@ -898,6 +918,7 @@ func activateFastOrbitEscape(b *Ball, axis int) {
 	b.orbitEscapeTimer = physicsConfig.orbitEscapeDuration
 	resetFastOrbitCandidate(b)
 	enforceFastOrbitEscape(b)
+	beginBallRescueAttempt(b, axis)
 	showStatusUnique("Orbital tilt!", physicsOrbitMessageDuration)
 }
 
@@ -950,6 +971,218 @@ func updateFastOrbitDetector(b *Ball, dt float64) {
 			b.orbitEscapeAxis = orbitAxisNone
 			b.orbitEscapeDirection = 0
 		}
+	}
+}
+
+func resetBallRescueState(b *Ball, resetFailures bool) {
+	if b == nil {
+		return
+	}
+	b.rescueAttemptActive = false
+	b.rescueAttemptAxis = orbitAxisNone
+	b.rescueAttemptElapsed = 0
+	b.rescueStartX = b.x
+	b.rescueStartY = b.y
+	if resetFailures {
+		b.rescueFailureCount = 0
+	}
+}
+
+func beginBallRescueAttempt(b *Ball, progressAxis int) {
+	if b == nil || !ballRescueEnabled || b.rescueAttemptActive {
+		return
+	}
+	b.rescueAttemptActive = true
+	b.rescueAttemptAxis = progressAxis
+	b.rescueAttemptElapsed = 0
+	b.rescueStartX = b.x
+	b.rescueStartY = b.y
+}
+
+func ballRescueAttemptProgress(b *Ball) float64 {
+	if b == nil || !b.rescueAttemptActive {
+		return 0
+	}
+	switch b.rescueAttemptAxis {
+	case orbitAxisVertical:
+		return math.Abs(b.x - b.rescueStartX)
+	case orbitAxisHorizontal:
+		return math.Abs(b.y - b.rescueStartY)
+	default:
+		return math.Hypot(b.x-b.rescueStartX, b.y-b.rescueStartY)
+	}
+}
+
+func ballRescuePerformanceHealthy() bool {
+	if physicsStepRateCurrent <= 0 || physicsRealtimePercent <= 0 {
+		return false
+	}
+	return physicsWarningTimer <= 0 &&
+		physicsRealtimePercent >= ballRescueMinRealtimePercent &&
+		physicsComputeLoad <= ballRescueMaxComputeLoad
+}
+
+func ballTeleportPositionClear(b *Ball, x, y, clearance float64) bool {
+	if b == nil {
+		return false
+	}
+	margin := b.r + math.Max(0, clearance)
+	if x < margin || x > canvasWidth-margin || y < margin || y > paddle.y-margin {
+		return false
+	}
+
+	for i := range bricks {
+		br := &bricks[i]
+		if !br.alive {
+			continue
+		}
+		closestX := clampFloat(x, br.x, br.x+br.w)
+		closestY := clampFloat(y, br.y, br.y+br.h)
+		dx := x - closestX
+		dy := y - closestY
+		if dx*dx+dy*dy < margin*margin {
+			return false
+		}
+	}
+
+	if secondBallActive {
+		other := &secondBall
+		if b == &secondBall {
+			other = &ball
+		}
+		minimumDistance := b.r + other.r + math.Max(0, clearance)
+		if math.Hypot(x-other.x, y-other.y) < minimumDistance {
+			return false
+		}
+	}
+
+	if blackHoleActive {
+		minimumDistance := math.Max(48, b.r+math.Max(0, clearance))
+		if math.Hypot(x-blackHoleX, y-blackHoleY) < minimumDistance {
+			return false
+		}
+	}
+	return true
+}
+
+func searchBallTeleportPosition(b *Ball, maximumY, clearance float64) (float64, float64, bool) {
+	if b == nil {
+		return 0, 0, false
+	}
+	minimumY := b.r + math.Max(12, clearance)
+	maximumY = math.Min(maximumY, paddle.y-b.r-math.Max(12, clearance))
+	if maximumY <= minimumY {
+		return 0, 0, false
+	}
+
+	const columns = 25
+	const rows = 14
+	centerColumn := columns / 2
+	for row := rows - 1; row >= 0; row-- {
+		y := minimumY + (float64(row)+0.5)/float64(rows)*(maximumY-minimumY)
+		for offset := 0; offset <= centerColumn; offset++ {
+			indices := []int{centerColumn + offset}
+			if offset > 0 {
+				indices = append(indices, centerColumn-offset)
+			}
+			for _, column := range indices {
+				if column < 0 || column >= columns {
+					continue
+				}
+				x := (float64(column) + 0.5) / float64(columns) * canvasWidth
+				if ballTeleportPositionClear(b, x, y, clearance) {
+					return x, y, true
+				}
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func safeBallTeleportPosition(b *Ball) (float64, float64, bool) {
+	upperLimit := canvasHeight * clampFloat(ballRescueUpperScreenFraction, 0.10, 0.90)
+	limits := []float64{upperLimit, canvasHeight * 0.55, paddle.y - b.r - 8}
+	clearances := []float64{ballRescueClearance, ballRescueClearance * 0.5, 0}
+	for _, maximumY := range limits {
+		for _, clearance := range clearances {
+			if x, y, ok := searchBallTeleportPosition(b, maximumY, clearance); ok {
+				return x, y, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func teleportBallToSafeArea(b *Ball, manual bool) bool {
+	if b == nil {
+		return false
+	}
+	x, y, found := safeBallTeleportPosition(b)
+	if !found {
+		showStatus("No safe teleport position", 1.5)
+		return false
+	}
+
+	speed := ballRescueLaunchSpeed
+	if speed <= 0 {
+		speed = math.Max(300, math.Hypot(startBallVx, startBallVy))
+	}
+	if physicsConfig.maxSpeed > 0 {
+		speed = math.Min(speed, physicsConfig.maxSpeed)
+	}
+	horizontalSpeed := speed * 0.35
+	direction := 1.0
+	if b.rescueFailureCount%2 != 0 || b == &secondBall {
+		direction = -1
+	}
+	verticalSpeed := math.Sqrt(math.Max(0, speed*speed-horizontalSpeed*horizontalSpeed))
+
+	b.x, b.y = x, y
+	b.vx = direction * horizontalSpeed
+	b.vy = verticalSpeed
+	b.omega *= 0.25
+	b.stuckTimer = 0
+	resetFastOrbitState(b)
+	resetBallRescueState(b, true)
+	syncRenderInterpolation()
+	if manual {
+		showStatus("Ball teleported (T)", 1.5)
+	} else if b == &secondBall {
+		showStatus("Ball 2 rescue teleport!", 2.0)
+	} else {
+		showStatus("Ball rescue teleport!", 2.0)
+	}
+	return true
+}
+
+func updateBallRescueAttempt(b *Ball, dt float64) {
+	if b == nil || !ballRescueEnabled {
+		resetBallRescueState(b, true)
+		return
+	}
+	if !b.rescueAttemptActive {
+		return
+	}
+	b.rescueAttemptElapsed += dt
+	if ballRescueAttemptProgress(b) >= ballRescueMinProgress {
+		resetBallRescueState(b, true)
+		return
+	}
+	if b.rescueAttemptElapsed < ballRescueCheckDuration {
+		return
+	}
+
+	if !ballRescuePerformanceHealthy() {
+		resetBallRescueState(b, false)
+		return
+	}
+
+	b.rescueAttemptActive = false
+	b.rescueAttemptAxis = orbitAxisNone
+	b.rescueAttemptElapsed = 0
+	b.rescueFailureCount++
+	if b.rescueFailureCount >= ballRescueFailureLimit {
+		teleportBallToSafeArea(b, false)
 	}
 }
 
@@ -1195,6 +1428,9 @@ func normalizeDebrisSettings() {
 	debrisFadeDuration = clampFloat(debrisFadeDuration, 0, debrisLifetime)
 	debrisStartOpacity = clampFloat(debrisStartOpacity, 0, 1)
 	debrisStartOpacityVariation = clampFloat(debrisStartOpacityVariation, 0, 1)
+	debrisFlashDuration = clampFloat(debrisFlashDuration, 0, debrisLifetime)
+	debrisFlashOpacity = clampFloat(debrisFlashOpacity, 0, 1)
+	debrisImpactSpeedFactor = math.Max(0, debrisImpactSpeedFactor)
 	debrisBallPieceChance = clampFloat(debrisBallPieceChance, 0, 1)
 	debrisSliverPieceChance = clampFloat(debrisSliverPieceChance, 0, 1)
 	specialShapeChance := debrisBallPieceChance + debrisSliverPieceChance
@@ -1227,6 +1463,19 @@ func normalizeDebrisSettings() {
 		debrisMaxActivePieces = 0
 	}
 	debrisOffscreenMargin = math.Max(0, debrisOffscreenMargin)
+}
+
+func normalizeBallRescueSettings() {
+	if ballRescueFailureLimit < 1 {
+		ballRescueFailureLimit = 1
+	}
+	ballRescueMinProgress = math.Max(0, ballRescueMinProgress)
+	ballRescueCheckDuration = math.Max(physicsStepSeconds, ballRescueCheckDuration)
+	ballRescueUpperScreenFraction = clampFloat(ballRescueUpperScreenFraction, 0.10, 0.90)
+	ballRescueClearance = math.Max(0, ballRescueClearance)
+	ballRescueLaunchSpeed = math.Max(0, ballRescueLaunchSpeed)
+	ballRescueMinRealtimePercent = clampFloat(ballRescueMinRealtimePercent, 0, 100)
+	ballRescueMaxComputeLoad = clampFloat(ballRescueMaxComputeLoad, 0, 1000)
 }
 
 func trimOldestDebrisFor(additional int) {
@@ -1407,7 +1656,7 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 	return points, pointCount, math.Max(2, radius), math.Max(1, area), roundness, false
 }
 
-func spawnBrickDebris(br *brick) {
+func spawnBrickDebris(br *brick, impactSpeed float64) {
 	if !debrisEnabled || br == nil || debrisMaxActivePieces <= 0 {
 		return
 	}
@@ -1428,6 +1677,7 @@ func spawnBrickDebris(br *brick) {
 	}
 
 	fillColor := brickDebrisColor(br)
+	impactSpeed = math.Max(0, impactSpeed)
 	brickCenterX := br.x + br.w/2
 	brickCenterY := br.y + br.h/2
 	topCount := (pieceCount + 1) / 2
@@ -1470,7 +1720,8 @@ func spawnBrickDebris(br *brick) {
 			sizeSpeedScale := clampFloat(math.Sqrt(referenceMass/mass), 0.80, 1.45)
 			sizeSpinScale := clampFloat(math.Sqrt(referenceMass/mass), 0.85, 1.70)
 
-			speed := debrisRandomBetween(debrisExplosionSpeedMin, debrisExplosionSpeedMax) * sizeSpeedScale
+			baseSpeed := debrisRandomBetween(debrisExplosionSpeedMin, debrisExplosionSpeedMax)
+			speed := (baseSpeed + impactSpeed*debrisImpactSpeedFactor) * sizeSpeedScale
 			tangentX, tangentY := -directionY, directionX
 			tangentSpeed := debrisRandomBetween(-0.18*speed, 0.18*speed)
 			angularSpeed := debrisRandomBetween(debrisAngularSpeedMin, debrisAngularSpeedMax) * sizeSpinScale
@@ -1505,6 +1756,7 @@ func spawnBrickDebris(br *brick) {
 				startOpacity:  startOpacity,
 				fillColor:     fillColor,
 			}
+			clampDebrisSpeed(&fragment)
 			brickDebris = append(brickDebris, fragment)
 			pieceIndex++
 		}
@@ -1514,11 +1766,11 @@ func spawnBrickDebris(br *brick) {
 	spawnRow(1, bottomCount)
 }
 
-func destroyBrick(br *brick) bool {
+func destroyBrick(br *brick, impactSpeed float64) bool {
 	if br == nil || !br.alive || br.unbreakable {
 		return false
 	}
-	spawnBrickDebris(br)
+	spawnBrickDebris(br, impactSpeed)
 	br.alive = false
 	score++
 	remainingBreakableBricks--
@@ -1530,11 +1782,11 @@ func destroyBrick(br *brick) bool {
 	return true
 }
 
-func destroyAnyBrick(br *brick) bool {
+func destroyAnyBrick(br *brick, impactSpeed float64) bool {
 	if br == nil || !br.alive {
 		return false
 	}
-	spawnBrickDebris(br)
+	spawnBrickDebris(br, impactSpeed)
 	br.alive = false
 	score++
 	if !br.unbreakable {
@@ -2684,6 +2936,9 @@ func resetGlobals() {
 	debrisFadeDuration = defaultDebrisFadeDuration
 	debrisStartOpacity = defaultDebrisStartOpacity
 	debrisStartOpacityVariation = defaultDebrisStartOpacityVariation
+	debrisFlashDuration = defaultDebrisFlashDuration
+	debrisFlashOpacity = defaultDebrisFlashOpacity
+	debrisImpactSpeedFactor = defaultDebrisImpactSpeedFactor
 	debrisBallPieceChance = defaultDebrisBallPieceChance
 	debrisSliverPieceChance = defaultDebrisSliverPieceChance
 	debrisMaxChunkAspectRatio = defaultDebrisMaxChunkAspectRatio
@@ -2702,6 +2957,15 @@ func resetGlobals() {
 	debrisMaxSpeed = defaultDebrisMaxSpeed
 	debrisMaxActivePieces = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin = defaultDebrisOffscreenMargin
+	ballRescueEnabled = defaultBallRescueEnabled
+	ballRescueFailureLimit = defaultBallRescueFailureLimit
+	ballRescueMinProgress = defaultBallRescueMinProgress
+	ballRescueCheckDuration = defaultBallRescueCheckDuration
+	ballRescueUpperScreenFraction = defaultBallRescueUpperScreenFraction
+	ballRescueClearance = defaultBallRescueClearance
+	ballRescueLaunchSpeed = defaultBallRescueLaunchSpeed
+	ballRescueMinRealtimePercent = defaultBallRescueMinRealtimePercent
+	ballRescueMaxComputeLoad = defaultBallRescueMaxComputeLoad
 	brickDebris = brickDebris[:0]
 	debrisFieldTick = 0
 	palette = append([]string(nil), defaultPalette...)
@@ -2976,6 +3240,24 @@ func applyConfig(config map[string]string) {
 			} else {
 				log("debrisStartOpacityVariation must be from 0 to 1")
 			}
+		case "debrisFlashDuration":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisFlashDuration = f
+			} else {
+				log("debrisFlashDuration must be zero or greater")
+			}
+		case "debrisFlashOpacity":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisFlashOpacity = f
+			} else {
+				log("debrisFlashOpacity must be from 0 to 1")
+			}
+		case "debrisImpactSpeedFactor":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisImpactSpeedFactor = f
+			} else {
+				log("debrisImpactSpeedFactor must be zero or greater")
+			}
 		case "debrisBallPieceChance":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
 				debrisBallPieceChance = f
@@ -3052,11 +3334,54 @@ func applyConfig(config map[string]string) {
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
 				debrisOffscreenMargin = f
 			}
+		case "ballRescue", "ballRescueEnabled":
+			if b, err := strconv.ParseBool(val); err == nil {
+				ballRescueEnabled = b
+			} else {
+				log(key + " must be true or false")
+			}
+		case "ballRescueFailureLimit":
+			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 100 {
+				ballRescueFailureLimit = i
+			} else {
+				log("ballRescueFailureLimit must be from 1 to 100")
+			}
+		case "ballRescueMinProgress":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				ballRescueMinProgress = f
+			}
+		case "ballRescueCheckDuration":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				ballRescueCheckDuration = f
+			}
+		case "ballRescueUpperScreenFraction":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0.10 && f <= 0.90 {
+				ballRescueUpperScreenFraction = f
+			} else {
+				log("ballRescueUpperScreenFraction must be from 0.10 to 0.90")
+			}
+		case "ballRescueClearance":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				ballRescueClearance = f
+			}
+		case "ballRescueLaunchSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				ballRescueLaunchSpeed = f
+			}
+		case "ballRescueMinRealtimePercent":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 100 {
+				ballRescueMinRealtimePercent = f
+			}
+		case "ballRescueMaxComputeLoad":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				ballRescueMaxComputeLoad = f
+			}
 		default:
 			log("Unknown level variable: " + key)
 		}
 	}
 	normalizeDebrisSettings()
+	normalizeBallRescueSettings()
 }
 
 // ---- Physics ----
@@ -3303,7 +3628,7 @@ func initBricksDefault(levelIndex int) {
 }
 
 // ---- Nuke ----
-func nukeBricks(hitBrick *brick) {
+func nukeBricks(hitBrick *brick, impactSpeed float64) {
 	if hitBrick == nil {
 		return
 	}
@@ -3314,13 +3639,13 @@ func nukeBricks(hitBrick *brick) {
 		}
 		if (br.row == hitBrick.row && abs(br.col-hitBrick.col) <= 2) ||
 			(br.col == hitBrick.col && abs(br.row-hitBrick.row) <= 2) {
-			destroyAnyBrick(br)
+			destroyAnyBrick(br, impactSpeed)
 		}
 	}
 }
 
 // Destroy one random living unbreakable brick.
-func breakRandomUnbreakable() bool {
+func breakRandomUnbreakable(impactSpeed float64) bool {
 	var candidates []int
 	for i := range bricks {
 		if bricks[i].alive && bricks[i].unbreakable {
@@ -3332,7 +3657,7 @@ func breakRandomUnbreakable() bool {
 	}
 
 	index := candidates[rand.Intn(len(candidates))]
-	return destroyAnyBrick(&bricks[index])
+	return destroyAnyBrick(&bricks[index], impactSpeed)
 }
 
 // Resize the paddle while preserving its center and keeping it on-screen.
@@ -3449,7 +3774,7 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 		showStatus("Pass Through!", powerUpDuration)
 	case POWER_NUKE:
 		feature = "nuke"
-		nukeBricks(hitBrick)
+		nukeBricks(hitBrick, impactSpeed)
 		showStatus("Nuke!", 2.0)
 	case POWER_REVERSE_GRAVITY:
 		feature = "reversegravity"
@@ -3470,6 +3795,7 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 			secondBall.stuckTimer = 0
 			secondBall.r = ball.r
 			resetFastOrbitState(&secondBall)
+			resetBallRescueState(&secondBall, true)
 			showStatus("Dual Balls!", 2.0)
 		} else {
 			feature = "speedboost"
@@ -3514,7 +3840,7 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 		showStatus("Zapper!", powerUpDuration)
 	case POWER_BREAK_UNBREAKABLE:
 		feature = "breakunbreakable"
-		if breakRandomUnbreakable() {
+		if breakRandomUnbreakable(impactSpeed) {
 			showStatus("Unbreakable destroyed!", 2.0)
 		} else {
 			activated = false
@@ -3814,6 +4140,8 @@ func startLevel(index int) {
 	levelMeasuredMaxSpin = math.Abs(ball.omega)
 	resetFastOrbitState(&ball)
 	resetFastOrbitState(&secondBall)
+	resetBallRescueState(&ball, true)
+	resetBallRescueState(&secondBall, true)
 	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.y = canvasHeight - 40
@@ -3963,7 +4291,7 @@ func destroyBricksInRadius(ballX, ballY, radius, impactSpeed float64) {
 		closestY := math.Max(br.y, math.Min(ballY, br.y+br.h))
 		dx := ballX - closestX
 		dy := ballY - closestY
-		if dx*dx+dy*dy <= radiusSquared && destroyBrick(br) {
+		if dx*dx+dy*dy <= radiusSquared && destroyBrick(br, impactSpeed) {
 			hitX := brickCenterX(br)
 			if br.magic {
 				playMagic(impactSpeed, hitX)
@@ -4035,6 +4363,7 @@ func applyTilt(b *Ball) {
 	b.vy = -physics.tiltUpSpeed
 	b.omega += (rand.Float64()*2 - 1) * 8
 	b.stuckTimer = 0
+	beginBallRescueAttempt(b, orbitAxisNone)
 
 	showStatus("TILT!", 1.5)
 	playTilt()
@@ -4135,7 +4464,7 @@ func updateOneZapper(
 	}
 
 	br := &bricks[*targetIndex]
-	if destroyBrick(br) {
+	if destroyBrick(br, 0) {
 		playZapperDestroyedBrick(br)
 		playZapper(brickCenterX(br))
 	}
@@ -4316,7 +4645,7 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 			if br.magic && isPrimary {
 				featureActivated = activatePowerUpWithBrick(br, contact.impact)
 			}
-			if destroyBrick(br) {
+			if destroyBrick(br, contact.impact) {
 				hitX := brickCenterX(br)
 				if br.magic {
 					if !featureActivated {
@@ -4398,7 +4727,7 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 			if isPrimary {
 				featureActivated = activatePowerUpWithBrick(br, contact.impact)
 			}
-			if destroyBrick(br) && !featureActivated {
+			if destroyBrick(br, contact.impact) && !featureActivated {
 				playMagic(contact.impact, brickCenterX(br))
 			}
 			if influencerActive {
@@ -4406,7 +4735,7 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 			}
 			continue
 		}
-		if destroyBrick(br) {
+		if destroyBrick(br, contact.impact) {
 			destroyedNormal = true
 			playBrickBreak(contact.impact, brickCenterX(br))
 		}
@@ -4575,6 +4904,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	handleBrickCollisions(b, isPrimary, previousX, previousY)
 	updateFastOrbitDetector(b, dt)
 	updateStuckDetector(b, dt)
+	updateBallRescueAttempt(b, dt)
 }
 
 // Physics subdivides fast movement so a ball cannot skip through thin
@@ -5681,10 +6011,17 @@ func debrisOpacity(fragment *debrisFragment) float64 {
 	if remaining <= 0 {
 		return 0
 	}
-	if debrisFadeDuration <= 0 || remaining >= debrisFadeDuration {
-		return fragment.startOpacity
+
+	opacity := fragment.startOpacity
+	if debrisFlashDuration > 0 && fragment.age < debrisFlashDuration {
+		t := clampFloat(fragment.age/debrisFlashDuration, 0, 1)
+		t = t * t * (3 - 2*t)
+		opacity = debrisFlashOpacity + (fragment.startOpacity-debrisFlashOpacity)*t
 	}
-	return fragment.startOpacity * clampFloat(remaining/debrisFadeDuration, 0, 1)
+	if debrisFadeDuration > 0 && remaining < debrisFadeDuration {
+		opacity *= clampFloat(remaining/debrisFadeDuration, 0, 1)
+	}
+	return clampFloat(opacity, 0, 1)
 }
 
 func drawBrickDebris(alpha float64) {
@@ -6010,6 +6347,8 @@ func resetBalls() {
 	secondBall.soundCooldown = 0
 	resetFastOrbitState(&ball)
 	resetFastOrbitState(&secondBall)
+	resetBallRescueState(&ball, true)
+	resetBallRescueState(&secondBall, true)
 	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
@@ -6507,6 +6846,10 @@ func physicsOverlayLines() []string {
 	if physicsWarningTimer > 0 {
 		status = "WARNING: PHYSICS COULD NOT KEEP UP"
 	}
+	rescueGate := "BLOCKED"
+	if ballRescuePerformanceHealthy() {
+		rescueGate = "OK"
+	}
 
 	lines := []string{
 		"BUILD " + buildID,
@@ -6523,6 +6866,8 @@ func physicsOverlayLines() []string {
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
 		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
+		"RESCUE PERF GATE    " + rescueGate,
+		"RESCUE FAILURES B1  " + strconv.Itoa(ball.rescueFailureCount) + "/" + strconv.Itoa(ballRescueFailureLimit),
 		"",
 		"BALL 1 SPEED " + fmt.Sprintf("%.2f", math.Hypot(ball.vx, ball.vy)) +
 			" (max " + strconv.FormatFloat(physicsConfig.maxSpeed, 'f', -1, 64) + ")",
@@ -6531,6 +6876,7 @@ func physicsOverlayLines() []string {
 	}
 	if secondBallActive {
 		lines = append(lines,
+			"RESCUE FAILURES B2 "+strconv.Itoa(secondBall.rescueFailureCount)+"/"+strconv.Itoa(ballRescueFailureLimit),
 			"BALL 2 SPEED "+fmt.Sprintf("%.2f", math.Hypot(secondBall.vx, secondBall.vy))+
 				" (max "+strconv.FormatFloat(physicsConfig.maxSpeed, 'f', -1, 64)+")",
 			"BALL 2 SPIN  "+fmt.Sprintf("%+.2f", secondBall.omega)+
@@ -7641,6 +7987,16 @@ func setupInput() {
 			return nil
 		}
 
+		// Manual last-resort rescue. It uses the same safe-position search as the
+		// automatic fourth-failure fallback, but ignores the performance gate
+		// because this is an explicit player action.
+		if (key == "t" || key == "T") && !e.Get("repeat").Bool() {
+			if !paused {
+				teleportBallToSafeArea(&ball, true)
+			}
+			return nil
+		}
+
 		// Sound toggle.
 		if (key == "s" || key == "S") && !e.Get("repeat").Bool() {
 			toggleSound()
@@ -7683,6 +8039,7 @@ func setupInput() {
 				}
 				secondBall.stuckTimer = 0
 				resetFastOrbitState(&secondBall)
+				resetBallRescueState(&secondBall, true)
 			}
 			return nil
 		}

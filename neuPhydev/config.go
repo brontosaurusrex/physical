@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260801-56d4a2c781"
+	buildID = "20260801-57e8b63f20"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -91,29 +91,45 @@ const (
 	// effects from turning one frame into thousands of collision bodies.
 	defaultDebrisEnabled               = true
 	defaultDebrisPiecesMin             = 2
-	defaultDebrisPiecesMax             = 22
-	defaultDebrisLifetime              = 9.0
+	defaultDebrisPiecesMax             = 12   //12
+	defaultDebrisLifetime              = 17.0 //7.0
 	defaultDebrisFadeDuration          = 3.0
-	defaultDebrisStartOpacity          = 0.35
-	defaultDebrisStartOpacityVariation = 0.25
+	defaultDebrisStartOpacity          = 0.45
+	defaultDebrisStartOpacityVariation = 0.15
+	defaultDebrisFlashDuration         = 0.30
+	defaultDebrisFlashOpacity          = 1.00
+	defaultDebrisImpactSpeedFactor     = 0.15
 	defaultDebrisBallPieceChance       = 0.18
 	defaultDebrisSliverPieceChance     = 0.015
 	defaultDebrisMaxChunkAspectRatio   = 1.45
-	defaultDebrisBrickCollisionDelay   = 0.25 //0.30
+	defaultDebrisBrickCollisionDelay   = 0.10 //0.30
 	defaultDebrisGravityScale          = 0.7  //1.0
 	defaultDebrisAirDrag               = 0.15
 	defaultDebrisRestitution           = 0.48
 	defaultDebrisFriction              = 1.24
-	defaultDebrisExplosionSpeedMin     = 150.0
-	defaultDebrisExplosionSpeedMax     = 1200.0
+	defaultDebrisExplosionSpeedMin     = 50.0
+	defaultDebrisExplosionSpeedMax     = 1150.0
 	defaultDebrisAngularSpeedMin       = 2.0
-	defaultDebrisAngularSpeedMax       = 6.0
-	defaultDebrisBallInfluence         = 0.35
+	defaultDebrisAngularSpeedMax       = 12.0
+	defaultDebrisBallInfluence         = 0.25 //0.35
 	defaultDebrisFieldScale            = 0.80
 	defaultDebrisMagnetScale           = 0.65
 	defaultDebrisMaxSpeed              = 1100.0
-	defaultDebrisMaxActivePieces       = 100
+	defaultDebrisMaxActivePieces       = 100 //100
 	defaultDebrisOffscreenMargin       = 120.0
+
+	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
+	// tilt measures movement along the orbit's minor axis. Only healthy fixed-step
+	// performance samples may count as failures or trigger the automatic teleport.
+	defaultBallRescueEnabled             = true
+	defaultBallRescueFailureLimit        = 4
+	defaultBallRescueMinProgress         = 80.0
+	defaultBallRescueCheckDuration       = 1.0
+	defaultBallRescueUpperScreenFraction = 1.0 / 3.0
+	defaultBallRescueClearance           = 12.0
+	defaultBallRescueLaunchSpeed         = 520.0
+	defaultBallRescueMinRealtimePercent  = 90.0
+	defaultBallRescueMaxComputeLoad      = 85.0
 
 	// Mouse position is direct. This only caps the measured surface velocity used
 	// for collision/spin calculations after a large cursor jump. It is part of

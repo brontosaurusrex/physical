@@ -1,4 +1,4 @@
-BRICK DEBRIS PHYSICS — v56
+BRICK DEBRIS PHYSICS — v57
 
 Every destroyed brick produces a configurable number of fragments. By default,
 18% are true circular chips, only 1.5% are deliberate triangular/sliver pieces,
@@ -14,7 +14,7 @@ COLLISIONS
   ball             two-way speed-based impulse; fragments can deflect the ball
   paddle           moving-surface collision using the current paddle velocity
   side/top walls   bounce with debris restitution and friction
-  living bricks    enabled after debrisBrickCollisionDelay (default 0.30 s)
+  living bricks    enabled after debrisBrickCollisionDelay (default 0.15 s)
                     and never damages or destroys the brick
   other debris     intentionally disabled for performance and visual clarity
   bottom edge      no wall; pieces fall out and are removed
@@ -40,6 +40,9 @@ DEFAULT LEVEL SETTINGS
   debrisFadeDuration=3
   debrisStartOpacity=0.70
   debrisStartOpacityVariation=0.10
+  debrisFlashDuration=0.10
+  debrisFlashOpacity=1.00
+  debrisImpactSpeedFactor=0.35
   debrisBallPieceChance=0.18
   debrisSliverPieceChance=0.015
   debrisMaxChunkAspectRatio=1.45
@@ -69,8 +72,20 @@ extra collision cost. The shape controls may be overridden per level. Setting
 
 Starting opacity defaults to 0.70. Each new piece receives a random offset in
 the range +/- debrisStartOpacityVariation (default 0.10), clamped to 0..1, so
-the normal starting range is 0.60..0.80. Fade-out multiplies the piece-specific
-starting opacity rather than jumping to full opacity first.
+the normal settled range is 0.60..0.80. For the first debrisFlashDuration
+(default 0.10 seconds), opacity smoothly falls from debrisFlashOpacity (default
+1.00) into that piece-specific value. The final lifetime fade multiplies the
+current opacity.
+
+The launch formula is:
+
+  (random explosion speed + impact speed * debrisImpactSpeedFactor)
+      * size multiplier
+
+The default impact factor is 0.35. Direct ball hits, pass-through hits,
+Influencer damage, Nuke damage, and break-unbreakable inherit the triggering
+collision speed. Zapper and other non-impact destruction use zero impact speed.
+The completed velocity is clamped by debrisMaxSpeed.
 
 These may be placed before --- in a level file. Setting debris=false disables
 fragment creation for that level. Setting debrisMaxActivePieces=0 also disables
@@ -87,7 +102,7 @@ overlay as DEBRIS current/max.
 
 For slower mobile hardware, try:
 
-  debrisMaxActivePieces=160
+  debrisMaxActivePieces=60
   debrisPiecesMin=4
   debrisPiecesMax=5
 

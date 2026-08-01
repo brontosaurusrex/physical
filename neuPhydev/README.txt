@@ -1,5 +1,5 @@
-Breakout WASM — gamepad + physics tuner + dynamic brick debris (v56)
-Build ID: 20260801-56d4a2c781
+Breakout WASM — gamepad + physics tuner + debris + ball rescue (v57)
+Build ID: 20260801-57e8b63f20
 
 BUILD
 
@@ -124,7 +124,7 @@ The browser Gamepad API is polled automatically. For the Vivanco
 0663-9807 USB Game Device (raw mapping):
 
   Axis 0   paddle left/right
-  Button 0 pause/unpause (one toggle per press)
+  Button 0 start/pause/unpause (one action per press)
 
 The center dead zone is configured in config.go as
 defaultGamepadDeadZone. Keyboard, mouse, touch and phone tilt remain available.
@@ -156,3 +156,31 @@ V55: debris fragments now use only the source brick main fill color; secondary s
 V56: deliberate slivers reduced to 1.5%, normal chunks are aspect-ratio limited,
 and 18% of debris pieces are true circles by default. All three values are
 config.go defaults and level-file overrides.
+
+
+V57: PERFORMANCE-AWARE BALL RESCUE
+----------------------------------
+Normal TILT! and Orbital tilt! recovery attempts are now checked after a
+configurable interval. A normal tilt must move the ball by the configured total
+distance. An orbital tilt must make that progress along the orbit's minor axis,
+so simply travelling around the same loop does not count as an escape.
+
+After four consecutive healthy-simulation failures, the ball is moved to the
+first safe opening found in the upper third of the playfield. If the upper third
+is blocked by living bricks, the search expands downward while remaining above
+the paddle. The ball receives a fresh downward-biased velocity.
+
+The automatic failure counter is gated by the existing fixed-step performance
+measurements. Slow/throttled samples, dropped simulation time, or excessive
+physics compute load are discarded and cannot trigger a teleport. Press P to see
+RESCUE PERF GATE and failure counts.
+
+Press T during active gameplay for a manual teleport using the same safe-position
+search. The manual cheat intentionally does not require the performance gate.
+
+V57: DEBRIS FLASH AND IMPACT ENERGY
+-----------------------------------
+New debris begins with a short configurable opacity flash, default 0.10 seconds,
+then settles smoothly into each piece's randomized normal opacity. Brick impact
+speed now contributes to debris launch speed through debrisImpactSpeedFactor.
+The existing debrisMaxSpeed remains the final safety cap.
