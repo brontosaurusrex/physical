@@ -291,6 +291,33 @@ var (
 	currentAudioRoom    = defaultAudioRoom
 	currentAudioRoomDry = defaultAudioRoomDry
 
+	// Per-level dynamic debris settings.
+	debrisEnabled               = defaultDebrisEnabled
+	debrisPiecesMin             = defaultDebrisPiecesMin
+	debrisPiecesMax             = defaultDebrisPiecesMax
+	debrisLifetime              = defaultDebrisLifetime
+	debrisFadeDuration          = defaultDebrisFadeDuration
+	debrisStartOpacity          = defaultDebrisStartOpacity
+	debrisStartOpacityVariation = defaultDebrisStartOpacityVariation
+	debrisBallPieceChance       = defaultDebrisBallPieceChance
+	debrisSliverPieceChance     = defaultDebrisSliverPieceChance
+	debrisMaxChunkAspectRatio   = defaultDebrisMaxChunkAspectRatio
+	debrisBrickCollisionDelay   = defaultDebrisBrickCollisionDelay
+	debrisGravityScale          = defaultDebrisGravityScale
+	debrisAirDrag               = defaultDebrisAirDrag
+	debrisRestitution           = defaultDebrisRestitution
+	debrisFriction              = defaultDebrisFriction
+	debrisExplosionSpeedMin     = defaultDebrisExplosionSpeedMin
+	debrisExplosionSpeedMax     = defaultDebrisExplosionSpeedMax
+	debrisAngularSpeedMin       = defaultDebrisAngularSpeedMin
+	debrisAngularSpeedMax       = defaultDebrisAngularSpeedMax
+	debrisBallInfluence         = defaultDebrisBallInfluence
+	debrisFieldScale            = defaultDebrisFieldScale
+	debrisMagnetScale           = defaultDebrisMagnetScale
+	debrisMaxSpeed              = defaultDebrisMaxSpeed
+	debrisMaxActivePieces       = defaultDebrisMaxActivePieces
+	debrisOffscreenMargin       = defaultDebrisOffscreenMargin
+
 	paused       bool
 	leftPressed  bool
 	rightPressed bool
@@ -433,6 +460,9 @@ var (
 	}
 
 	bricks                   []brick
+	brickDebris              []debrisFragment
+	debrisRNG                = rand.New(rand.NewSource(0x52d3b715))
+	debrisFieldTick          int
 	brickGrid                map[int][]int
 	remainingBreakableBricks int
 	initialBreakableBricks   int
@@ -640,6 +670,29 @@ type brick struct {
 	alive       bool
 	unbreakable bool
 	magic       bool
+}
+
+// debrisFragment is a lightweight rigid shard. Rendering uses an irregular,
+// single-fill-color local polygon, while collision uses its conservative bounding circle. This
+// keeps hundreds of fragments practical inside the 240 Hz fixed-step loop.
+type debrisFragment struct {
+	x, y          float64
+	previousX     float64
+	previousY     float64
+	vx, vy        float64
+	angle         float64
+	previousAngle float64
+	omega         float64
+	radius        float64
+	mass          float64
+	age           float64
+	lifetime      float64
+	pointCount    int
+	points        [16]float64
+	roundness     float64
+	circle        bool
+	startOpacity  float64
+	fillColor     string
 }
 
 // ---- Level data ----
@@ -1109,10 +1162,363 @@ func registerBrick(index int) {
 	}
 }
 
+func brickDebrisColor(br *brick) string {
+	if br == nil {
+		return palette[2]
+	}
+	if br.magic {
+		return magicColor
+	}
+	if br.unbreakable {
+		return palette[6]
+	}
+	return palette[2]
+}
+
+func normalizeDebrisSettings() {
+	if debrisPiecesMin < 1 {
+		debrisPiecesMin = 1
+	}
+	if debrisPiecesMax < 1 {
+		debrisPiecesMax = 1
+	}
+	if debrisPiecesMin > debrisPiecesMax {
+		debrisPiecesMin, debrisPiecesMax = debrisPiecesMax, debrisPiecesMin
+	}
+	if debrisPiecesMax > 16 {
+		debrisPiecesMax = 16
+	}
+	if debrisPiecesMin > debrisPiecesMax {
+		debrisPiecesMin = debrisPiecesMax
+	}
+	debrisLifetime = math.Max(0.05, debrisLifetime)
+	debrisFadeDuration = clampFloat(debrisFadeDuration, 0, debrisLifetime)
+	debrisStartOpacity = clampFloat(debrisStartOpacity, 0, 1)
+	debrisStartOpacityVariation = clampFloat(debrisStartOpacityVariation, 0, 1)
+	debrisBallPieceChance = clampFloat(debrisBallPieceChance, 0, 1)
+	debrisSliverPieceChance = clampFloat(debrisSliverPieceChance, 0, 1)
+	specialShapeChance := debrisBallPieceChance + debrisSliverPieceChance
+	if specialShapeChance > 0.95 {
+		scale := 0.95 / specialShapeChance
+		debrisBallPieceChance *= scale
+		debrisSliverPieceChance *= scale
+	}
+	debrisMaxChunkAspectRatio = math.Max(1, debrisMaxChunkAspectRatio)
+	debrisBrickCollisionDelay = math.Max(0, debrisBrickCollisionDelay)
+	debrisGravityScale = math.Max(0, debrisGravityScale)
+	debrisAirDrag = math.Max(0, debrisAirDrag)
+	debrisRestitution = clampFloat(debrisRestitution, 0, 1.5)
+	debrisFriction = clampFloat(debrisFriction, 0, 1)
+	debrisExplosionSpeedMin = math.Max(0, debrisExplosionSpeedMin)
+	debrisExplosionSpeedMax = math.Max(0, debrisExplosionSpeedMax)
+	if debrisExplosionSpeedMin > debrisExplosionSpeedMax {
+		debrisExplosionSpeedMin, debrisExplosionSpeedMax = debrisExplosionSpeedMax, debrisExplosionSpeedMin
+	}
+	debrisAngularSpeedMin = math.Max(0, debrisAngularSpeedMin)
+	debrisAngularSpeedMax = math.Max(0, debrisAngularSpeedMax)
+	if debrisAngularSpeedMin > debrisAngularSpeedMax {
+		debrisAngularSpeedMin, debrisAngularSpeedMax = debrisAngularSpeedMax, debrisAngularSpeedMin
+	}
+	debrisBallInfluence = clampFloat(debrisBallInfluence, 0, 1)
+	debrisFieldScale = math.Max(0, debrisFieldScale)
+	debrisMagnetScale = math.Max(0, debrisMagnetScale)
+	debrisMaxSpeed = math.Max(0, debrisMaxSpeed)
+	if debrisMaxActivePieces < 0 {
+		debrisMaxActivePieces = 0
+	}
+	debrisOffscreenMargin = math.Max(0, debrisOffscreenMargin)
+}
+
+func trimOldestDebrisFor(additional int) {
+	if additional <= 0 || debrisMaxActivePieces <= 0 {
+		return
+	}
+	excess := len(brickDebris) + additional - debrisMaxActivePieces
+	if excess <= 0 {
+		return
+	}
+	if excess >= len(brickDebris) {
+		brickDebris = brickDebris[:0]
+		return
+	}
+	copy(brickDebris, brickDebris[excess:])
+	brickDebris = brickDebris[:len(brickDebris)-excess]
+}
+
+func debrisRandomBetween(minimum, maximum float64) float64 {
+	if maximum <= minimum {
+		return minimum
+	}
+	return minimum + debrisRNG.Float64()*(maximum-minimum)
+}
+
+func debrisPolygonArea(points [16]float64, pointCount int) float64 {
+	if pointCount < 3 {
+		return 0
+	}
+	area := 0.0
+	for i := 0; i < pointCount; i++ {
+		next := (i + 1) % pointCount
+		area += points[i*2]*points[next*2+1] - points[next*2]*points[i*2+1]
+	}
+	return math.Abs(area) * 0.5
+}
+
+func rotateDebrisPoints(points *[16]float64, pointCount int, angle float64) {
+	if points == nil || pointCount <= 0 || angle == 0 {
+		return
+	}
+	for i := 0; i < pointCount; i++ {
+		points[i*2], points[i*2+1] = rotateVector(points[i*2], points[i*2+1], angle)
+	}
+}
+
+func debrisRadialPolygon(
+	pointCount int,
+	radiusX, radiusY,
+	radiusMinimum, radiusMaximum,
+	angleJitter, rotation float64,
+) [16]float64 {
+	var points [16]float64
+	pointCount = max(3, min(8, pointCount))
+	for i := 0; i < pointCount; i++ {
+		angle := rotation + 2*math.Pi*float64(i)/float64(pointCount)
+		angle += debrisRandomBetween(-angleJitter, angleJitter)
+		radiusScale := debrisRandomBetween(radiusMinimum, radiusMaximum)
+		points[i*2] = math.Cos(angle) * radiusX * radiusScale
+		points[i*2+1] = math.Sin(angle) * radiusY * radiusScale
+	}
+	return points
+}
+
+// buildDebrisShape deliberately mixes several cheap polygon families. Drawing
+// gets visual variety, while collision remains one conservative circle.
+func buildDebrisShape(cellWidth, cellHeight float64) (
+	points [16]float64,
+	pointCount int,
+	radius, area, roundness float64,
+	circle bool,
+) {
+	halfWidth := cellWidth * debrisRandomBetween(0.37, 0.50)
+	halfHeight := cellHeight * debrisRandomBetween(0.36, 0.49)
+
+	// Most debris should read as compact chunks rather than long sticks. Shrink
+	// only the longer axis; the deliberately rare sliver family may narrow itself
+	// further below.
+	if halfWidth > halfHeight*debrisMaxChunkAspectRatio {
+		halfWidth = halfHeight * debrisRandomBetween(1.0, debrisMaxChunkAspectRatio)
+	}
+	if halfHeight > halfWidth*debrisMaxChunkAspectRatio {
+		halfHeight = halfWidth * debrisRandomBetween(1.0, debrisMaxChunkAspectRatio)
+	}
+
+	shapeRoll := debrisRNG.Float64()
+	ballLimit := debrisBallPieceChance
+	sliverLimit := ballLimit + debrisSliverPieceChance
+
+	if shapeRoll < ballLimit {
+		// A true circular chip. Drawing and collision use the same radius, so this
+		// family costs no more than the existing circle collision approximation.
+		radius = math.Min(halfWidth, halfHeight) * debrisRandomBetween(0.72, 0.96)
+		radius = math.Max(2, radius)
+		area = math.Pi * radius * radius
+		return points, 0, radius, area, 1, true
+	}
+
+	if shapeRoll < sliverLimit {
+		// Rare triangular or four-sided sliver. Kept separate so its frequency is
+		// explicitly configurable and can be reduced without changing other shapes.
+		pointCount = 3 + debrisRNG.Intn(2)
+		if debrisRNG.Intn(2) == 0 {
+			halfWidth *= debrisRandomBetween(0.36, 0.58)
+		} else {
+			halfHeight *= debrisRandomBetween(0.36, 0.58)
+		}
+		points = debrisRadialPolygon(
+			pointCount,
+			halfWidth,
+			halfHeight,
+			0.68,
+			1.05,
+			0.16,
+			debrisRandomBetween(-math.Pi, math.Pi),
+		)
+		roundness = debrisRandomBetween(0, 0.07)
+	} else {
+		remainingChance := math.Max(0.0001, 1-sliverLimit)
+		normalizedRoll := clampFloat((shapeRoll-sliverLimit)/remainingChance, 0, 1)
+		switch {
+		case normalizedRoll < 0.34:
+			// Rough four-corner chunk, recognisably cut from a rectangular brick.
+			pointCount = 4
+			jitterX := halfWidth * 0.22
+			jitterY := halfHeight * 0.24
+			points = [16]float64{
+				-halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				halfWidth + debrisRandomBetween(-jitterX, jitterX), halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				-halfWidth + debrisRandomBetween(-jitterX, jitterX), halfHeight + debrisRandomBetween(-jitterY, jitterY),
+			}
+			roundness = debrisRandomBetween(0.02, 0.12)
+
+		case normalizedRoll < 0.72:
+			// More visibly broken pentagonal or hexagonal chunk.
+			pointCount = 5 + debrisRNG.Intn(2)
+			points = debrisRadialPolygon(
+				pointCount,
+				halfWidth,
+				halfHeight,
+				0.62,
+				1.05,
+				0.18,
+				debrisRandomBetween(-math.Pi, math.Pi),
+			)
+			roundness = debrisRandomBetween(0.05, 0.18)
+
+		default:
+			// Eight-point rounded-rectangle silhouette: a small broken piece that still
+			// resembles the source brick's softened rectangular shape.
+			pointCount = 8
+			cutX := halfWidth * debrisRandomBetween(0.28, 0.45)
+			cutY := halfHeight * debrisRandomBetween(0.28, 0.45)
+			jitterX := halfWidth * 0.06
+			jitterY := halfHeight * 0.07
+			points = [16]float64{
+				-halfWidth + cutX, -halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				halfWidth - cutX, -halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + cutY,
+				halfWidth + debrisRandomBetween(-jitterX, jitterX), halfHeight - cutY,
+				halfWidth - cutX, halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				-halfWidth + cutX, halfHeight + debrisRandomBetween(-jitterY, jitterY),
+				-halfWidth + debrisRandomBetween(-jitterX, jitterX), halfHeight - cutY,
+				-halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + cutY,
+			}
+			roundness = debrisRandomBetween(0.58, 0.82)
+
+		}
+	}
+
+	// A little local rotation keeps the family mix from looking grid-aligned.
+	rotateDebrisPoints(&points, pointCount, debrisRandomBetween(-0.18, 0.18))
+	for i := 0; i < pointCount; i++ {
+		radius = math.Max(radius, math.Hypot(points[i*2], points[i*2+1]))
+	}
+	area = debrisPolygonArea(points, pointCount)
+	return points, pointCount, math.Max(2, radius), math.Max(1, area), roundness, false
+}
+
+func spawnBrickDebris(br *brick) {
+	if !debrisEnabled || br == nil || debrisMaxActivePieces <= 0 {
+		return
+	}
+	normalizeDebrisSettings()
+
+	pieceCount := debrisPiecesMin
+	if debrisPiecesMax > debrisPiecesMin {
+		pieceCount += debrisRNG.Intn(debrisPiecesMax - debrisPiecesMin + 1)
+	}
+	pieceCount = min(pieceCount, debrisMaxActivePieces)
+	trimOldestDebrisFor(pieceCount)
+	available := debrisMaxActivePieces - len(brickDebris)
+	if available <= 0 {
+		return
+	}
+	if pieceCount > available {
+		pieceCount = available
+	}
+
+	fillColor := brickDebrisColor(br)
+	brickCenterX := br.x + br.w/2
+	brickCenterY := br.y + br.h/2
+	topCount := (pieceCount + 1) / 2
+	bottomCount := pieceCount - topCount
+	rowCount := 2
+	if bottomCount == 0 {
+		rowCount = 1
+	}
+	pieceIndex := 0
+
+	spawnRow := func(row int, columns int) {
+		if columns <= 0 {
+			return
+		}
+		cellWidth := br.w / float64(columns)
+		cellHeight := br.h / float64(rowCount)
+		for column := 0; column < columns && pieceIndex < pieceCount; column++ {
+			localCenterX := -br.w/2 + (float64(column)+0.5)*cellWidth
+			localCenterY := -br.h/2 + (float64(row)+0.5)*cellHeight
+			worldOffsetX, worldOffsetY := rotateVector(localCenterX, localCenterY, br.tiltRadians)
+
+			points, pointCount, radius, shapeArea, roundness, circle := buildDebrisShape(cellWidth, cellHeight)
+
+			directionX, directionY := worldOffsetX, worldOffsetY
+			// A small upward bias makes the break read as an explosion before gravity
+			// takes over, while the radial component still follows the source brick.
+			directionY -= br.h * 0.35
+			length := math.Hypot(directionX, directionY)
+			if length < 0.001 {
+				angle := debrisRNG.Float64() * 2 * math.Pi
+				directionX, directionY = math.Cos(angle), math.Sin(angle)
+			} else {
+				directionX /= length
+				directionY /= length
+			}
+			areaFraction := shapeArea / math.Max(1, br.w*br.h)
+			mass := clampFloat(areaFraction*1.8, 0.08, 0.60)
+			referenceArea := cellWidth * cellHeight * 0.78
+			referenceMass := clampFloat(referenceArea/math.Max(1, br.w*br.h)*1.8, 0.08, 0.60)
+			sizeSpeedScale := clampFloat(math.Sqrt(referenceMass/mass), 0.80, 1.45)
+			sizeSpinScale := clampFloat(math.Sqrt(referenceMass/mass), 0.85, 1.70)
+
+			speed := debrisRandomBetween(debrisExplosionSpeedMin, debrisExplosionSpeedMax) * sizeSpeedScale
+			tangentX, tangentY := -directionY, directionX
+			tangentSpeed := debrisRandomBetween(-0.18*speed, 0.18*speed)
+			angularSpeed := debrisRandomBetween(debrisAngularSpeedMin, debrisAngularSpeedMax) * sizeSpinScale
+			if debrisRNG.Intn(2) == 0 {
+				angularSpeed = -angularSpeed
+			}
+
+			initialAngle := br.tiltRadians + debrisRandomBetween(-0.10, 0.10)
+			startOpacity := clampFloat(
+				debrisStartOpacity+debrisRandomBetween(-debrisStartOpacityVariation, debrisStartOpacityVariation),
+				0,
+				1,
+			)
+			fragment := debrisFragment{
+				x:             brickCenterX + worldOffsetX,
+				y:             brickCenterY + worldOffsetY,
+				previousX:     brickCenterX + worldOffsetX,
+				previousY:     brickCenterY + worldOffsetY,
+				vx:            directionX*speed + tangentX*tangentSpeed,
+				vy:            directionY*speed + tangentY*tangentSpeed,
+				angle:         initialAngle,
+				previousAngle: initialAngle,
+				omega:         angularSpeed,
+				radius:        radius,
+				mass:          mass,
+				age:           0,
+				lifetime:      debrisLifetime * debrisRandomBetween(0.90, 1.10),
+				pointCount:    pointCount,
+				points:        points,
+				roundness:     roundness,
+				circle:        circle,
+				startOpacity:  startOpacity,
+				fillColor:     fillColor,
+			}
+			brickDebris = append(brickDebris, fragment)
+			pieceIndex++
+		}
+	}
+
+	spawnRow(0, topCount)
+	spawnRow(1, bottomCount)
+}
+
 func destroyBrick(br *brick) bool {
 	if br == nil || !br.alive || br.unbreakable {
 		return false
 	}
+	spawnBrickDebris(br)
 	br.alive = false
 	score++
 	remainingBreakableBricks--
@@ -1128,6 +1534,7 @@ func destroyAnyBrick(br *brick) bool {
 	if br == nil || !br.alive {
 		return false
 	}
+	spawnBrickDebris(br)
 	br.alive = false
 	score++
 	if !br.unbreakable {
@@ -2268,8 +2675,35 @@ func resetGlobals() {
 	enableZapper = defaultEnableZapper
 	enableBreakUnbreakable = defaultEnableBreakUnbreakable
 	enableBigPaddle = defaultEnableBigPaddle
-	currentAudioRoom = "none"
+	currentAudioRoom = defaultAudioRoom
 	currentAudioRoomDry = defaultAudioRoomDry
+	debrisEnabled = defaultDebrisEnabled
+	debrisPiecesMin = defaultDebrisPiecesMin
+	debrisPiecesMax = defaultDebrisPiecesMax
+	debrisLifetime = defaultDebrisLifetime
+	debrisFadeDuration = defaultDebrisFadeDuration
+	debrisStartOpacity = defaultDebrisStartOpacity
+	debrisStartOpacityVariation = defaultDebrisStartOpacityVariation
+	debrisBallPieceChance = defaultDebrisBallPieceChance
+	debrisSliverPieceChance = defaultDebrisSliverPieceChance
+	debrisMaxChunkAspectRatio = defaultDebrisMaxChunkAspectRatio
+	debrisBrickCollisionDelay = defaultDebrisBrickCollisionDelay
+	debrisGravityScale = defaultDebrisGravityScale
+	debrisAirDrag = defaultDebrisAirDrag
+	debrisRestitution = defaultDebrisRestitution
+	debrisFriction = defaultDebrisFriction
+	debrisExplosionSpeedMin = defaultDebrisExplosionSpeedMin
+	debrisExplosionSpeedMax = defaultDebrisExplosionSpeedMax
+	debrisAngularSpeedMin = defaultDebrisAngularSpeedMin
+	debrisAngularSpeedMax = defaultDebrisAngularSpeedMax
+	debrisBallInfluence = defaultDebrisBallInfluence
+	debrisFieldScale = defaultDebrisFieldScale
+	debrisMagnetScale = defaultDebrisMagnetScale
+	debrisMaxSpeed = defaultDebrisMaxSpeed
+	debrisMaxActivePieces = defaultDebrisMaxActivePieces
+	debrisOffscreenMargin = defaultDebrisOffscreenMargin
+	brickDebris = brickDebris[:0]
+	debrisFieldTick = 0
 	palette = append([]string(nil), defaultPalette...)
 	magicColor = defaultMagicColor
 	magicStrokeColor = defaultMagicStrokeColor
@@ -2494,10 +2928,135 @@ func applyConfig(config map[string]string) {
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
 				paddleHeight = f
 			}
+		case "debris", "debrisEnabled":
+			if b, err := strconv.ParseBool(val); err == nil {
+				debrisEnabled = b
+			} else {
+				log(key + " must be true or false")
+			}
+		case "debrisPiecesMin":
+			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 16 {
+				debrisPiecesMin = i
+			} else {
+				log("debrisPiecesMin must be from 1 to 16")
+			}
+		case "debrisPiecesMax":
+			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 16 {
+				debrisPiecesMax = i
+			} else {
+				log("debrisPiecesMax must be from 1 to 16")
+			}
+		case "debrisMaxActivePieces":
+			if i, err := strconv.Atoi(val); err == nil && i >= 0 && i <= 2000 {
+				debrisMaxActivePieces = i
+			} else {
+				log("debrisMaxActivePieces must be from 0 to 2000")
+			}
+		case "debrisLifetime":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				debrisLifetime = f
+			} else {
+				log("debrisLifetime must be greater than zero")
+			}
+		case "debrisFadeDuration":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisFadeDuration = f
+			} else {
+				log("debrisFadeDuration must be zero or greater")
+			}
+		case "debrisStartOpacity":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisStartOpacity = f
+			} else {
+				log("debrisStartOpacity must be from 0 to 1")
+			}
+		case "debrisStartOpacityVariation":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisStartOpacityVariation = f
+			} else {
+				log("debrisStartOpacityVariation must be from 0 to 1")
+			}
+		case "debrisBallPieceChance":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisBallPieceChance = f
+			} else {
+				log("debrisBallPieceChance must be from 0 to 1")
+			}
+		case "debrisSliverPieceChance":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisSliverPieceChance = f
+			} else {
+				log("debrisSliverPieceChance must be from 0 to 1")
+			}
+		case "debrisMaxChunkAspectRatio":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 1 && f <= 4 {
+				debrisMaxChunkAspectRatio = f
+			} else {
+				log("debrisMaxChunkAspectRatio must be from 1 to 4")
+			}
+		case "debrisBrickCollisionDelay":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisBrickCollisionDelay = f
+			} else {
+				log("debrisBrickCollisionDelay must be zero or greater")
+			}
+		case "debrisGravityScale":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisGravityScale = f
+			}
+		case "debrisAirDrag":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisAirDrag = f
+			}
+		case "debrisRestitution":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1.5 {
+				debrisRestitution = f
+			}
+		case "debrisFriction":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisFriction = f
+			}
+		case "debrisExplosionSpeedMin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisExplosionSpeedMin = f
+			}
+		case "debrisExplosionSpeedMax":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisExplosionSpeedMax = f
+			}
+		case "debrisAngularSpeedMin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisAngularSpeedMin = f
+			}
+		case "debrisAngularSpeedMax":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisAngularSpeedMax = f
+			}
+		case "debrisBallInfluence":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisBallInfluence = f
+			}
+		case "debrisFieldScale":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisFieldScale = f
+			}
+		case "debrisMagnetScale":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisMagnetScale = f
+			}
+		case "debrisMaxSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisMaxSpeed = f
+			}
+		case "debrisOffscreenMargin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisOffscreenMargin = f
+			}
 		default:
 			log("Unknown level variable: " + key)
 		}
 	}
+	normalizeDebrisSettings()
 }
 
 // ---- Physics ----
@@ -3297,6 +3856,7 @@ func startLevel(index int) {
 		showStatus("Zapper enabled by level", 2.0)
 	}
 
+	debrisRNG.Seed(int64(index+1)*0x52d3b715 + 1)
 	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
 	syncRenderInterpolation()
@@ -4740,6 +5300,444 @@ func pollGamepadInput() {
 	gamepadFullscreenWasPressed = fullscreenPressed
 }
 
+func clampDebrisSpeed(fragment *debrisFragment) {
+	if fragment == nil || debrisMaxSpeed <= 0 {
+		return
+	}
+	speed := math.Hypot(fragment.vx, fragment.vy)
+	if speed <= debrisMaxSpeed || speed <= 0 {
+		return
+	}
+	scale := debrisMaxSpeed / speed
+	fragment.vx *= scale
+	fragment.vy *= scale
+}
+
+func nearestMagneticBrickForDebris(x, y float64) (float64, float64, float64, bool) {
+	if magnetRange <= 0 {
+		return 0, 0, 0, false
+	}
+
+	bestDistanceSquared := magnetRange * magnetRange
+	bestX, bestY := 0.0, 0.0
+	found := false
+	consider := func(index int) {
+		if index < 0 || index >= len(bricks) {
+			return
+		}
+		br := &bricks[index]
+		if !br.alive || br.unbreakable {
+			return
+		}
+		centerX := br.x + br.w/2
+		centerY := br.y + br.h/2
+		dx := centerX - x
+		dy := centerY - y
+		distanceSquared := dx*dx + dy*dy
+		if distanceSquared > 1 && distanceSquared < bestDistanceSquared {
+			bestDistanceSquared = distanceSquared
+			bestX, bestY = centerX, centerY
+			found = true
+		}
+	}
+
+	if gridRows <= 0 || gridCols <= 0 || gridCellWidth <= 0 || gridCellHeight <= 0 {
+		for i := range bricks {
+			consider(i)
+		}
+	} else {
+		minCol := int(math.Floor((x - magnetRange - gridOffsetLeft) / gridCellWidth))
+		maxCol := int(math.Floor((x + magnetRange - gridOffsetLeft) / gridCellWidth))
+		minRow := int(math.Floor((y - magnetRange - gridOffsetTop) / gridCellHeight))
+		maxRow := int(math.Floor((y + magnetRange - gridOffsetTop) / gridCellHeight))
+		minCol = max(0, minCol)
+		maxCol = min(gridCols-1, maxCol)
+		minRow = max(0, minRow)
+		maxRow = min(gridRows-1, maxRow)
+		for row := minRow; row <= maxRow; row++ {
+			for col := minCol; col <= maxCol; col++ {
+				for _, index := range brickGrid[gridKey(row, col)] {
+					consider(index)
+				}
+			}
+		}
+	}
+
+	if !found {
+		return 0, 0, 0, false
+	}
+	return bestX, bestY, math.Sqrt(bestDistanceSquared), true
+}
+
+func applyDebrisFields(fragment *debrisFragment, dt float64, applyMagnet bool) {
+	fragment.vy += currentGravity * debrisGravityScale * dt
+
+	if blackHoleActive && debrisFieldScale > 0 {
+		dx := blackHoleX - fragment.x
+		dy := blackHoleY - fragment.y
+		distance := math.Hypot(dx, dy)
+		if distance > 1 {
+			acceleration := blackHoleStrength * debrisFieldScale
+			fragment.vx += dx / distance * acceleration * dt
+			fragment.vy += dy / distance * acceleration * dt
+		} else {
+			// Avoid a zero-length normal without consuming gameplay randomness.
+			direction := sign(fragment.omega)
+			if direction == 0 {
+				direction = 1
+			}
+			fragment.vx += direction * blackHoleStrength * debrisFieldScale * 0.05 * dt
+		}
+	}
+
+	if applyMagnet && magnetIsActive() && debrisMagnetScale > 0 {
+		if targetX, targetY, distance, found := nearestMagneticBrickForDebris(fragment.x, fragment.y); found {
+			dx := targetX - fragment.x
+			dy := targetY - fragment.y
+			falloff := clampFloat(1-distance/math.Max(1, magnetRange), 0, 1)
+			// Nearest-brick lookup is staggered across four fixed steps. Multiplying
+			// the impulse by four preserves the average 240 Hz force while reducing
+			// the expensive search work to 60 Hz per fragment.
+			acceleration := magnetStrength * debrisMagnetScale * falloff
+			fragment.vx += dx / distance * acceleration * dt * 4
+			fragment.vy += dy / distance * acceleration * dt * 4
+		}
+	}
+
+	damping := math.Exp(-debrisAirDrag * dt)
+	fragment.vx *= damping
+	fragment.vy *= damping
+	fragment.omega *= math.Exp(-debrisAirDrag * 0.35 * dt)
+	clampDebrisSpeed(fragment)
+}
+
+func circleAABBContact(
+	x, y, radius,
+	left, top, right, bottom float64,
+) (bool, float64, float64, float64) {
+	closestX := clampFloat(x, left, right)
+	closestY := clampFloat(y, top, bottom)
+	dx := x - closestX
+	dy := y - closestY
+	distanceSquared := dx*dx + dy*dy
+	if distanceSquared > 0 {
+		if distanceSquared >= radius*radius {
+			return false, 0, 0, 0
+		}
+		distance := math.Sqrt(distanceSquared)
+		return true, dx / distance, dy / distance, radius - distance
+	}
+
+	// The centre is inside the box. Push toward the nearest side.
+	leftDistance := x - left
+	rightDistance := right - x
+	topDistance := y - top
+	bottomDistance := bottom - y
+	nx, ny := -1.0, 0.0
+	nearest := leftDistance
+	if rightDistance < nearest {
+		nx, ny = 1, 0
+		nearest = rightDistance
+	}
+	if topDistance < nearest {
+		nx, ny = 0, -1
+		nearest = topDistance
+	}
+	if bottomDistance < nearest {
+		nx, ny = 0, 1
+		nearest = bottomDistance
+	}
+	return true, nx, ny, radius + math.Max(0, nearest)
+}
+
+func resolveDebrisSurfaceCollision(
+	fragment *debrisFragment,
+	nx, ny, penetration, surfaceVx, surfaceVy float64,
+) {
+	fragment.x += nx * (penetration + physicsConfig.collisionSlop)
+	fragment.y += ny * (penetration + physicsConfig.collisionSlop)
+
+	relativeVx := fragment.vx - surfaceVx
+	relativeVy := fragment.vy - surfaceVy
+	normalVelocity := relativeVx*nx + relativeVy*ny
+	if normalVelocity >= 0 {
+		return
+	}
+
+	fragment.vx -= (1 + debrisRestitution) * normalVelocity * nx
+	fragment.vy -= (1 + debrisRestitution) * normalVelocity * ny
+
+	tangentX, tangentY := -ny, nx
+	tangentVelocity := (fragment.vx-surfaceVx)*tangentX + (fragment.vy-surfaceVy)*tangentY
+	frictionDelta := -tangentVelocity * debrisFriction
+	fragment.vx += frictionDelta * tangentX
+	fragment.vy += frictionDelta * tangentY
+	if fragment.radius > 0 {
+		fragment.omega -= frictionDelta / fragment.radius * 0.35
+	}
+	clampDebrisSpeed(fragment)
+}
+
+func collideDebrisWithWalls(fragment *debrisFragment) {
+	if fragment.x-fragment.radius < 0 {
+		resolveDebrisSurfaceCollision(fragment, 1, 0, fragment.radius-fragment.x, 0, 0)
+	}
+	if fragment.x+fragment.radius > canvasWidth {
+		resolveDebrisSurfaceCollision(fragment, -1, 0, fragment.x+fragment.radius-canvasWidth, 0, 0)
+	}
+	if fragment.y-fragment.radius < 0 {
+		resolveDebrisSurfaceCollision(fragment, 0, 1, fragment.radius-fragment.y, 0, 0)
+	}
+	// There is intentionally no bottom wall. Fragments fall out and are removed.
+}
+
+func collideDebrisWithPaddle(fragment *debrisFragment) {
+	hit, nx, ny, penetration := circleAABBContact(
+		fragment.x, fragment.y, fragment.radius,
+		paddle.x, paddle.y, paddle.x+paddle.w, paddle.y+paddle.h,
+	)
+	if !hit {
+		return
+	}
+	resolveDebrisSurfaceCollision(fragment, nx, ny, penetration, paddle.vx, 0)
+}
+
+func collideDebrisWithBall(fragment *debrisFragment, b *Ball) {
+	if b == nil || b.r <= 0 || b.y-b.r > canvasHeight {
+		return
+	}
+	dx := b.x - fragment.x
+	dy := b.y - fragment.y
+	minimumDistance := b.r + fragment.radius
+	distanceSquared := dx*dx + dy*dy
+	if distanceSquared >= minimumDistance*minimumDistance {
+		return
+	}
+
+	distance := math.Sqrt(distanceSquared)
+	nx, ny := 0.0, -1.0
+	if distance > 0.000001 {
+		nx, ny = dx/distance, dy/distance
+	} else {
+		relativeLength := math.Hypot(b.vx-fragment.vx, b.vy-fragment.vy)
+		if relativeLength > 0.000001 {
+			nx = (b.vx - fragment.vx) / relativeLength
+			ny = (b.vy - fragment.vy) / relativeLength
+		}
+	}
+
+	penetration := minimumDistance - distance
+	// The small fragment takes most of the positional correction so the ball does
+	// not visibly jump when it touches a cloud of debris.
+	fragment.x -= nx * penetration * 0.82
+	fragment.y -= ny * penetration * 0.82
+	b.x += nx * penetration * 0.18
+	b.y += ny * penetration * 0.18
+
+	relativeVx := b.vx - fragment.vx
+	relativeVy := b.vy - fragment.vy
+	normalVelocity := relativeVx*nx + relativeVy*ny
+	if normalVelocity >= 0 {
+		return
+	}
+
+	fragmentMass := math.Max(0.05, fragment.mass)
+	ballMass := 1.0
+	restitution := math.Min(physicsConfig.restitution, debrisRestitution)
+	impulse := -(1 + restitution) * normalVelocity / (1/ballMass + 1/fragmentMass)
+	ballImpulse := impulse * debrisBallInfluence
+	fragmentImpulse := impulse
+
+	b.vx += nx * ballImpulse / ballMass
+	b.vy += ny * ballImpulse / ballMass
+	fragment.vx -= nx * fragmentImpulse / fragmentMass
+	fragment.vy -= ny * fragmentImpulse / fragmentMass
+
+	// Relative tangential motion gives the ball a restrained spin nudge. The main
+	// direction change remains the speed-dependent normal impulse above.
+	tangentX, tangentY := -ny, nx
+	tangentVelocity := relativeVx*tangentX + relativeVy*tangentY
+	if b.r > 0 {
+		b.omega += tangentVelocity * debrisBallInfluence * 0.06 / b.r
+		b.omega = clampFloat(b.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+	}
+
+	maximumBallSpeed := math.Max(physicsConfig.maxSpeed, physicsConfig.maxSpeed*1.35)
+	ballSpeed := math.Hypot(b.vx, b.vy)
+	if maximumBallSpeed > 0 && ballSpeed > maximumBallSpeed {
+		scale := maximumBallSpeed / ballSpeed
+		b.vx *= scale
+		b.vy *= scale
+	}
+	clampDebrisSpeed(fragment)
+	fragment.omega -= tangentVelocity * 0.025 / math.Max(1, fragment.radius)
+	resetFastOrbitCandidate(b)
+	recordMeasuredBallSpin(b)
+}
+
+func collideDebrisWithLivingBricks(fragment *debrisFragment) {
+	if fragment.age < debrisBrickCollisionDelay {
+		return
+	}
+
+	collided := false
+	consider := func(index int) {
+		if collided || index < 0 || index >= len(bricks) {
+			return
+		}
+		br := &bricks[index]
+		if !br.alive {
+			return
+		}
+		hit, nx, ny, penetration := circleAABBContact(
+			fragment.x, fragment.y, fragment.radius,
+			br.x, br.y, br.x+br.w, br.y+br.h,
+		)
+		if !hit {
+			return
+		}
+		resolveDebrisSurfaceCollision(fragment, nx, ny, penetration, 0, 0)
+		collided = true
+	}
+
+	if gridRows <= 0 || gridCols <= 0 || gridCellWidth <= 0 || gridCellHeight <= 0 {
+		for i := range bricks {
+			consider(i)
+			if collided {
+				return
+			}
+		}
+		return
+	}
+
+	minCol := int(math.Floor((fragment.x-fragment.radius-gridOffsetLeft)/gridCellWidth)) - 1
+	maxCol := int(math.Floor((fragment.x+fragment.radius-gridOffsetLeft)/gridCellWidth)) + 1
+	minRow := int(math.Floor((fragment.y-fragment.radius-gridOffsetTop)/gridCellHeight)) - 1
+	maxRow := int(math.Floor((fragment.y+fragment.radius-gridOffsetTop)/gridCellHeight)) + 1
+	minCol = max(0, minCol)
+	maxCol = min(gridCols-1, maxCol)
+	minRow = max(0, minRow)
+	maxRow = min(gridRows-1, maxRow)
+	for row := minRow; row <= maxRow && !collided; row++ {
+		for col := minCol; col <= maxCol && !collided; col++ {
+			for _, index := range brickGrid[gridKey(row, col)] {
+				consider(index)
+				if collided {
+					break
+				}
+			}
+		}
+	}
+}
+
+func debrisIsOffscreen(fragment *debrisFragment) bool {
+	margin := debrisOffscreenMargin
+	return fragment.y-fragment.radius > canvasHeight+margin ||
+		fragment.x+fragment.radius < -margin ||
+		fragment.x-fragment.radius > canvasWidth+margin ||
+		fragment.y+fragment.radius < -margin
+}
+
+func updateBrickDebris(dt float64) {
+	if len(brickDebris) == 0 || dt <= 0 {
+		return
+	}
+
+	debrisFieldTick++
+	kept := brickDebris[:0]
+	for i := range brickDebris {
+		fragment := brickDebris[i]
+		fragment.previousX = fragment.x
+		fragment.previousY = fragment.y
+		fragment.previousAngle = fragment.angle
+		fragment.age += dt
+		if fragment.age >= fragment.lifetime {
+			continue
+		}
+
+		applyDebrisFields(&fragment, dt, (debrisFieldTick+i)%4 == 0)
+		fragment.x += fragment.vx * dt
+		fragment.y += fragment.vy * dt
+		fragment.angle += fragment.omega * dt
+
+		collideDebrisWithWalls(&fragment)
+		collideDebrisWithPaddle(&fragment)
+		collideDebrisWithLivingBricks(&fragment)
+		collideDebrisWithBall(&fragment, &ball)
+		if secondBallActive {
+			collideDebrisWithBall(&fragment, &secondBall)
+		}
+
+		if debrisIsOffscreen(&fragment) {
+			continue
+		}
+		kept = append(kept, fragment)
+	}
+	brickDebris = kept
+}
+
+func debrisOpacity(fragment *debrisFragment) float64 {
+	remaining := fragment.lifetime - fragment.age
+	if remaining <= 0 {
+		return 0
+	}
+	if debrisFadeDuration <= 0 || remaining >= debrisFadeDuration {
+		return fragment.startOpacity
+	}
+	return fragment.startOpacity * clampFloat(remaining/debrisFadeDuration, 0, 1)
+}
+
+func drawBrickDebris(alpha float64) {
+	if len(brickDebris) == 0 {
+		return
+	}
+	alpha = clampFloat(alpha, 0, 1)
+	ctx.Call("save")
+	for i := range brickDebris {
+		fragment := &brickDebris[i]
+		opacity := debrisOpacity(fragment)
+		if opacity <= 0 || (!fragment.circle && fragment.pointCount < 3) {
+			continue
+		}
+		x := lerpFloat(fragment.previousX, fragment.x, alpha)
+		y := lerpFloat(fragment.previousY, fragment.y, alpha)
+		angle := lerpFloat(fragment.previousAngle, fragment.angle, alpha)
+
+		ctx.Call("save")
+		ctx.Set("globalAlpha", opacity)
+		ctx.Set("fillStyle", fragment.fillColor)
+		ctx.Call("translate", x, y)
+		ctx.Call("rotate", angle)
+		ctx.Call("beginPath")
+		if fragment.circle {
+			ctx.Call("arc", 0, 0, fragment.radius, 0, 2*math.Pi)
+		} else if fragment.roundness <= 0.001 {
+			ctx.Call("moveTo", fragment.points[0], fragment.points[1])
+			for point := 1; point < fragment.pointCount; point++ {
+				ctx.Call("lineTo", fragment.points[point*2], fragment.points[point*2+1])
+			}
+		} else {
+			cornerFraction := 0.08 + clampFloat(fragment.roundness, 0, 1)*0.34
+			last := fragment.pointCount - 1
+			startX := fragment.points[last*2] + (fragment.points[0]-fragment.points[last*2])*(1-cornerFraction)
+			startY := fragment.points[last*2+1] + (fragment.points[1]-fragment.points[last*2+1])*(1-cornerFraction)
+			ctx.Call("moveTo", startX, startY)
+			for point := 0; point < fragment.pointCount; point++ {
+				next := (point + 1) % fragment.pointCount
+				currentX := fragment.points[point*2]
+				currentY := fragment.points[point*2+1]
+				outX := currentX + (fragment.points[next*2]-currentX)*cornerFraction
+				outY := currentY + (fragment.points[next*2+1]-currentY)*cornerFraction
+				ctx.Call("quadraticCurveTo", currentX, currentY, outX, outY)
+			}
+		}
+		ctx.Call("closePath")
+		ctx.Call("fill")
+		ctx.Call("restore")
+	}
+	ctx.Call("restore")
+}
+
 // ---- Update (main loop) ----
 func update(dt float64) {
 	if gameOver || paused || waitingForStart {
@@ -4748,6 +5746,8 @@ func update(dt float64) {
 	}
 
 	if levelAdvancePending {
+		// Keep the final brick explosion alive during the level-complete hold.
+		updateBrickDebris(dt)
 		levelCompleteTimer -= dt
 		if levelCompleteTimer <= 0 {
 			levelCompleteTimer = 0
@@ -4949,6 +5949,11 @@ func update(dt float64) {
 		}
 	}
 
+	// Debris is integrated before the balls so shard impulses affect the balls'
+	// velocity during this same fixed step. Debris spawned by a ball impact begins
+	// moving on the following step, which avoids source-brick self-collisions.
+	updateBrickDebris(dt)
+
 	// Primary ball
 	updateBall(&ball, dt, true)
 
@@ -5010,6 +6015,8 @@ func resetBalls() {
 	paddle.vx = 0
 	paddlePreviousX = paddle.x
 	resetPaddleSpinHistory()
+	brickDebris = brickDebris[:0]
+	debrisFieldTick = 0
 	mouseControlActive = false
 	mousePaddleTargetX = paddle.x
 	clearLastPaddleSpinDebug()
@@ -5515,6 +6522,7 @@ func physicsOverlayLines() []string {
 		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
+		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
 		"",
 		"BALL 1 SPEED " + fmt.Sprintf("%.2f", math.Hypot(ball.vx, ball.vy)) +
 			" (max " + strconv.FormatFloat(physicsConfig.maxSpeed, 'f', -1, 64) + ")",
@@ -6092,6 +7100,8 @@ func draw(alpha float64) {
 		ctx.Call("arc", renderState.blackHoleX, renderState.blackHoleY, 42, 0, 2*math.Pi)
 		ctx.Call("stroke")
 	}
+
+	drawBrickDebris(alpha)
 
 	drawBall(renderState.ballX, renderState.ballY, ball.r, renderState.ballAngle, palette[3], palette[5])
 	if renderState.secondBallActive {

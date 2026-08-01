@@ -1,0 +1,98 @@
+BRICK DEBRIS PHYSICS — v56
+
+Every destroyed brick produces a configurable number of fragments. By default,
+18% are true circular chips, only 1.5% are deliberate triangular/sliver pieces,
+and the rest are compact rough, irregular, or rounded brick-like chunks. Normal
+chunks are limited to a 1.45:1 aspect ratio so narrow source cells do not turn
+most fragments into long sticks.
+
+Each fragment captures only the source brick's main fill color at destruction
+time, including level palette overrides.
+
+COLLISIONS
+
+  ball             two-way speed-based impulse; fragments can deflect the ball
+  paddle           moving-surface collision using the current paddle velocity
+  side/top walls   bounce with debris restitution and friction
+  living bricks    enabled after debrisBrickCollisionDelay (default 0.30 s)
+                    and never damages or destroys the brick
+  other debris     intentionally disabled for performance and visual clarity
+  bottom edge      no wall; pieces fall out and are removed
+
+FIELD EFFECTS
+
+  normal gravity
+  low gravity
+  reverse gravity
+  black hole attraction
+  brick magnet attraction
+
+The black-hole and magnet forces have independent debris scale controls.
+Magnet target searches are staggered across four 240 Hz steps, preserving the
+average force while doing the expensive nearest-brick lookup at 60 Hz per piece.
+
+DEFAULT LEVEL SETTINGS
+
+  debris=true
+  debrisPiecesMin=5
+  debrisPiecesMax=24
+  debrisLifetime=7
+  debrisFadeDuration=3
+  debrisStartOpacity=0.70
+  debrisStartOpacityVariation=0.10
+  debrisBallPieceChance=0.18
+  debrisSliverPieceChance=0.015
+  debrisMaxChunkAspectRatio=1.45
+  debrisBrickCollisionDelay=0.15
+  debrisGravityScale=0.7
+  debrisAirDrag=0.15
+  debrisRestitution=0.48
+  debrisFriction=1.24
+  debrisExplosionSpeedMin=150
+  debrisExplosionSpeedMax=1200
+  debrisAngularSpeedMin=2
+  debrisAngularSpeedMax=90
+  debrisBallInfluence=0.35
+  debrisFieldScale=0.80
+  debrisMagnetScale=0.65
+  debrisMaxSpeed=1100
+  debrisMaxActivePieces=100
+  debrisOffscreenMargin=120
+
+Smaller pieces receive more launch and angular speed than larger pieces. The
+size multiplier is deliberately restrained: launch speed is clamped to 0.80–1.45x
+and angular speed to 0.85–1.70x, so chips feel light without becoming bullets.
+
+True circular chips use the same circle for drawing and collision, so they add no
+extra collision cost. The shape controls may be overridden per level. Setting
+`debrisSliverPieceChance=0` removes deliberate slivers completely.
+
+Starting opacity defaults to 0.70. Each new piece receives a random offset in
+the range +/- debrisStartOpacityVariation (default 0.10), clamped to 0..1, so
+the normal starting range is 0.60..0.80. Fade-out multiplies the piece-specific
+starting opacity rather than jumping to full opacity first.
+
+These may be placed before --- in a level file. Setting debris=false disables
+fragment creation for that level. Setting debrisMaxActivePieces=0 also disables
+creation.
+
+PERFORMANCE BOUND
+
+The default hard cap is 100 active fragments. At 240 Hz this is at most 24,000
+fragment integration steps per second. Ball and paddle checks are constant-time;
+living-brick checks use the existing spatial grid; magnet searches are staggered.
+When Nuke or another mass-destruction effect would exceed the cap, the oldest
+fragments are removed first. The current debris count is shown in the P physics
+overlay as DEBRIS current/max.
+
+For slower mobile hardware, try:
+
+  debrisMaxActivePieces=160
+  debrisPiecesMin=4
+  debrisPiecesMax=5
+
+
+COLOR
+-----
+Each debris piece is rendered with one color only: the source brick main fill color.
+Magic and unbreakable stroke/secondary colors are deliberately ignored.

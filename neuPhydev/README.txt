@@ -1,5 +1,5 @@
-Breakout WASM — instant mouse + config.go + physics tuner (v48)
-Build ID: 20260730-8e4d2b7f61
+Breakout WASM — gamepad + physics tuner + dynamic brick debris (v56)
+Build ID: 20260801-56d4a2c781
 
 BUILD
 
@@ -131,3 +131,28 @@ defaultGamepadDeadZone. Keyboard, mouse, touch and phone tilt remain available.
 
 
 Joystick: axis 0 moves left/right, B0 starts/pauses, B1 toggles fullscreen.
+
+DYNAMIC BRICK DEBRIS
+--------------------
+Every destroyed normal, magic, or explicitly broken unbreakable brick creates
+a configurable number of irregular physical fragments. Each fragment stores the
+source brick's single main fill color plus an independently randomized
+starting opacity, then fades during the end of its lifetime.
+
+Fragments respond to gravity, low/reverse gravity, black holes and magnets. They
+collide with the ball, paddle, top/side walls, and—after the configured delay—
+living bricks without damaging them. They do not collide with one another.
+Pieces are removed when their lifetime ends or they fall outside the playfield.
+
+The attached config defaults to a cap of 100 active pieces. Mass destruction
+removes the oldest pieces rather than allowing the physics workload to grow
+without bound. See BRICK_DEBRIS.txt for all config.go defaults and level-file
+overrides.
+
+
+V55: debris fragments now use only the source brick main fill color; secondary stroke colors are not rendered.
+
+
+V56: deliberate slivers reduced to 1.5%, normal chunks are aspect-ratio limited,
+and 18% of debris pieces are true circles by default. All three values are
+config.go defaults and level-file overrides.

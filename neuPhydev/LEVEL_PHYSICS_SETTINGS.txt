@@ -78,3 +78,36 @@ scheduling or global presentation rather than one level's physical behavior:
   physicsOrbitMessageDuration
   high-spin message settings
   wall noise IDs
+
+DYNAMIC BRICK DEBRIS
+--------------------
+These are separate gameplay/fragment settings rather than ball physics fields:
+
+  debris=true
+  debrisPiecesMin=5
+  debrisPiecesMax=24
+  debrisLifetime=7
+  debrisFadeDuration=3
+  debrisStartOpacity=0.70          # base, 0..1
+  debrisStartOpacityVariation=0.10 # random +/- range, 0..1
+  debrisBallPieceChance=0.18        # true circular pieces, 0..1
+  debrisSliverPieceChance=0.015     # deliberate thin pieces, 0..1
+  debrisMaxChunkAspectRatio=1.45    # compact non-sliver shapes, >=1
+  debrisBrickCollisionDelay=0.15
+  debrisGravityScale=0.7
+  debrisAirDrag=0.15
+  debrisRestitution=0.48
+  debrisFriction=1.24
+  debrisExplosionSpeedMin=150
+  debrisExplosionSpeedMax=1200
+  debrisAngularSpeedMin=2
+  debrisAngularSpeedMax=90
+  debrisBallInfluence=0.35
+  debrisFieldScale=0.80
+  debrisMagnetScale=0.65
+  debrisMaxSpeed=1100
+  debrisMaxActivePieces=100
+  debrisOffscreenMargin=120
+
+See BRICK_DEBRIS.txt for collision behavior and performance notes.
+

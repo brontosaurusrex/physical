@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260801-56d4a2c781"
+	buildID = "20260731-51d781fa20"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -85,35 +85,6 @@ const (
 	defaultAudioRoom         = "none"
 	defaultAudioRoomDry      = -1.0
 	defaultMobileControlMode = "vertical"
-
-	// Dynamic brick debris. Fragments use bounded lightweight rigid-body physics
-	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
-	// effects from turning one frame into thousands of collision bodies.
-	defaultDebrisEnabled               = true
-	defaultDebrisPiecesMin             = 2
-	defaultDebrisPiecesMax             = 22
-	defaultDebrisLifetime              = 9.0
-	defaultDebrisFadeDuration          = 3.0
-	defaultDebrisStartOpacity          = 0.35
-	defaultDebrisStartOpacityVariation = 0.25
-	defaultDebrisBallPieceChance       = 0.18
-	defaultDebrisSliverPieceChance     = 0.015
-	defaultDebrisMaxChunkAspectRatio   = 1.45
-	defaultDebrisBrickCollisionDelay   = 0.55 //0.30
-	defaultDebrisGravityScale          = 0.7  //1.0
-	defaultDebrisAirDrag               = 0.15
-	defaultDebrisRestitution           = 0.48
-	defaultDebrisFriction              = 1.24
-	defaultDebrisExplosionSpeedMin     = 150.0
-	defaultDebrisExplosionSpeedMax     = 1200.0
-	defaultDebrisAngularSpeedMin       = 2.0
-	defaultDebrisAngularSpeedMax       = 6.0
-	defaultDebrisBallInfluence         = 0.35
-	defaultDebrisFieldScale            = 0.80
-	defaultDebrisMagnetScale           = 0.65
-	defaultDebrisMaxSpeed              = 1100.0
-	defaultDebrisMaxActivePieces       = 100
-	defaultDebrisOffscreenMargin       = 120.0
 
 	// Mouse position is direct. This only caps the measured surface velocity used
 	// for collision/spin calculations after a large cursor jump. It is part of
