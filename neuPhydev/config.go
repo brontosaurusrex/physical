@@ -99,7 +99,7 @@ const (
 	defaultDebrisBallPieceChance       = 0.18
 	defaultDebrisSliverPieceChance     = 0.015
 	defaultDebrisMaxChunkAspectRatio   = 1.45
-	defaultDebrisBrickCollisionDelay   = 0.55 //0.30
+	defaultDebrisBrickCollisionDelay   = 0.25 //0.30
 	defaultDebrisGravityScale          = 0.7  //1.0
 	defaultDebrisAirDrag               = 0.15
 	defaultDebrisRestitution           = 0.48
