@@ -17,6 +17,20 @@ enableMagnet=false
 audioRoom=space
 audioRoomDry=0.40
 title="THE GREAT EYE"
+
+backgroundColor=#071521
+paddleColor=#FAF0E6
+brickColor=#B9B4C7
+brickStrokeColor=#B9B4C7
+unbreakableColor=#5C5470
+unbreakableStrokeColor=#5C5470
+magicColor=#FAF0E6
+magicStrokeColor=#FAF0E6
+ballColor=#FAF0E6
+spinColor=#FAF0E6
+secondBallColor=#FAF0E6
+textColor=#FAF0E6
+secondBallSpinColor=#FAF0E6
 ---
 
 UU  UU  UUU   UUU  UU  UU
