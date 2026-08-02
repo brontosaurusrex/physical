@@ -1,0 +1,52 @@
+BLACK HOLE CURVED MOTION — v63
+
+The black hole no longer travels on a straight horizontal line.
+Each activation generates a new smooth random-looking curve around the middle
+of the screen, biased slightly upward.
+
+DEFAULTS IN config.go
+
+    defaultBlackHoleRange                       = 600.0
+    defaultBlackHolePathVerticalRange           = 120.0
+    defaultBlackHolePathCenterYOffset           = -70.0
+    defaultBlackHolePathHorizontalCyclesMin     = 0.95
+    defaultBlackHolePathHorizontalCyclesMax     = 1.15
+    defaultBlackHolePathVerticalCyclesMin       = 1.65
+    defaultBlackHolePathVerticalCyclesMax       = 2.35
+    defaultBlackHolePathWobble                  = 0.18
+
+MEANING
+
+blackHoleRange
+    Horizontal path radius in pixels. The old value was 200; the new 600 value
+    gives approximately three times as much horizontal travel.
+
+blackHolePathVerticalRange
+    Maximum vertical distance from the raised path centre.
+
+blackHolePathCenterYOffset
+    Vertical offset from exact screen centre. Negative values move the whole
+    path upward. The default -70 places it slightly above centre.
+
+Horizontal/vertical cycle ranges
+    A random cycle count is chosen for each activation. Different horizontal
+    and vertical rates generate a new Lissajous-style curve each time.
+
+blackHolePathWobble
+    Adds smooth phase modulation. 0 gives a cleaner Lissajous curve; larger
+    values make it more irregular. Accepted level-setting range: 0 to 0.45.
+
+LEVEL OVERRIDES
+
+    blackHoleStrength=800
+    blackHoleRange=600
+    blackHolePathVerticalRange=120
+    blackHolePathCenterYOffset=-70
+    blackHolePathHorizontalCyclesMin=0.95
+    blackHolePathHorizontalCyclesMax=1.15
+    blackHolePathVerticalCyclesMin=1.65
+    blackHolePathVerticalCyclesMax=2.35
+    blackHolePathWobble=0.18
+
+The path uses its own random-number generator, so it does not change gameplay,
+power-up, debris, or automatic-paddle random sequences.

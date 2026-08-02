@@ -162,3 +162,15 @@ BELOW-FLOOR BALL GRACE (V62)
 
   ballBelowFloorGracePixels=120    # 0..5000; measured from ball bottom edge
   # alias: ballFloorDeathMargin=120
+
+BLACK HOLE CURVED MOTION (v63)
+
+blackHoleStrength=800
+blackHoleRange=600
+blackHolePathVerticalRange=120
+blackHolePathCenterYOffset=-70
+blackHolePathHorizontalCyclesMin=0.95
+blackHolePathHorizontalCyclesMax=1.15
+blackHolePathVerticalCyclesMin=1.65
+blackHolePathVerticalCyclesMax=2.35
+blackHolePathWobble=0.18

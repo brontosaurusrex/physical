@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260802-62d5f1a8c3"
+	buildID = "20260802-63e7b4c1a9d"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -102,11 +102,11 @@ const (
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
 	// effects from turning one frame into thousands of collision bodies.
 	defaultDebrisEnabled   = true
-	defaultDebrisPiecesMin = 2
-	defaultDebrisPiecesMax = 16
+	defaultDebrisPiecesMin = 17 //10
+	defaultDebrisPiecesMax = 35 //25
 	defaultDebrisLifetime  = 9.0
-	// Each new piece receives lifetime × (1 ± variation/100). At 16.7% and
-	// a 9-second base lifetime, the approximate range is 7.5–10.5 seconds.
+	// Each new piece receives lifetime ├ù (1 ┬▒ variation/100). At 16.7% and
+	// a 9-second base lifetime, the approximate range is 7.5ΓÇô10.5 seconds.
 	defaultDebrisLifetimeVariationPercent = 16.7
 	defaultDebrisFadeDuration             = 3.0
 	defaultDebrisStartOpacity             = 0.35
@@ -136,11 +136,11 @@ const (
 	defaultDebrisAngularSpeedMax          = 6.0
 	defaultDebrisAngularDrag              = 1.10
 	defaultDebrisAngularStopSpeed         = 0.10
-	defaultDebrisBallInfluence            = 0.15
+	defaultDebrisBallInfluence            = 0.00 //0.15
 	defaultDebrisFieldScale               = 0.80
 	defaultDebrisMagnetScale              = 0.65
 	defaultDebrisMaxSpeed                 = 1100.0
-	defaultDebrisMaxActivePieces          = 150
+	defaultDebrisMaxActivePieces          = 200 //150
 	defaultDebrisOffscreenMargin          = 120.0
 
 	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
@@ -165,13 +165,24 @@ const (
 	// physicsSettings so levels and the in-game physics editor may override it.
 	defaultPhysicsMousePaddleSpinVelocityLimit = 6000.0
 
-	defaultPaddleRadius         = 12.0
-	defaultBrickRadius          = 6.0
-	defaultUnbreakableChance    = 0.15
-	defaultMagicChance          = 0.3
-	defaultPowerUpDuration      = 10.0
-	defaultBlackHoleStrength    = 800.0
-	defaultBlackHoleRange       = 200.0
+	defaultPaddleRadius      = 12.0
+	defaultBrickRadius       = 6.0
+	defaultUnbreakableChance = 0.15
+	defaultMagicChance       = 0.3
+	defaultPowerUpDuration   = 10.0
+	defaultBlackHoleStrength = 800.0
+	// Horizontal path radius. 600 px is three times the previous 200 px travel.
+	defaultBlackHoleRange = 600.0
+	// The black hole follows a different smooth curved path on each activation,
+	// centered slightly above the middle of the playfield.
+	defaultBlackHolePathVerticalRange       = 120.0
+	defaultBlackHolePathCenterYOffset       = -70.0
+	defaultBlackHolePathHorizontalCyclesMin = 0.95
+	defaultBlackHolePathHorizontalCyclesMax = 1.15
+	defaultBlackHolePathVerticalCyclesMin   = 1.65
+	defaultBlackHolePathVerticalCyclesMax   = 2.35
+	defaultBlackHolePathWobble              = 0.18
+
 	defaultMagnetStrength       = 600.0
 	defaultMagnetRange          = 300.0
 	defaultInfluencerMultiplier = 5.0
@@ -263,7 +274,7 @@ const (
 	defaultEnableBreakUnbreakable = true
 	defaultEnableBigPaddle        = true
 
-	showBlackHole = false
+	showBlackHole = true // false
 
 	defaultMagicColor             = "#f1faee"
 	defaultMagicStrokeColor       = "#ffd700"

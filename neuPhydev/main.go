@@ -289,12 +289,19 @@ var (
 	magicChance       = defaultMagicChance
 	powerUpDuration   = defaultPowerUpDuration
 
-	blackHoleStrength    = defaultBlackHoleStrength
-	blackHoleRange       = defaultBlackHoleRange
-	magnetStrength       = defaultMagnetStrength
-	magnetRange          = defaultMagnetRange
-	influencerMultiplier = defaultInfluencerMultiplier
-	zapperRange          = defaultZapperRange
+	blackHoleStrength                = defaultBlackHoleStrength
+	blackHoleRange                   = defaultBlackHoleRange
+	blackHolePathVerticalRange       = defaultBlackHolePathVerticalRange
+	blackHolePathCenterYOffset       = defaultBlackHolePathCenterYOffset
+	blackHolePathHorizontalCyclesMin = defaultBlackHolePathHorizontalCyclesMin
+	blackHolePathHorizontalCyclesMax = defaultBlackHolePathHorizontalCyclesMax
+	blackHolePathVerticalCyclesMin   = defaultBlackHolePathVerticalCyclesMin
+	blackHolePathVerticalCyclesMax   = defaultBlackHolePathVerticalCyclesMax
+	blackHolePathWobble              = defaultBlackHolePathWobble
+	magnetStrength                   = defaultMagnetStrength
+	magnetRange                      = defaultMagnetRange
+	influencerMultiplier             = defaultInfluencerMultiplier
+	zapperRange                      = defaultZapperRange
 
 	startBallX  = defaultStartBallX
 	startBallY  = defaultStartBallY
@@ -567,12 +574,20 @@ var (
 	bigPaddleTimer       float64
 	currentGravity       float64
 
-	blackHoleActive    bool
-	blackHoleTimer     float64
-	blackHoleX         float64
-	blackHoleY         float64
-	blackHoleDirection float64
-	blackHoleSpeed     float64
+	blackHoleActive bool
+	blackHoleTimer  float64
+	blackHoleX      float64
+	blackHoleY      float64
+
+	blackHolePathElapsed          float64
+	blackHolePathDuration         float64
+	blackHolePathHorizontalCycles float64
+	blackHolePathVerticalCycles   float64
+	blackHolePathPhaseX           float64
+	blackHolePathPhaseY           float64
+	blackHolePathWobblePhaseX     float64
+	blackHolePathWobblePhaseY     float64
+	blackHoleRNG                  = rand.New(rand.NewSource(0x63b10c7))
 
 	magnetCheat       bool
 	zapperCheat       bool
@@ -3063,6 +3078,13 @@ func resetGlobals() {
 	powerUpDuration = defaultPowerUpDuration
 	blackHoleStrength = defaultBlackHoleStrength
 	blackHoleRange = defaultBlackHoleRange
+	blackHolePathVerticalRange = defaultBlackHolePathVerticalRange
+	blackHolePathCenterYOffset = defaultBlackHolePathCenterYOffset
+	blackHolePathHorizontalCyclesMin = defaultBlackHolePathHorizontalCyclesMin
+	blackHolePathHorizontalCyclesMax = defaultBlackHolePathHorizontalCyclesMax
+	blackHolePathVerticalCyclesMin = defaultBlackHolePathVerticalCyclesMin
+	blackHolePathVerticalCyclesMax = defaultBlackHolePathVerticalCyclesMax
+	blackHolePathWobble = defaultBlackHolePathWobble
 	magnetStrength = defaultMagnetStrength
 	magnetRange = defaultMagnetRange
 	influencerMultiplier = defaultInfluencerMultiplier
@@ -3250,6 +3272,58 @@ func applyConfig(config map[string]string) {
 		case "zapper":
 			if b, err := strconv.ParseBool(val); err == nil {
 				levelZapperActive = b
+			}
+		case "blackHoleStrength":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				blackHoleStrength = f
+			} else {
+				log("blackHoleStrength must be zero or greater")
+			}
+		case "blackHoleRange":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				blackHoleRange = f
+			} else {
+				log("blackHoleRange must be zero or greater")
+			}
+		case "blackHolePathVerticalRange":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				blackHolePathVerticalRange = f
+			} else {
+				log("blackHolePathVerticalRange must be zero or greater")
+			}
+		case "blackHolePathCenterYOffset":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				blackHolePathCenterYOffset = f
+			}
+		case "blackHolePathHorizontalCyclesMin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				blackHolePathHorizontalCyclesMin = f
+			} else {
+				log("blackHolePathHorizontalCyclesMin must be greater than zero")
+			}
+		case "blackHolePathHorizontalCyclesMax":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				blackHolePathHorizontalCyclesMax = f
+			} else {
+				log("blackHolePathHorizontalCyclesMax must be greater than zero")
+			}
+		case "blackHolePathVerticalCyclesMin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				blackHolePathVerticalCyclesMin = f
+			} else {
+				log("blackHolePathVerticalCyclesMin must be greater than zero")
+			}
+		case "blackHolePathVerticalCyclesMax":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				blackHolePathVerticalCyclesMax = f
+			} else {
+				log("blackHolePathVerticalCyclesMax must be greater than zero")
+			}
+		case "blackHolePathWobble":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 0.45 {
+				blackHolePathWobble = f
+			} else {
+				log("blackHolePathWobble must be between 0 and 0.45")
 			}
 		case "magnetStrength":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
@@ -3935,6 +4009,75 @@ func refreshCurrentGravity() {
 	}
 }
 
+// randomBlackHolePathValue samples one path parameter without consuming the
+// gameplay RNG used for power-up selection.
+func randomBlackHolePathValue(minimum, maximum float64) float64 {
+	if minimum > maximum {
+		minimum, maximum = maximum, minimum
+	}
+	if maximum <= minimum {
+		return minimum
+	}
+	return minimum + blackHoleRNG.Float64()*(maximum-minimum)
+}
+
+// updateBlackHolePathPosition evaluates a smooth randomised Lissajous-style
+// curve. Phase-modulated harmonics keep the motion organic without sharp
+// corners, while the configured ranges keep it near the middle of the screen.
+func updateBlackHolePathPosition() {
+	duration := math.Max(blackHolePathDuration, 0.001)
+	progress := clampFloat(blackHolePathElapsed/duration, 0, 1)
+	angle := 2 * math.Pi * progress
+
+	wobble := clampFloat(blackHolePathWobble, 0, 0.45)
+	xDetail := math.Sin(angle*blackHolePathHorizontalCycles*2.73 + blackHolePathWobblePhaseX)
+	xCurve := math.Sin(angle*blackHolePathHorizontalCycles + blackHolePathPhaseX + wobble*xDetail)
+
+	yDetail := math.Sin(angle*blackHolePathVerticalCycles*1.91 + blackHolePathWobblePhaseY)
+	yCurve := math.Sin(angle*blackHolePathVerticalCycles + blackHolePathPhaseY + wobble*0.72*yDetail)
+
+	const visualMargin = 48.0
+	centerX := canvasWidth / 2
+	centerY := clampFloat(canvasHeight/2+blackHolePathCenterYOffset, visualMargin, canvasHeight-visualMargin)
+	horizontalRange := math.Min(math.Max(0, blackHoleRange), math.Max(0, centerX-visualMargin))
+	verticalRange := math.Min(
+		math.Max(0, blackHolePathVerticalRange),
+		math.Max(0, math.Min(centerY-visualMargin, canvasHeight-visualMargin-centerY)),
+	)
+
+	blackHoleX = centerX + horizontalRange*xCurve
+	blackHoleY = centerY + verticalRange*yCurve
+}
+
+func startBlackHolePath() {
+	blackHolePathElapsed = 0
+	blackHolePathDuration = math.Max(powerUpDuration, 0.001)
+	blackHolePathHorizontalCycles = randomBlackHolePathValue(
+		blackHolePathHorizontalCyclesMin,
+		blackHolePathHorizontalCyclesMax,
+	)
+	blackHolePathVerticalCycles = randomBlackHolePathValue(
+		blackHolePathVerticalCyclesMin,
+		blackHolePathVerticalCyclesMax,
+	)
+	blackHolePathPhaseX = blackHoleRNG.Float64() * 2 * math.Pi
+	blackHolePathPhaseY = blackHoleRNG.Float64() * 2 * math.Pi
+	blackHolePathWobblePhaseX = blackHoleRNG.Float64() * 2 * math.Pi
+	blackHolePathWobblePhaseY = blackHoleRNG.Float64() * 2 * math.Pi
+	updateBlackHolePathPosition()
+}
+
+func resetBlackHolePath() {
+	blackHolePathElapsed = 0
+	blackHolePathDuration = 0
+	blackHolePathHorizontalCycles = 0
+	blackHolePathVerticalCycles = 0
+	blackHolePathPhaseX = 0
+	blackHolePathPhaseY = 0
+	blackHolePathWobblePhaseX = 0
+	blackHolePathWobblePhaseY = 0
+}
+
 func clearTimedPowerUps() {
 	stopAllMagicFeatureVoices()
 	lowGravityActive = false
@@ -3951,6 +4094,7 @@ func clearTimedPowerUps() {
 	bigPaddleTimer = 0
 	blackHoleActive = false
 	blackHoleTimer = 0
+	resetBlackHolePath()
 	influencerActive = false
 	influencerTimer = 0
 	secondBallActive = false
@@ -4059,15 +4203,9 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 		blackHoleTimer = powerUpDuration
 		currentGravity = 0
 
-		// Move back and forth within a limited range around screen center.
-		blackHoleX = canvasWidth / 2
-		blackHoleY = canvasHeight / 2
-		blackHoleSpeed = (4 * blackHoleRange) / math.Max(powerUpDuration, 0.001)
-		if rand.Intn(2) == 0 {
-			blackHoleDirection = 1
-		} else {
-			blackHoleDirection = -1
-		}
+		// Generate a fresh smooth curve around the slightly raised screen centre.
+		// Path randomness is isolated from gameplay randomness.
+		startBlackHolePath()
 
 		showStatus("Black Hole!", powerUpDuration)
 		refreshCurrentGravity()
@@ -4416,9 +4554,8 @@ func startLevel(index int) {
 	blackHoleActive = false
 	blackHoleTimer = 0
 	blackHoleX = canvasWidth / 2
-	blackHoleY = canvasHeight / 2
-	blackHoleDirection = 0
-	blackHoleSpeed = 0
+	blackHoleY = canvasHeight/2 + blackHolePathCenterYOffset
+	resetBlackHolePath()
 	refreshCurrentGravity()
 	influencerActive = false
 	influencerTimer = 0
@@ -4436,6 +4573,7 @@ func startLevel(index int) {
 
 	debrisRNG.Seed(int64(index+1)*0x52d3b715 + 1)
 	autoPaddleRNG.Seed(int64(index+1)*0x60a17f3d + 7)
+	blackHoleRNG.Seed(int64(index+1)*0x63b10c7 + 11)
 	resetAutoPaddleHitPlan()
 	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
@@ -6773,27 +6911,15 @@ func update(dt float64) {
 	}
 
 	if blackHoleActive {
-		blackHoleX += blackHoleDirection * blackHoleSpeed * dt
-
-		leftLimit := canvasWidth/2 - blackHoleRange
-		rightLimit := canvasWidth/2 + blackHoleRange
-
-		if blackHoleX <= leftLimit {
-			blackHoleX = leftLimit
-			blackHoleDirection = 1
-		}
-		if blackHoleX >= rightLimit {
-			blackHoleX = rightLimit
-			blackHoleDirection = -1
-		}
+		blackHolePathElapsed = math.Min(blackHolePathDuration, blackHolePathElapsed+dt)
+		updateBlackHolePathPosition()
 
 		blackHoleTimer -= dt
 		if blackHoleTimer <= 0 {
 			stopMagicFeatureVoice("blackhole")
 			blackHoleActive = false
 			blackHoleTimer = 0
-			blackHoleDirection = 0
-			blackHoleSpeed = 0
+			resetBlackHolePath()
 			gravityChanged = true
 		}
 	}
@@ -7224,6 +7350,24 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return strconv.FormatBool(levelMagnetActive), "false", "bool", true
 	case "zapper":
 		return strconv.FormatBool(levelZapperActive), "false", "bool", true
+	case "blackHoleStrength":
+		return formatConfigFloat(blackHoleStrength), formatConfigFloat(defaultBlackHoleStrength), "float", true
+	case "blackHoleRange":
+		return formatConfigFloat(blackHoleRange), formatConfigFloat(defaultBlackHoleRange), "float", true
+	case "blackHolePathVerticalRange":
+		return formatConfigFloat(blackHolePathVerticalRange), formatConfigFloat(defaultBlackHolePathVerticalRange), "float", true
+	case "blackHolePathCenterYOffset":
+		return formatConfigFloat(blackHolePathCenterYOffset), formatConfigFloat(defaultBlackHolePathCenterYOffset), "float", true
+	case "blackHolePathHorizontalCyclesMin":
+		return formatConfigFloat(blackHolePathHorizontalCyclesMin), formatConfigFloat(defaultBlackHolePathHorizontalCyclesMin), "float", true
+	case "blackHolePathHorizontalCyclesMax":
+		return formatConfigFloat(blackHolePathHorizontalCyclesMax), formatConfigFloat(defaultBlackHolePathHorizontalCyclesMax), "float", true
+	case "blackHolePathVerticalCyclesMin":
+		return formatConfigFloat(blackHolePathVerticalCyclesMin), formatConfigFloat(defaultBlackHolePathVerticalCyclesMin), "float", true
+	case "blackHolePathVerticalCyclesMax":
+		return formatConfigFloat(blackHolePathVerticalCyclesMax), formatConfigFloat(defaultBlackHolePathVerticalCyclesMax), "float", true
+	case "blackHolePathWobble":
+		return formatConfigFloat(blackHolePathWobble), formatConfigFloat(defaultBlackHolePathWobble), "float", true
 	case "magnetStrength":
 		return formatConfigFloat(magnetStrength), formatConfigFloat(defaultMagnetStrength), "float", true
 	case "magnetRange":
@@ -7397,7 +7541,7 @@ func physicsOverlayLines() []string {
 	lines := []string{
 		"BUILD " + buildID,
 		"AUTO PADDLE        " + autoPaddleState,
-		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / ±%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
+		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / ┬▒%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
 		"PHYSICS FIXED STEP " + fmt.Sprintf("%.0f Hz / %.3f ms", physicsStepHz, physicsStepSeconds*1000),
 		"MAX TRAVEL / TICK  " + fmt.Sprintf("%.2f px", physicsConfig.maxSpeed*physicsStepSeconds),
 		"PHYSICS ACTUAL     " + fmt.Sprintf("%.1f Hz", physicsStepRateCurrent),
@@ -8218,7 +8362,7 @@ func ensurePhysicsEditorPanel() {
 	header.Call("appendChild", title)
 
 	hint := doc.Call("createElement", "div")
-	hint.Set("textContent", "E closes + copies · O auto paddle")
+	hint.Set("textContent", "E closes + copies ┬╖ O auto paddle")
 	setStyle(hint, "fontSize", "13px")
 	setStyle(hint, "opacity", "0.70")
 	header.Call("appendChild", hint)
