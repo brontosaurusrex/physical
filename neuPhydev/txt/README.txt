@@ -1,5 +1,5 @@
-Breakout WASM — opaque layered debris + expanded shapes (v61)
-Build ID: 20260802-61c9e4b7a2
+Breakout WASM — speed-dependent debris depth ordering (v64)
+Build ID: 20260802-64f2c8d7b1
 
 BUILD
 
@@ -236,3 +236,11 @@ Level override:
 
 The threshold is measured from the ball's bottom edge. Set it to 0 to restore the
 old immediate floor boundary. The P overlay shows FLOOR GRACE.
+
+V64: SPEED-DEPENDENT DEBRIS DEPTH
+
+Debris is split into two visual layers using debrisFrontLayerSpeed. Shards below
+the threshold are drawn behind living bricks; shards at or above it are drawn
+after the brick cache and therefore pass visibly over intact bricks. The default
+is 600 px/s. Each shard is drawn exactly once; the renderer only performs one
+extra velocity-squared comparison per active shard per frame.

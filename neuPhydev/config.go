@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260802-63e7b4c1a9d"
+	buildID = "20260802-64f2c8d7b1"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -140,8 +140,11 @@ const (
 	defaultDebrisFieldScale               = 0.80
 	defaultDebrisMagnetScale              = 0.65
 	defaultDebrisMaxSpeed                 = 1100.0
-	defaultDebrisMaxActivePieces          = 200 //150
-	defaultDebrisOffscreenMargin          = 120.0
+	// Shards at or above this linear speed are drawn over living bricks. Slower
+	// shards remain behind them. Zero puts every shard in the front layer.
+	defaultDebrisFrontLayerSpeed = 600.0
+	defaultDebrisMaxActivePieces = 200 //150
+	defaultDebrisOffscreenMargin = 120.0
 
 	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
 	// tilt measures movement along the orbit's minor axis. Only healthy fixed-step
@@ -274,7 +277,7 @@ const (
 	defaultEnableBreakUnbreakable = true
 	defaultEnableBigPaddle        = true
 
-	showBlackHole = true // false
+	showBlackHole = false // false
 
 	defaultMagicColor             = "#f1faee"
 	defaultMagicStrokeColor       = "#ffd700"
@@ -355,6 +358,7 @@ var debrisEditorSliderSpecs = []debrisSliderSpec{
 	{group: "Motion and settling", key: "debrisAngularDrag", label: "Angular drag", configName: "defaultDebrisAngularDrag", min: 0, max: 8, step: 0.05, precision: 2},
 	{group: "Motion and settling", key: "debrisAngularStopSpeed", label: "Angular stop threshold", configName: "defaultDebrisAngularStopSpeed", min: 0, max: 5, step: 0.05, precision: 2},
 	{group: "Motion and settling", key: "debrisMaxSpeed", label: "Maximum shard speed", configName: "defaultDebrisMaxSpeed", min: 0, max: 2500, step: 25, precision: 0},
+	{group: "Motion and settling", key: "debrisFrontLayerSpeed", label: "Front-layer speed threshold", configName: "defaultDebrisFrontLayerSpeed", min: 0, max: 2500, step: 25, precision: 0},
 	{group: "Motion and settling", key: "debrisOffscreenMargin", label: "Offscreen cleanup margin", configName: "defaultDebrisOffscreenMargin", min: 0, max: 500, step: 5, precision: 0},
 
 	{group: "Contact and fields", key: "debrisBrickCollisionDelay", label: "Brick collision delay", configName: "defaultDebrisBrickCollisionDelay", min: 0, max: 2, step: 0.01, precision: 2},

@@ -364,6 +364,7 @@ var (
 	debrisFieldScale               = defaultDebrisFieldScale
 	debrisMagnetScale              = defaultDebrisMagnetScale
 	debrisMaxSpeed                 = defaultDebrisMaxSpeed
+	debrisFrontLayerSpeed          = defaultDebrisFrontLayerSpeed
 	debrisMaxActivePieces          = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin          = defaultDebrisOffscreenMargin
 
@@ -1552,6 +1553,7 @@ func normalizeDebrisSettings() {
 	debrisFieldScale = math.Max(0, debrisFieldScale)
 	debrisMagnetScale = math.Max(0, debrisMagnetScale)
 	debrisMaxSpeed = math.Max(0, debrisMaxSpeed)
+	debrisFrontLayerSpeed = math.Max(0, debrisFrontLayerSpeed)
 	if debrisMaxActivePieces < 0 {
 		debrisMaxActivePieces = 0
 	}
@@ -3143,6 +3145,7 @@ func resetGlobals() {
 	debrisFieldScale = defaultDebrisFieldScale
 	debrisMagnetScale = defaultDebrisMagnetScale
 	debrisMaxSpeed = defaultDebrisMaxSpeed
+	debrisFrontLayerSpeed = defaultDebrisFrontLayerSpeed
 	debrisMaxActivePieces = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin = defaultDebrisOffscreenMargin
 	autoPaddleHitVariation = defaultAutoPaddleHitVariation
@@ -3647,6 +3650,12 @@ func applyConfig(config map[string]string) {
 		case "debrisMaxSpeed":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
 				debrisMaxSpeed = f
+			}
+		case "debrisFrontLayerSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisFrontLayerSpeed = f
+			} else {
+				log("debrisFrontLayerSpeed must be zero or greater")
 			}
 		case "debrisOffscreenMargin":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
@@ -6523,14 +6532,20 @@ func debrisOpacity(fragment *debrisFragment) float64 {
 	return clampFloat(opacity, 0, 1)
 }
 
-func drawBrickDebris(alpha float64) {
+func drawBrickDebris(alpha float64, frontLayer bool) {
 	if len(brickDebris) == 0 {
 		return
 	}
 	alpha = clampFloat(alpha, 0, 1)
+	thresholdSquared := debrisFrontLayerSpeed * debrisFrontLayerSpeed
 	ctx.Call("save")
 	for i := range brickDebris {
 		fragment := &brickDebris[i]
+		fragmentFrontLayer := debrisFrontLayerSpeed <= 0 ||
+			fragment.vx*fragment.vx+fragment.vy*fragment.vy >= thresholdSquared
+		if fragmentFrontLayer != frontLayer {
+			continue
+		}
 		opacity := debrisOpacity(fragment)
 		if opacity <= 0 || (!fragment.circle && fragment.pointCount < 3) {
 			continue
@@ -7428,6 +7443,8 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return formatConfigFloat(autoPaddleHitVariation), formatConfigFloat(defaultAutoPaddleHitVariation), "float", true
 	case "debrisLifetimeVariationPercent":
 		return formatConfigFloat(debrisLifetimeVariationPercent), formatConfigFloat(defaultDebrisLifetimeVariationPercent), "float", true
+	case "debrisFrontLayerSpeed":
+		return formatConfigFloat(debrisFrontLayerSpeed), formatConfigFloat(defaultDebrisFrontLayerSpeed), "float", true
 	default:
 		return "", "", "", false
 	}
@@ -7843,6 +7860,8 @@ func debrisEditorValue(key string) float64 {
 		return debrisMagnetScale
 	case "debrisMaxSpeed":
 		return debrisMaxSpeed
+	case "debrisFrontLayerSpeed":
+		return debrisFrontLayerSpeed
 	case "debrisOffscreenMargin":
 		return debrisOffscreenMargin
 	}
@@ -7925,6 +7944,8 @@ func setDebrisEditorRawValue(key string, value float64) {
 		debrisMagnetScale = value
 	case "debrisMaxSpeed":
 		debrisMaxSpeed = value
+	case "debrisFrontLayerSpeed":
+		debrisFrontLayerSpeed = value
 	case "debrisOffscreenMargin":
 		debrisOffscreenMargin = value
 	}
@@ -8014,6 +8035,8 @@ func defaultDebrisEditorValue(key string) float64 {
 		return defaultDebrisMagnetScale
 	case "debrisMaxSpeed":
 		return defaultDebrisMaxSpeed
+	case "debrisFrontLayerSpeed":
+		return defaultDebrisFrontLayerSpeed
 	case "debrisOffscreenMargin":
 		return defaultDebrisOffscreenMargin
 	}
@@ -8741,14 +8764,17 @@ func draw(alpha float64) {
 	ctx.Set("fillStyle", palette[0])
 	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
 
-	// Dynamic debris is drawn first so living bricks occlude it. Destroyed-brick
-	// gaps still reveal the fragments, and the balls/paddle remain above both.
-	drawBrickDebris(alpha)
+	// Slow debris stays behind living bricks. Fast debris gets a second depth pass
+	// after the brick cache, so energetic shards visibly fly over intact bricks.
+	// Each fragment is still drawn exactly once; the extra work is only a cheap
+	// velocity-squared classification during the second scan.
+	drawBrickDebris(alpha, false)
 
 	if bricksDirty {
 		rebuildBrickCanvas()
 	}
 	ctx.Call("drawImage", brickCanvas, 0, 0)
+	drawBrickDebris(alpha, true)
 	drawZapperBolts()
 
 	if renderState.blackHoleActive && showBlackHole {
