@@ -1,0 +1,93 @@
+BRICK DEBRIS PHYSICS — v61
+==========================
+
+Every destroyed brick produces configurable physical fragments. Each fragment
+uses the source brick's main fill color, independent starting opacity, size,
+rotation, velocity and lifetime.
+
+ATTACHED CONFIG DEFAULTS
+
+  debris=true
+  debrisPiecesMin=2
+  debrisPiecesMax=16
+  debrisLifetime=9
+  debrisLifetimeVariationPercent=16.7
+  debrisFadeDuration=3
+  debrisStartOpacity=0.35
+  debrisStartOpacityVariation=0.25
+  debrisFlashDuration=0.10
+  debrisFlashOpacity=1.00
+  debrisImpactSpeedFactor=0.35
+  debrisBallPieceChance=0.18
+  debrisTrianglePieceChance=0.14
+  debrisStarPieceChance=0.06
+  debrisStarPointsMin=4
+  debrisStarPointsMax=7
+  debrisGlassPieceChance=0.20
+  debrisGlassCornersMin=7
+  debrisGlassCornersMax=14
+  debrisSliverPieceChance=0.015
+  debrisMaxChunkAspectRatio=1.45
+  debrisSizeScale=1.35
+  debrisBrickCollisionDelay=0.25
+  debrisGravityScale=0.7
+  debrisAirDrag=0.15
+  debrisRestitution=0.48
+  debrisFriction=1.00
+  debrisExplosionSpeedMin=150
+  debrisExplosionSpeedMax=1200
+  debrisAngularSpeedMin=2
+  debrisAngularSpeedMax=6
+  debrisAngularDrag=1.10
+  debrisAngularStopSpeed=0.10
+  debrisBallInfluence=0.35
+  debrisFieldScale=0.80
+  debrisMagnetScale=0.65
+  debrisMaxSpeed=1100
+  debrisMaxActivePieces=150
+  debrisOffscreenMargin=120
+
+LIFETIME VARIATION
+
+Every new piece gets its own lifetime:
+
+  lifetime = debrisLifetime * random(1-v, 1+v)
+  v = debrisLifetimeVariationPercent / 100
+
+With 9 seconds and 16.7%, the range is approximately 7.5..10.5 seconds. Use 0
+for identical lifetimes. The allowed range is 0..95%.
+
+
+RENDERING AND COLOR
+
+Debris is drawn behind the cached living-brick layer. Intact bricks therefore
+cover fragments, while the empty space left by destroyed bricks reveals them.
+Balls, paddle and overlays remain above the debris.
+
+The apparent opacity is pre-blended into an opaque fill color against the
+current level background. Pieces retain the muted colors produced by opacity,
+but overlapping debris occludes rather than accumulating transparency. The
+opening flash and end fade are also represented by opaque blended colors.
+
+SHAPE MIX
+
+New configurable families supplement circles, compact chunks and rare slivers:
+
+  triangles                    3 corners
+  stars                        4..7 points / 8..14 corners
+  glass-like radial polygons   7..14 corners
+
+Stars vary their inner radius and corner angles. Glass pieces vary both corner
+angles and radial lengths, producing sharp, irregular silhouettes. Rendering
+uses the full outline; collision remains the existing conservative circle.
+
+COLLISIONS AND FIELDS
+
+Fragments collide with balls, paddle, top/side walls and living bricks after the
+configured delay. They never destroy living bricks and do not collide with one
+another. Gravity, low/reverse gravity, black holes and magnets affect them.
+
+PERFORMANCE
+
+The active-piece cap remains the main bound. The attached default is 150 pieces.
+Mass destruction removes the oldest fragments when necessary.

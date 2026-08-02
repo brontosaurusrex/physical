@@ -1,0 +1,33 @@
+BALL BELOW-FLOOR GRACE — V62
+============================
+
+The ball remains alive and physically simulated after crossing the visible floor.
+It is lost only when its bottom edge travels beyond:
+
+  canvasHeight + ballBelowFloorGracePixels
+
+Default config.go value:
+
+  defaultBallBelowFloorGracePixels = 120.0
+
+Level-file override:
+
+  ballBelowFloorGracePixels=120
+
+Accepted alias:
+
+  ballFloorDeathMargin=120
+
+Range: 0..5000 pixels.
+
+While inside the grace zone, the ball continues receiving:
+
+  - normal or reversed gravity
+  - black-hole attraction
+  - air drag and Magnus/spin effects
+  - side-wall physics if applicable
+
+Therefore a reverse-gravity or black-hole effect can pull the ball back into the
+visible playfield before it crosses the final limit.
+
+Set the value to 0 to preserve the old immediate-death boundary.

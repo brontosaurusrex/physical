@@ -1,0 +1,164 @@
+PER-LEVEL PHYSICS SETTINGS
+==========================
+
+Put overrides before the --- separator in a level file. Omitted values use the
+matching defaults from config.go. Names are case-sensitive.
+
+CORE PHYSICS
+
+  gravity=300
+  restitution=0.90                 # 0..1
+  frictionCoeff=0.14               # >= 0
+  paddleBoost=900
+  brickBoost=100
+  maxSpeed=1000                    # > 0
+  maxSpin=1530                     # > 0
+  stuckSpeedThreshold=85           # >= 0
+  stuckDuration=1.2                # >= 0
+  tiltUpSpeed=520                  # >= 0
+  tiltSideMin=180                  # >= 0
+  tiltSideMax=340                  # >= 0
+
+FLIGHT / SPIN
+
+  magnusCoefficient=0.003          # >= 0
+  magnusAccelerationScale=0.25     # >= 0
+  spinDrag=0.04                    # >= 0
+  airDrag=0.010                    # >= 0
+  paddleSpinGraceSeconds=0.050     # >= 0; 0 disables history
+  mousePaddleSpinVelocityLimit=6000 # >= 0; 0 disables mouse spin cap
+  overspeedHalfLife=0.35           # >= 0; 0 disables overspeed easing
+
+COLLISION / SURFACE GRIP
+
+  wallFrictionScale=2.00           # >= 0
+  brickFrictionScale=2.00          # >= 0
+  unbreakableFrictionScale=1.80    # >= 0
+  paddleFrictionScale=3.20         # >= 0
+  paddleSpinTransfer=2.80          # >= 0
+  collisionSpinCoupling=2.00       # >= 0
+  minimumCollisionGrip=0.08        # >= 0
+  minimumPaddleGrip=0.55           # >= 0
+  collisionSlop=0.05               # >= 0
+
+WALL ROUGHNESS
+
+  wallNoiseCellSize=20             # >= 0; 0 disables variation
+  wallSideTiltDegrees=0.15         # >= 0
+  wallTopTiltDegrees=3.45          # >= 0
+  wallCornerFadeDistance=40        # >= 0
+
+BRICK MICRO-TILT
+
+  brickTiltMinDegrees=0.2          # >= 0
+  brickTiltMaxDegrees=2.0          # >= 0
+  drawBrickTilt=true               # true/false
+
+UNBREAKABLE ORBIT ESCAPE
+
+  orbitMinimumSpeed=300            # >= 0
+  orbitMinimumHitSpeed=80          # >= 0
+  orbitMinorSpeedRatio=0.08        # >= 0
+  orbitMinorSpeedFloor=45          # >= 0
+  orbitRequiredHits=3              # positive integer
+  orbitDetectionWindow=4.0         # >= 0
+  orbitMaximumMinorProgress=40     # >= 0
+  orbitHitCooldown=0.08            # >= 0
+  orbitEscapeSpeed=110             # >= 0
+  orbitEscapeDuration=0.90         # >= 0
+
+NOT LEVEL SETTINGS
+
+The following remain compile-time-only in config.go because they control engine
+scheduling or global presentation rather than one level's physical behavior:
+
+  physicsStepHz
+  physicsMaxCatchUpSteps
+  physicsWarningHoldSeconds
+  physicsOrbitMessageDuration
+  high-spin message settings
+  wall noise IDs
+
+AUTOMATIC INSPECTION PADDLE
+---------------------------
+
+  autoPaddleHitVariation=0.65 # 0=center only; max 0.90
+
+DYNAMIC BRICK DEBRIS
+--------------------
+These are separate gameplay/fragment settings rather than ball physics fields:
+
+  debris=true
+  debrisPiecesMin=2
+  debrisPiecesMax=16
+  debrisLifetime=9
+  debrisLifetimeVariationPercent=16.7 # random +/- percent for new pieces
+  debrisFadeDuration=3
+  debrisStartOpacity=0.35          # settled base, 0..1
+  debrisStartOpacityVariation=0.25 # random +/- range, 0..1
+  debrisFlashDuration=0.10         # bright opening transition in seconds
+  debrisFlashOpacity=1.00          # opening opacity, 0..1
+  debrisImpactSpeedFactor=0.35     # impact speed added to launch energy
+  debrisBallPieceChance=0.18       # true circular pieces, 0..1
+  debrisTrianglePieceChance=0.14   # compact triangles, 0..1
+  debrisStarPieceChance=0.06       # concave stars, 0..1
+  debrisStarPointsMin=4            # 3..8 star points
+  debrisStarPointsMax=7            # 3..8 star points
+  debrisGlassPieceChance=0.20      # sharp many-corner polygons, 0..1
+  debrisGlassCornersMin=7          # 7..16 corners
+  debrisGlassCornersMax=14         # 7..16 corners
+  debrisSliverPieceChance=0.015    # deliberate thin pieces, 0..1
+  debrisMaxChunkAspectRatio=1.45    # compact non-sliver shapes, >=1
+  debrisSizeScale=1.35               # draw/collision size multiplier, 0.25..3
+  debrisBrickCollisionDelay=0.25
+  debrisGravityScale=0.7
+  debrisAirDrag=0.15
+  debrisRestitution=0.48
+  debrisFriction=1.00
+  debrisExplosionSpeedMin=150
+  debrisExplosionSpeedMax=1200
+  debrisAngularSpeedMin=2
+  debrisAngularSpeedMax=6
+  debrisAngularDrag=1.10             # exponential rotational damping, >=0
+  debrisAngularStopSpeed=0.10        # snap omega to zero below this, >=0
+  debrisBallInfluence=0.35
+  debrisFieldScale=0.80
+  debrisMagnetScale=0.65
+  debrisMaxSpeed=1100
+  debrisMaxActivePieces=150
+  debrisOffscreenMargin=120
+
+See BRICK_DEBRIS.txt for collision behavior and performance notes.
+
+
+
+BALL RESCUE / TELEPORT
+----------------------
+These settings govern the automatic fallback after TILT! and Orbital tilt!:
+
+  ballRescue=true
+  ballRescueFailureLimit=4
+  ballRescueMinProgress=80
+  ballRescueCheckDuration=1.0
+  ballRescueUpperScreenFraction=0.333333
+  ballRescueClearance=12
+  ballRescueLaunchSpeed=520
+  ballRescueMinRealtimePercent=90
+  ballRescueMaxComputeLoad=85
+
+A normal TILT! measures total displacement. Orbital tilt measures only the orbit
+minor axis: horizontal movement for a vertical orbit and vertical movement for a
+horizontal orbit. Successful progress resets the consecutive-failure count.
+
+A failed attempt counts only when the fixed-step simulation is healthy: realtime
+percentage meets the minimum, compute load stays below the maximum, and no recent
+physics warning/dropped-time event is active. On the configured failure limit,
+the ball is placed in a collision-free position, preferring the upper third.
+
+Press T during active gameplay for a manual teleport. It uses the same safe
+position and launch logic but intentionally bypasses the performance gate.
+
+BELOW-FLOOR BALL GRACE (V62)
+
+  ballBelowFloorGracePixels=120    # 0..5000; measured from ball bottom edge
+  # alias: ballFloorDeathMargin=120

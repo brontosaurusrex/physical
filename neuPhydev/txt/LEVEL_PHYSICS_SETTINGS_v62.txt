@@ -157,3 +157,8 @@ the ball is placed in a collision-free position, preferring the upper third.
 
 Press T during active gameplay for a manual teleport. It uses the same safe
 position and launch logic but intentionally bypasses the performance gate.
+
+BELOW-FLOOR BALL GRACE (V62)
+
+  ballBelowFloorGracePixels=120    # 0..5000; measured from ball bottom edge
+  # alias: ballFloorDeathMargin=120

@@ -220,3 +220,19 @@ opaque colors blended against the level background, preventing overlap from
 becoming increasingly transparent. New live-tunable shape families include
 triangles, randomized stars and sharp seven-to-sixteen-corner glass polygons.
 All continue to use bounded-circle collision physics.
+
+
+V62: BELOW-FLOOR BALL GRACE ZONE
+--------------------------------
+The ball is no longer lost the instant its bottom edge crosses the visible floor.
+It continues receiving full physics below the canvas for a configurable number of
+pixels, allowing reverse gravity or black-hole attraction to pull it back.
+
+Default:
+  defaultBallBelowFloorGracePixels = 120.0
+
+Level override:
+  ballBelowFloorGracePixels=120
+
+The threshold is measured from the ball's bottom edge. Set it to 0 to restore the
+old immediate floor boundary. The P overlay shows FLOOR GRACE.
