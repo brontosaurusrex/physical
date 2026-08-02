@@ -130,13 +130,13 @@ const (
 	defaultDebrisAirDrag                  = 0.15
 	defaultDebrisRestitution              = 0.48
 	defaultDebrisFriction                 = 1.00
-	defaultDebrisExplosionSpeedMin        = 150.0
-	defaultDebrisExplosionSpeedMax        = 1200.0
+	defaultDebrisExplosionSpeedMin        = 0.0
+	defaultDebrisExplosionSpeedMax        = 520.0
 	defaultDebrisAngularSpeedMin          = 2.0
 	defaultDebrisAngularSpeedMax          = 6.0
 	defaultDebrisAngularDrag              = 1.10
 	defaultDebrisAngularStopSpeed         = 0.10
-	defaultDebrisBallInfluence            = 0.35
+	defaultDebrisBallInfluence            = 0.15
 	defaultDebrisFieldScale               = 0.80
 	defaultDebrisMagnetScale              = 0.65
 	defaultDebrisMaxSpeed                 = 1100.0
