@@ -1,5 +1,5 @@
-Breakout WASM — variable auto hits + lifetime variation (v60)
-Build ID: 20260801-60c6a91e4b
+Breakout WASM — opaque layered debris + expanded shapes (v61)
+Build ID: 20260802-61c9e4b7a2
 
 BUILD
 
@@ -211,3 +211,12 @@ return instead of centering every contact. The E panel exposes the maximum hit
 offset. Debris lifetime variation is now percentage-based and independently
 randomized per new piece; 16.7% around the attached 9-second default produces
 approximately 7.5..10.5-second lifetimes.
+
+
+V61: DEBRIS LAYERING, OPAQUE COLOR AND SHAPE VARIETY
+----------------------------------------------------
+Debris is rendered behind living bricks. Its opacity appearance is baked into
+opaque colors blended against the level background, preventing overlap from
+becoming increasingly transparent. New live-tunable shape families include
+triangles, randomized stars and sharp seven-to-sixteen-corner glass polygons.
+All continue to use bounded-circle collision physics.

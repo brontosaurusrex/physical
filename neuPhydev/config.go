@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260801-60c6a91e4b"
+	buildID = "20260802-61c9e4b7a2"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -115,11 +115,18 @@ const (
 	defaultDebrisFlashOpacity             = 1.00
 	defaultDebrisImpactSpeedFactor        = 0.35
 	defaultDebrisBallPieceChance          = 0.18
+	defaultDebrisTrianglePieceChance      = 0.14
+	defaultDebrisStarPieceChance          = 0.30 //0.06
+	defaultDebrisStarPointsMin            = 4
+	defaultDebrisStarPointsMax            = 7
+	defaultDebrisGlassPieceChance         = 0.20
+	defaultDebrisGlassCornersMin          = 7
+	defaultDebrisGlassCornersMax          = 14
 	defaultDebrisSliverPieceChance        = 0.015
 	defaultDebrisMaxChunkAspectRatio      = 1.45
 	defaultDebrisSizeScale                = 1.35
 	defaultDebrisBrickCollisionDelay      = 0.25 //0.30
-	defaultDebrisGravityScale             = 0.7  //1.0
+	defaultDebrisGravityScale             = 0.75 //1.0
 	defaultDebrisAirDrag                  = 0.15
 	defaultDebrisRestitution              = 0.48
 	defaultDebrisFriction                 = 1.00
@@ -129,7 +136,7 @@ const (
 	defaultDebrisAngularSpeedMax          = 6.0
 	defaultDebrisAngularDrag              = 1.10
 	defaultDebrisAngularStopSpeed         = 0.10
-	defaultDebrisBallInfluence            = 0.35
+	defaultDebrisBallInfluence            = 0.30 //0.35
 	defaultDebrisFieldScale               = 0.80
 	defaultDebrisMagnetScale              = 0.65
 	defaultDebrisMaxSpeed                 = 1100.0
@@ -159,8 +166,8 @@ const (
 	defaultUnbreakableChance    = 0.15
 	defaultMagicChance          = 0.3
 	defaultPowerUpDuration      = 10.0
-	defaultBlackHoleStrength    = 800.0
-	defaultBlackHoleRange       = 200.0
+	defaultBlackHoleStrength    = 1300.0 //800.0
+	defaultBlackHoleRange       = 400.0  //200.0
 	defaultMagnetStrength       = 600.0
 	defaultMagnetRange          = 300.0
 	defaultInfluencerMultiplier = 5.0
@@ -312,6 +319,13 @@ var debrisEditorSliderSpecs = []debrisSliderSpec{
 	{group: "Appearance", key: "debrisFlashOpacity", label: "Bright flash opacity", configName: "defaultDebrisFlashOpacity", min: 0, max: 1, step: 0.01, precision: 2},
 	{group: "Appearance", key: "debrisSizeScale", label: "Piece size (new + live)", configName: "defaultDebrisSizeScale", min: 0.25, max: 3, step: 0.05, precision: 2},
 	{group: "Appearance", key: "debrisBallPieceChance", label: "Round-piece chance (new)", configName: "defaultDebrisBallPieceChance", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisTrianglePieceChance", label: "Triangle chance (new)", configName: "defaultDebrisTrianglePieceChance", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisStarPieceChance", label: "Star chance (new)", configName: "defaultDebrisStarPieceChance", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisStarPointsMin", label: "Star points minimum (new)", configName: "defaultDebrisStarPointsMin", min: 3, max: 8, step: 1, precision: 0, integer: true},
+	{group: "Appearance", key: "debrisStarPointsMax", label: "Star points maximum (new)", configName: "defaultDebrisStarPointsMax", min: 3, max: 8, step: 1, precision: 0, integer: true},
+	{group: "Appearance", key: "debrisGlassPieceChance", label: "Glass-polygon chance (new)", configName: "defaultDebrisGlassPieceChance", min: 0, max: 1, step: 0.01, precision: 2},
+	{group: "Appearance", key: "debrisGlassCornersMin", label: "Glass corners minimum (new)", configName: "defaultDebrisGlassCornersMin", min: 7, max: 16, step: 1, precision: 0, integer: true},
+	{group: "Appearance", key: "debrisGlassCornersMax", label: "Glass corners maximum (new)", configName: "defaultDebrisGlassCornersMax", min: 7, max: 16, step: 1, precision: 0, integer: true},
 	{group: "Appearance", key: "debrisSliverPieceChance", label: "Sliver chance (new)", configName: "defaultDebrisSliverPieceChance", min: 0, max: 0.30, step: 0.005, precision: 3},
 	{group: "Appearance", key: "debrisMaxChunkAspectRatio", label: "Maximum chunk aspect (new)", configName: "defaultDebrisMaxChunkAspectRatio", min: 1, max: 4, step: 0.05, precision: 2},
 

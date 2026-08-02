@@ -332,6 +332,13 @@ var (
 	debrisFlashOpacity             = defaultDebrisFlashOpacity
 	debrisImpactSpeedFactor        = defaultDebrisImpactSpeedFactor
 	debrisBallPieceChance          = defaultDebrisBallPieceChance
+	debrisTrianglePieceChance      = defaultDebrisTrianglePieceChance
+	debrisStarPieceChance          = defaultDebrisStarPieceChance
+	debrisStarPointsMin            = defaultDebrisStarPointsMin
+	debrisStarPointsMax            = defaultDebrisStarPointsMax
+	debrisGlassPieceChance         = defaultDebrisGlassPieceChance
+	debrisGlassCornersMin          = defaultDebrisGlassCornersMin
+	debrisGlassCornersMax          = defaultDebrisGlassCornersMax
 	debrisSliverPieceChance        = defaultDebrisSliverPieceChance
 	debrisMaxChunkAspectRatio      = defaultDebrisMaxChunkAspectRatio
 	debrisSizeScale                = defaultDebrisSizeScale
@@ -514,6 +521,7 @@ var (
 	bricks                   []brick
 	brickDebris              []debrisFragment
 	debrisRNG                = rand.New(rand.NewSource(0x52d3b715))
+	debrisOpaqueColorCache   = make(map[string][]string)
 	debrisFieldTick          int
 	brickGrid                map[int][]int
 	remainingBreakableBricks int
@@ -756,7 +764,7 @@ type debrisFragment struct {
 	age           float64
 	lifetime      float64
 	pointCount    int
-	points        [16]float64
+	points        [32]float64
 	roundness     float64
 	circle        bool
 	startOpacity  float64
@@ -1481,11 +1489,28 @@ func normalizeDebrisSettings() {
 	debrisFlashOpacity = clampFloat(debrisFlashOpacity, 0, 1)
 	debrisImpactSpeedFactor = math.Max(0, debrisImpactSpeedFactor)
 	debrisBallPieceChance = clampFloat(debrisBallPieceChance, 0, 1)
+	debrisTrianglePieceChance = clampFloat(debrisTrianglePieceChance, 0, 1)
+	debrisStarPieceChance = clampFloat(debrisStarPieceChance, 0, 1)
+	debrisGlassPieceChance = clampFloat(debrisGlassPieceChance, 0, 1)
 	debrisSliverPieceChance = clampFloat(debrisSliverPieceChance, 0, 1)
-	specialShapeChance := debrisBallPieceChance + debrisSliverPieceChance
+	debrisStarPointsMin = max(3, min(8, debrisStarPointsMin))
+	debrisStarPointsMax = max(3, min(8, debrisStarPointsMax))
+	if debrisStarPointsMin > debrisStarPointsMax {
+		debrisStarPointsMin, debrisStarPointsMax = debrisStarPointsMax, debrisStarPointsMin
+	}
+	debrisGlassCornersMin = max(7, min(16, debrisGlassCornersMin))
+	debrisGlassCornersMax = max(7, min(16, debrisGlassCornersMax))
+	if debrisGlassCornersMin > debrisGlassCornersMax {
+		debrisGlassCornersMin, debrisGlassCornersMax = debrisGlassCornersMax, debrisGlassCornersMin
+	}
+	specialShapeChance := debrisBallPieceChance + debrisTrianglePieceChance +
+		debrisStarPieceChance + debrisGlassPieceChance + debrisSliverPieceChance
 	if specialShapeChance > 0.95 {
 		scale := 0.95 / specialShapeChance
 		debrisBallPieceChance *= scale
+		debrisTrianglePieceChance *= scale
+		debrisStarPieceChance *= scale
+		debrisGlassPieceChance *= scale
 		debrisSliverPieceChance *= scale
 	}
 	debrisMaxChunkAspectRatio = math.Max(1, debrisMaxChunkAspectRatio)
@@ -1553,7 +1578,14 @@ func debrisRandomBetween(minimum, maximum float64) float64 {
 	return minimum + debrisRNG.Float64()*(maximum-minimum)
 }
 
-func debrisPolygonArea(points [16]float64, pointCount int) float64 {
+func debrisRandomInt(minimum, maximum int) int {
+	if maximum <= minimum {
+		return minimum
+	}
+	return minimum + debrisRNG.Intn(maximum-minimum+1)
+}
+
+func debrisPolygonArea(points [32]float64, pointCount int) float64 {
 	if pointCount < 3 {
 		return 0
 	}
@@ -1565,7 +1597,7 @@ func debrisPolygonArea(points [16]float64, pointCount int) float64 {
 	return math.Abs(area) * 0.5
 }
 
-func rotateDebrisPoints(points *[16]float64, pointCount int, angle float64) {
+func rotateDebrisPoints(points *[32]float64, pointCount int, angle float64) {
 	if points == nil || pointCount <= 0 || angle == 0 {
 		return
 	}
@@ -1579,9 +1611,9 @@ func debrisRadialPolygon(
 	radiusX, radiusY,
 	radiusMinimum, radiusMaximum,
 	angleJitter, rotation float64,
-) [16]float64 {
-	var points [16]float64
-	pointCount = max(3, min(8, pointCount))
+) [32]float64 {
+	var points [32]float64
+	pointCount = max(3, min(16, pointCount))
 	for i := 0; i < pointCount; i++ {
 		angle := rotation + 2*math.Pi*float64(i)/float64(pointCount)
 		angle += debrisRandomBetween(-angleJitter, angleJitter)
@@ -1592,10 +1624,28 @@ func debrisRadialPolygon(
 	return points
 }
 
+func debrisStarPolygon(pointPairs int, radiusX, radiusY, rotation float64) ([32]float64, int) {
+	var points [32]float64
+	pointPairs = max(3, min(8, pointPairs))
+	pointCount := pointPairs * 2
+	innerScale := debrisRandomBetween(0.34, 0.62)
+	step := math.Pi / float64(pointPairs)
+	for i := 0; i < pointCount; i++ {
+		angle := rotation + float64(i)*step + debrisRandomBetween(-step*0.16, step*0.16)
+		radiusScale := debrisRandomBetween(0.86, 1.08)
+		if i%2 == 1 {
+			radiusScale *= innerScale * debrisRandomBetween(0.88, 1.12)
+		}
+		points[i*2] = math.Cos(angle) * radiusX * radiusScale
+		points[i*2+1] = math.Sin(angle) * radiusY * radiusScale
+	}
+	return points, pointCount
+}
+
 // buildDebrisShape deliberately mixes several cheap polygon families. Drawing
 // gets visual variety, while collision remains one conservative circle.
 func buildDebrisShape(cellWidth, cellHeight float64) (
-	points [16]float64,
+	points [32]float64,
 	pointCount int,
 	radius, area, roundness float64,
 	circle bool,
@@ -1603,9 +1653,8 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 	halfWidth := cellWidth * debrisRandomBetween(0.37, 0.50)
 	halfHeight := cellHeight * debrisRandomBetween(0.36, 0.49)
 
-	// Most debris should read as compact chunks rather than long sticks. Shrink
-	// only the longer axis; the deliberately rare sliver family may narrow itself
-	// further below.
+	// Most debris should read as compact chunks rather than long sticks. Only the
+	// deliberately rare sliver family may narrow itself further below.
 	if halfWidth > halfHeight*debrisMaxChunkAspectRatio {
 		halfWidth = halfHeight * debrisRandomBetween(1.0, debrisMaxChunkAspectRatio)
 	}
@@ -1615,20 +1664,61 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 
 	shapeRoll := debrisRNG.Float64()
 	ballLimit := debrisBallPieceChance
-	sliverLimit := ballLimit + debrisSliverPieceChance
+	triangleLimit := ballLimit + debrisTrianglePieceChance
+	starLimit := triangleLimit + debrisStarPieceChance
+	glassLimit := starLimit + debrisGlassPieceChance
+	sliverLimit := glassLimit + debrisSliverPieceChance
 
-	if shapeRoll < ballLimit {
-		// A true circular chip. Drawing and collision use the same radius, so this
-		// family costs no more than the existing circle collision approximation.
+	switch {
+	case shapeRoll < ballLimit:
+		// A true circular chip. Drawing and collision use the same radius.
 		radius = math.Min(halfWidth, halfHeight) * debrisRandomBetween(0.72, 0.96)
 		radius = math.Max(2, radius)
 		area = math.Pi * radius * radius
 		return points, 0, radius, area, 1, true
-	}
 
-	if shapeRoll < sliverLimit {
-		// Rare triangular or four-sided sliver. Kept separate so its frequency is
-		// explicitly configurable and can be reduced without changing other shapes.
+	case shapeRoll < triangleLimit:
+		// Compact, visibly triangular fragments rather than narrow slivers.
+		pointCount = 3
+		points = debrisRadialPolygon(
+			pointCount,
+			halfWidth,
+			halfHeight,
+			0.72,
+			1.06,
+			0.12,
+			debrisRandomBetween(-math.Pi, math.Pi),
+		)
+		roundness = debrisRandomBetween(0, 0.04)
+
+	case shapeRoll < starLimit:
+		// Concave stars vary from four to seven points (eight to fourteen corners).
+		starPoints := debrisRandomInt(debrisStarPointsMin, debrisStarPointsMax)
+		points, pointCount = debrisStarPolygon(
+			starPoints,
+			halfWidth,
+			halfHeight,
+			debrisRandomBetween(-math.Pi, math.Pi),
+		)
+		roundness = debrisRandomBetween(0, 0.025)
+
+	case shapeRoll < glassLimit:
+		// Sharp, many-cornered radial polygons resemble irregular glass chips.
+		pointCount = debrisRandomInt(debrisGlassCornersMin, debrisGlassCornersMax)
+		step := 2 * math.Pi / float64(pointCount)
+		points = debrisRadialPolygon(
+			pointCount,
+			halfWidth,
+			halfHeight,
+			0.48,
+			1.10,
+			step*0.28,
+			debrisRandomBetween(-math.Pi, math.Pi),
+		)
+		roundness = 0
+
+	case shapeRoll < sliverLimit:
+		// Rare narrow triangular or four-sided sliver.
 		pointCount = 3 + debrisRNG.Intn(2)
 		if debrisRNG.Intn(2) == 0 {
 			halfWidth *= debrisRandomBetween(0.36, 0.58)
@@ -1644,17 +1734,18 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 			0.16,
 			debrisRandomBetween(-math.Pi, math.Pi),
 		)
-		roundness = debrisRandomBetween(0, 0.07)
-	} else {
+		roundness = debrisRandomBetween(0, 0.05)
+
+	default:
 		remainingChance := math.Max(0.0001, 1-sliverLimit)
 		normalizedRoll := clampFloat((shapeRoll-sliverLimit)/remainingChance, 0, 1)
 		switch {
-		case normalizedRoll < 0.34:
+		case normalizedRoll < 0.30:
 			// Rough four-corner chunk, recognisably cut from a rectangular brick.
 			pointCount = 4
 			jitterX := halfWidth * 0.22
 			jitterY := halfHeight * 0.24
-			points = [16]float64{
+			points = [32]float64{
 				-halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + debrisRandomBetween(-jitterY, jitterY),
 				halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + debrisRandomBetween(-jitterY, jitterY),
 				halfWidth + debrisRandomBetween(-jitterX, jitterX), halfHeight + debrisRandomBetween(-jitterY, jitterY),
@@ -1662,9 +1753,9 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 			}
 			roundness = debrisRandomBetween(0.02, 0.12)
 
-		case normalizedRoll < 0.72:
-			// More visibly broken pentagonal or hexagonal chunk.
-			pointCount = 5 + debrisRNG.Intn(2)
+		case normalizedRoll < 0.68:
+			// Compact irregular chunks with a random four-to-seven-corner outline.
+			pointCount = debrisRandomInt(4, 7)
 			points = debrisRadialPolygon(
 				pointCount,
 				halfWidth,
@@ -1674,17 +1765,16 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 				0.18,
 				debrisRandomBetween(-math.Pi, math.Pi),
 			)
-			roundness = debrisRandomBetween(0.05, 0.18)
+			roundness = debrisRandomBetween(0.04, 0.18)
 
 		default:
-			// Eight-point rounded-rectangle silhouette: a small broken piece that still
-			// resembles the source brick's softened rectangular shape.
+			// Eight-point rounded-rectangle silhouette retains some brick ancestry.
 			pointCount = 8
 			cutX := halfWidth * debrisRandomBetween(0.28, 0.45)
 			cutY := halfHeight * debrisRandomBetween(0.28, 0.45)
 			jitterX := halfWidth * 0.06
 			jitterY := halfHeight * 0.07
-			points = [16]float64{
+			points = [32]float64{
 				-halfWidth + cutX, -halfHeight + debrisRandomBetween(-jitterY, jitterY),
 				halfWidth - cutX, -halfHeight + debrisRandomBetween(-jitterY, jitterY),
 				halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + cutY,
@@ -1695,11 +1785,9 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 				-halfWidth + debrisRandomBetween(-jitterX, jitterX), -halfHeight + cutY,
 			}
 			roundness = debrisRandomBetween(0.58, 0.82)
-
 		}
 	}
 
-	// A little local rotation keeps the family mix from looking grid-aligned.
 	rotateDebrisPoints(&points, pointCount, debrisRandomBetween(-0.18, 0.18))
 	for i := 0; i < pointCount; i++ {
 		radius = math.Max(radius, math.Hypot(points[i*2], points[i*2+1]))
@@ -3006,6 +3094,13 @@ func resetGlobals() {
 	debrisFlashOpacity = defaultDebrisFlashOpacity
 	debrisImpactSpeedFactor = defaultDebrisImpactSpeedFactor
 	debrisBallPieceChance = defaultDebrisBallPieceChance
+	debrisTrianglePieceChance = defaultDebrisTrianglePieceChance
+	debrisStarPieceChance = defaultDebrisStarPieceChance
+	debrisStarPointsMin = defaultDebrisStarPointsMin
+	debrisStarPointsMax = defaultDebrisStarPointsMax
+	debrisGlassPieceChance = defaultDebrisGlassPieceChance
+	debrisGlassCornersMin = defaultDebrisGlassCornersMin
+	debrisGlassCornersMax = defaultDebrisGlassCornersMax
 	debrisSliverPieceChance = defaultDebrisSliverPieceChance
 	debrisMaxChunkAspectRatio = defaultDebrisMaxChunkAspectRatio
 	debrisSizeScale = defaultDebrisSizeScale
@@ -3349,6 +3444,48 @@ func applyConfig(config map[string]string) {
 				debrisBallPieceChance = f
 			} else {
 				log("debrisBallPieceChance must be from 0 to 1")
+			}
+		case "debrisTrianglePieceChance":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisTrianglePieceChance = f
+			} else {
+				log("debrisTrianglePieceChance must be from 0 to 1")
+			}
+		case "debrisStarPieceChance":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisStarPieceChance = f
+			} else {
+				log("debrisStarPieceChance must be from 0 to 1")
+			}
+		case "debrisStarPointsMin":
+			if i, err := strconv.Atoi(val); err == nil && i >= 3 && i <= 8 {
+				debrisStarPointsMin = i
+			} else {
+				log("debrisStarPointsMin must be from 3 to 8")
+			}
+		case "debrisStarPointsMax":
+			if i, err := strconv.Atoi(val); err == nil && i >= 3 && i <= 8 {
+				debrisStarPointsMax = i
+			} else {
+				log("debrisStarPointsMax must be from 3 to 8")
+			}
+		case "debrisGlassPieceChance":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
+				debrisGlassPieceChance = f
+			} else {
+				log("debrisGlassPieceChance must be from 0 to 1")
+			}
+		case "debrisGlassCornersMin":
+			if i, err := strconv.Atoi(val); err == nil && i >= 7 && i <= 16 {
+				debrisGlassCornersMin = i
+			} else {
+				log("debrisGlassCornersMin must be from 7 to 16")
+			}
+		case "debrisGlassCornersMax":
+			if i, err := strconv.Atoi(val); err == nil && i >= 7 && i <= 16 {
+				debrisGlassCornersMax = i
+			} else {
+				log("debrisGlassCornersMax must be from 7 to 16")
 			}
 		case "debrisSliverPieceChance":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 1 {
@@ -6122,6 +6259,98 @@ func updateBrickDebris(dt float64) {
 	brickDebris = kept
 }
 
+type debrisRGB struct {
+	r, g, b float64
+}
+
+func parseResolvedDebrisColor(value string) (debrisRGB, bool) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if strings.HasPrefix(value, "#") {
+		hex := strings.TrimPrefix(value, "#")
+		if len(hex) == 3 || len(hex) == 4 {
+			hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+		}
+		if len(hex) == 6 || len(hex) == 8 {
+			n, err := strconv.ParseUint(hex[:6], 16, 24)
+			if err == nil {
+				return debrisRGB{
+					r: float64((n >> 16) & 0xff),
+					g: float64((n >> 8) & 0xff),
+					b: float64(n & 0xff),
+				}, true
+			}
+		}
+	}
+	if strings.HasPrefix(value, "rgb(") || strings.HasPrefix(value, "rgba(") {
+		start := strings.IndexByte(value, '(')
+		end := strings.LastIndexByte(value, ')')
+		if start >= 0 && end > start {
+			parts := strings.Split(value[start+1:end], ",")
+			if len(parts) >= 3 {
+				components := [3]float64{}
+				for i := 0; i < 3; i++ {
+					part := strings.TrimSpace(parts[i])
+					if strings.HasSuffix(part, "%") {
+						percent, err := strconv.ParseFloat(strings.TrimSuffix(part, "%"), 64)
+						if err != nil {
+							return debrisRGB{}, false
+						}
+						components[i] = clampFloat(percent, 0, 100) * 2.55
+					} else {
+						component, err := strconv.ParseFloat(part, 64)
+						if err != nil {
+							return debrisRGB{}, false
+						}
+						components[i] = clampFloat(component, 0, 255)
+					}
+				}
+				return debrisRGB{r: components[0], g: components[1], b: components[2]}, true
+			}
+		}
+	}
+	return debrisRGB{}, false
+}
+
+func resolveDebrisCSSColor(value string) (debrisRGB, bool) {
+	if ctx.IsUndefined() || ctx.IsNull() {
+		return parseResolvedDebrisColor(value)
+	}
+	previous := ctx.Get("fillStyle").String()
+	ctx.Set("fillStyle", "#010203")
+	ctx.Set("fillStyle", value)
+	resolved := ctx.Get("fillStyle").String()
+	ctx.Set("fillStyle", previous)
+	return parseResolvedDebrisColor(resolved)
+}
+
+func opaqueDebrisColor(fillColor, backgroundColor string, opacity float64) string {
+	opacity = clampFloat(opacity, 0, 1)
+	level := int(math.Round(opacity * 255))
+	key := fillColor + "\x00" + backgroundColor
+	palette, ok := debrisOpaqueColorCache[key]
+	if !ok {
+		fill, fillOK := resolveDebrisCSSColor(fillColor)
+		background, backgroundOK := resolveDebrisCSSColor(backgroundColor)
+		palette = make([]string, 256)
+		if fillOK && backgroundOK {
+			for i := 0; i < 256; i++ {
+				a := float64(i) / 255.0
+				r := int(math.Round(background.r + (fill.r-background.r)*a))
+				g := int(math.Round(background.g + (fill.g-background.g)*a))
+				b := int(math.Round(background.b + (fill.b-background.b)*a))
+				palette[i] = "rgb(" + strconv.Itoa(r) + "," + strconv.Itoa(g) + "," + strconv.Itoa(b) + ")"
+			}
+		} else {
+			for i := 0; i < 256; i++ {
+				percent := strconv.FormatFloat(float64(i)*100.0/255.0, 'f', 2, 64)
+				palette[i] = "color-mix(in srgb, " + fillColor + " " + percent + "%, " + backgroundColor + ")"
+			}
+		}
+		debrisOpaqueColorCache[key] = palette
+	}
+	return palette[level]
+}
+
 func debrisOpacity(fragment *debrisFragment) float64 {
 	remaining := fragment.lifetime - fragment.age
 	if remaining <= 0 {
@@ -6157,8 +6386,7 @@ func drawBrickDebris(alpha float64) {
 		angle := lerpFloat(fragment.previousAngle, fragment.angle, alpha)
 
 		ctx.Call("save")
-		ctx.Set("globalAlpha", opacity)
-		ctx.Set("fillStyle", fragment.fillColor)
+		ctx.Set("fillStyle", opaqueDebrisColor(fragment.fillColor, palette[0], opacity))
 		ctx.Call("translate", x, y)
 		ctx.Call("rotate", angle)
 		ctx.Call("beginPath")
@@ -7405,6 +7633,20 @@ func debrisEditorValue(key string) float64 {
 		return debrisImpactSpeedFactor
 	case "debrisBallPieceChance":
 		return debrisBallPieceChance
+	case "debrisTrianglePieceChance":
+		return debrisTrianglePieceChance
+	case "debrisStarPieceChance":
+		return debrisStarPieceChance
+	case "debrisStarPointsMin":
+		return float64(debrisStarPointsMin)
+	case "debrisStarPointsMax":
+		return float64(debrisStarPointsMax)
+	case "debrisGlassPieceChance":
+		return debrisGlassPieceChance
+	case "debrisGlassCornersMin":
+		return float64(debrisGlassCornersMin)
+	case "debrisGlassCornersMax":
+		return float64(debrisGlassCornersMax)
 	case "debrisSliverPieceChance":
 		return debrisSliverPieceChance
 	case "debrisMaxChunkAspectRatio":
@@ -7473,6 +7715,20 @@ func setDebrisEditorRawValue(key string, value float64) {
 		debrisImpactSpeedFactor = value
 	case "debrisBallPieceChance":
 		debrisBallPieceChance = value
+	case "debrisTrianglePieceChance":
+		debrisTrianglePieceChance = value
+	case "debrisStarPieceChance":
+		debrisStarPieceChance = value
+	case "debrisStarPointsMin":
+		debrisStarPointsMin = int(math.Round(value))
+	case "debrisStarPointsMax":
+		debrisStarPointsMax = int(math.Round(value))
+	case "debrisGlassPieceChance":
+		debrisGlassPieceChance = value
+	case "debrisGlassCornersMin":
+		debrisGlassCornersMin = int(math.Round(value))
+	case "debrisGlassCornersMax":
+		debrisGlassCornersMax = int(math.Round(value))
 	case "debrisSliverPieceChance":
 		debrisSliverPieceChance = value
 	case "debrisMaxChunkAspectRatio":
@@ -7548,6 +7804,20 @@ func defaultDebrisEditorValue(key string) float64 {
 		return defaultDebrisImpactSpeedFactor
 	case "debrisBallPieceChance":
 		return defaultDebrisBallPieceChance
+	case "debrisTrianglePieceChance":
+		return defaultDebrisTrianglePieceChance
+	case "debrisStarPieceChance":
+		return defaultDebrisStarPieceChance
+	case "debrisStarPointsMin":
+		return float64(defaultDebrisStarPointsMin)
+	case "debrisStarPointsMax":
+		return float64(defaultDebrisStarPointsMax)
+	case "debrisGlassPieceChance":
+		return defaultDebrisGlassPieceChance
+	case "debrisGlassCornersMin":
+		return float64(defaultDebrisGlassCornersMin)
+	case "debrisGlassCornersMax":
+		return float64(defaultDebrisGlassCornersMax)
 	case "debrisSliverPieceChance":
 		return defaultDebrisSliverPieceChance
 	case "debrisMaxChunkAspectRatio":
@@ -8311,6 +8581,10 @@ func draw(alpha float64) {
 	ctx.Set("fillStyle", palette[0])
 	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
 
+	// Dynamic debris is drawn first so living bricks occlude it. Destroyed-brick
+	// gaps still reveal the fragments, and the balls/paddle remain above both.
+	drawBrickDebris(alpha)
+
 	if bricksDirty {
 		rebuildBrickCanvas()
 	}
@@ -8332,8 +8606,6 @@ func draw(alpha float64) {
 		ctx.Call("arc", renderState.blackHoleX, renderState.blackHoleY, 42, 0, 2*math.Pi)
 		ctx.Call("stroke")
 	}
-
-	drawBrickDebris(alpha)
 
 	drawBall(renderState.ballX, renderState.ballY, ball.r, renderState.ballAngle, palette[3], palette[5])
 	if renderState.secondBallActive {
