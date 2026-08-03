@@ -186,7 +186,7 @@ const (
 	// Mouse position is direct. This only caps the measured surface velocity used
 	// for collision/spin calculations after a large cursor jump. It is part of
 	// physicsSettings so levels and the in-game physics editor may override it.
-	defaultPhysicsMousePaddleSpinVelocityLimit = 6000.0
+	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
 
 	defaultPaddleRadius      = 12.0
 	defaultBrickRadius       = 6.0
