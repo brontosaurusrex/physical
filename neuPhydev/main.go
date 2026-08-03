@@ -7659,6 +7659,8 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return formatConfigFloat(autoPaddleHitVariation), formatConfigFloat(defaultAutoPaddleHitVariation), "float", true
 	case "debrisShapeMode":
 		return debrisShapeMode, defaultDebrisShapeMode, "string", true
+	case "debrisSizeScale":
+		return formatConfigFloat(debrisSizeScale), formatConfigFloat(defaultDebrisSizeScale), "float", true
 	case "debrisLifetimeVariationPercent":
 		return formatConfigFloat(debrisLifetimeVariationPercent), formatConfigFloat(defaultDebrisLifetimeVariationPercent), "float", true
 	case "debrisFrontLayerSpeed":
@@ -7789,7 +7791,7 @@ func physicsOverlayLines() []string {
 	lines := []string{
 		"BUILD " + buildID,
 		"AUTO PADDLE        " + autoPaddleState,
-		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / ┬▒%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
+		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / +/-%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
 		"PHYSICS FIXED STEP " + fmt.Sprintf("%.0f Hz / %.3f ms", physicsStepHz, physicsStepSeconds*1000),
 		"MAX TRAVEL / TICK  " + fmt.Sprintf("%.2f px", physicsConfig.maxSpeed*physicsStepSeconds),
 		"PHYSICS ACTUAL     " + fmt.Sprintf("%.1f Hz", physicsStepRateCurrent),
@@ -8661,7 +8663,7 @@ func ensurePhysicsEditorPanel() {
 	header.Call("appendChild", title)
 
 	hint := doc.Call("createElement", "div")
-	hint.Set("textContent", "E closes + copies ┬╖ O auto paddle")
+	hint.Set("textContent", "E closes + copies | O auto paddle")
 	setStyle(hint, "fontSize", "13px")
 	setStyle(hint, "opacity", "0.70")
 	header.Call("appendChild", hint)
