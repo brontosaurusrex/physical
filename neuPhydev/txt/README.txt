@@ -1,5 +1,5 @@
-Breakout WASM — speed-dependent debris depth ordering (v64)
-Build ID: 20260802-64f2c8d7b1
+Breakout WASM — optimized debris and merged diagnostics (v66)
+Build ID: 20260803-66d4f9a2c7
 
 BUILD
 
@@ -244,3 +244,18 @@ the threshold are drawn behind living bricks; shards at or above it are drawn
 after the brick cache and therefore pass visibly over intact bricks. The default
 is 600 px/s. Each shard is drawn exactly once; the renderer only performs one
 extra velocity-squared comparison per active shard per frame.
+
+V66 DIAGNOSTICS AND FPS
+-----------------------
+
+P cycles physics diagnostics, level/config diagnostics, then off. I is an alias
+for the same sequence. Both full views are transparent and bottom-right. F
+toggles a compact current/lowest FPS display. Lowest FPS uses visible-page
+half-second samples after warm-up and ignores hidden-tab/resume gaps.
+
+V65 RENDER OPTIMIZATIONS RETAINED
+---------------------------------
+
+Cached Path2D shard outlines, cached opaque color palettes, reduced Canvas state
+changes, and adaptive drawing of older slow debris remain enabled. Debris physics
+and collisions are never skipped. See DEBRIS_RENDER_OPTIMIZATION_v65.txt.

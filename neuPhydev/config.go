@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260802-64f2c8d7b1"
+	buildID = "20260803-66d4f9a2c7"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -56,6 +56,11 @@ const (
 	physicsMaxCatchUpSteps    = 32
 	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
 	physicsWarningHoldSeconds = 3.0
+
+	// Render-FPS sampling. The lowest value ignores the first two visible-page
+	// samples so startup does not become the permanent session minimum.
+	renderFPSSampleWindowSeconds = 0.5
+	renderFPSLowestWarmupSamples = 2
 
 	// Default geometry and gameplay.
 	defaultCanvasWidth    = 1800.0
@@ -145,6 +150,18 @@ const (
 	defaultDebrisFrontLayerSpeed = 600.0
 	defaultDebrisMaxActivePieces = 200 //150
 	defaultDebrisOffscreenMargin = 120.0
+
+	// Rendering optimizations for older machines. Path2D caches each shard outline,
+	// avoiding repeated Go/WASM -> JavaScript path commands on every frame.
+	defaultDebrisUsePath2DCache = true
+	// Adaptive rendering never removes debris physics. When the observed render rate
+	// drops relative to the no-debris baseline, it draws a stable subset of older,
+	// slow shards while always retaining fresh and fast-moving fragments.
+	defaultDebrisAdaptiveRendering       = true
+	defaultDebrisAdaptiveTargetFPS       = 60.0
+	defaultDebrisAdaptiveFreshSeconds    = 0.75
+	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
+	defaultDebrisAdaptiveMaxStride       = 3
 
 	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
 	// tilt measures movement along the orbit's minor axis. Only healthy fixed-step
