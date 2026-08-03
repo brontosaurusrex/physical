@@ -160,7 +160,7 @@ const (
 	// Adaptive rendering never removes debris physics. When the observed render rate
 	// drops relative to the no-debris baseline, it draws a stable subset of older,
 	// slow shards while always retaining fresh and fast-moving fragments.
-	defaultDebrisAdaptiveRendering       = true
+	defaultDebrisAdaptiveRendering       = false  // sucks
 	defaultDebrisAdaptiveTargetFPS       = 60.0
 	defaultDebrisAdaptiveFreshSeconds    = 0.75
 	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
@@ -220,7 +220,7 @@ const (
 	defaultPhysicsFrictionCoeff       = 0.14 // was 0.10
 	defaultPhysicsPaddleBoost         = 900.0
 	defaultPhysicsBrickBoost          = 100.0
-	defaultPhysicsMaxSpeed            = 1000.0 // was 1170.0
+	defaultPhysicsMaxSpeed            = 920.0 // was 1000.0
 	defaultPhysicsMaxSpin             = 1530.0
 	defaultPhysicsStuckSpeedThreshold = 85.0
 	defaultPhysicsStuckDuration       = 1.2 // was 3.0
