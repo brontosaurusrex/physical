@@ -364,6 +364,7 @@ var (
 	debrisFieldScale               = defaultDebrisFieldScale
 	debrisMagnetScale              = defaultDebrisMagnetScale
 	debrisMaxSpeed                 = defaultDebrisMaxSpeed
+	debrisFrontLayerSpeed          = defaultDebrisFrontLayerSpeed
 	debrisMaxActivePieces          = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin          = defaultDebrisOffscreenMargin
 
@@ -526,29 +527,41 @@ var (
 		vx: 0,
 	}
 
-	bricks                   []brick
-	brickDebris              []debrisFragment
-	debrisRNG                = rand.New(rand.NewSource(0x52d3b715))
-	debrisOpaqueColorCache   = make(map[string][]string)
-	debrisFieldTick          int
-	brickGrid                map[int][]int
-	remainingBreakableBricks int
-	initialBreakableBricks   int
-	lastBrickSoundPlayed     bool
-	score                    int
-	lives                    int
-	gameOver                 bool
-	win                      bool
-	waitingForStart          bool
-	levelStartTitle          string
-	levelCompleteTimer       float64
-	levelAdvancePending      bool
+	bricks                 []brick
+	brickDebris            []debrisFragment
+	debrisRNG              = rand.New(rand.NewSource(0x52d3b715))
+	debrisOpaqueColorCache = make(map[string][]string)
+	debrisFieldTick        int
+
+	debrisRenderIDCounter      uint32
+	debrisAdaptiveBaselineFPS  float64
+	debrisAdaptiveRenderStride = 1
+	debrisRenderedLastFrame    int
+	debrisSkippedLastFrame     int
+	debrisPath2DChecked        bool
+	debrisPath2DSupported      bool
+	debrisPath2DConstructor    js.Value
+	brickGrid                  map[int][]int
+	remainingBreakableBricks   int
+	initialBreakableBricks     int
+	lastBrickSoundPlayed       bool
+	score                      int
+	lives                      int
+	gameOver                   bool
+	win                        bool
+	waitingForStart            bool
+	levelStartTitle            string
+	levelCompleteTimer         float64
+	levelAdvancePending        bool
 
 	lastTime float64
 
-	fpsCurrent       float64
-	fpsSampleElapsed float64
-	fpsSampleFrames  int
+	fpsCurrent            float64
+	fpsLowest             float64
+	fpsSampleElapsed      float64
+	fpsSampleFrames       int
+	fpsVisibleSamplesSeen int
+	fpsMiniOverlayVisible bool
 
 	loopFunc      js.Func
 	keyDown       js.Func
@@ -785,6 +798,13 @@ type debrisFragment struct {
 	circle        bool
 	startOpacity  float64
 	fillColor     string
+
+	// Cached rendering data. The Path2D outline is immutable until live size tuning
+	// changes the shape; the opaque palette is shared by shards of the same color.
+	renderID           uint32
+	renderPath         js.Value
+	renderPathReady    bool
+	renderColorPalette []string
 }
 
 // ---- Level data ----
@@ -1552,6 +1572,7 @@ func normalizeDebrisSettings() {
 	debrisFieldScale = math.Max(0, debrisFieldScale)
 	debrisMagnetScale = math.Max(0, debrisMagnetScale)
 	debrisMaxSpeed = math.Max(0, debrisMaxSpeed)
+	debrisFrontLayerSpeed = math.Max(0, debrisFrontLayerSpeed)
 	if debrisMaxActivePieces < 0 {
 		debrisMaxActivePieces = 0
 	}
@@ -1926,6 +1947,13 @@ func spawnBrickDebris(br *brick, impactSpeed float64) {
 				startOpacity:  startOpacity,
 				fillColor:     fillColor,
 			}
+			debrisRenderIDCounter++
+			if debrisRenderIDCounter == 0 {
+				debrisRenderIDCounter++
+			}
+			fragment.renderID = debrisRenderIDCounter
+			fragment.renderColorPalette = opaqueDebrisPalette(fillColor, palette[0])
+			rebuildDebrisRenderPath(&fragment)
 			clampDebrisSpeed(&fragment)
 			brickDebris = append(brickDebris, fragment)
 			pieceIndex++
@@ -3143,6 +3171,7 @@ func resetGlobals() {
 	debrisFieldScale = defaultDebrisFieldScale
 	debrisMagnetScale = defaultDebrisMagnetScale
 	debrisMaxSpeed = defaultDebrisMaxSpeed
+	debrisFrontLayerSpeed = defaultDebrisFrontLayerSpeed
 	debrisMaxActivePieces = defaultDebrisMaxActivePieces
 	debrisOffscreenMargin = defaultDebrisOffscreenMargin
 	autoPaddleHitVariation = defaultAutoPaddleHitVariation
@@ -3647,6 +3676,12 @@ func applyConfig(config map[string]string) {
 		case "debrisMaxSpeed":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
 				debrisMaxSpeed = f
+			}
+		case "debrisFrontLayerSpeed":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				debrisFrontLayerSpeed = f
+			} else {
+				log("debrisFrontLayerSpeed must be zero or greater")
 			}
 		case "debrisOffscreenMargin":
 			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
@@ -6477,32 +6512,163 @@ func resolveDebrisCSSColor(value string) (debrisRGB, bool) {
 	return parseResolvedDebrisColor(resolved)
 }
 
-func opaqueDebrisColor(fillColor, backgroundColor string, opacity float64) string {
-	opacity = clampFloat(opacity, 0, 1)
-	level := int(math.Round(opacity * 255))
+func opaqueDebrisPalette(fillColor, backgroundColor string) []string {
 	key := fillColor + "\x00" + backgroundColor
 	palette, ok := debrisOpaqueColorCache[key]
-	if !ok {
-		fill, fillOK := resolveDebrisCSSColor(fillColor)
-		background, backgroundOK := resolveDebrisCSSColor(backgroundColor)
-		palette = make([]string, 256)
-		if fillOK && backgroundOK {
-			for i := 0; i < 256; i++ {
-				a := float64(i) / 255.0
-				r := int(math.Round(background.r + (fill.r-background.r)*a))
-				g := int(math.Round(background.g + (fill.g-background.g)*a))
-				b := int(math.Round(background.b + (fill.b-background.b)*a))
-				palette[i] = "rgb(" + strconv.Itoa(r) + "," + strconv.Itoa(g) + "," + strconv.Itoa(b) + ")"
-			}
-		} else {
-			for i := 0; i < 256; i++ {
-				percent := strconv.FormatFloat(float64(i)*100.0/255.0, 'f', 2, 64)
-				palette[i] = "color-mix(in srgb, " + fillColor + " " + percent + "%, " + backgroundColor + ")"
-			}
-		}
-		debrisOpaqueColorCache[key] = palette
+	if ok {
+		return palette
 	}
+
+	fill, fillOK := resolveDebrisCSSColor(fillColor)
+	background, backgroundOK := resolveDebrisCSSColor(backgroundColor)
+	palette = make([]string, 256)
+	if fillOK && backgroundOK {
+		for i := 0; i < 256; i++ {
+			a := float64(i) / 255.0
+			r := int(math.Round(background.r + (fill.r-background.r)*a))
+			g := int(math.Round(background.g + (fill.g-background.g)*a))
+			b := int(math.Round(background.b + (fill.b-background.b)*a))
+			palette[i] = "rgb(" + strconv.Itoa(r) + "," + strconv.Itoa(g) + "," + strconv.Itoa(b) + ")"
+		}
+	} else {
+		for i := 0; i < 256; i++ {
+			percent := strconv.FormatFloat(float64(i)*100.0/255.0, 'f', 2, 64)
+			palette[i] = "color-mix(in srgb, " + fillColor + " " + percent + "%, " + backgroundColor + ")"
+		}
+	}
+	debrisOpaqueColorCache[key] = palette
+	return palette
+}
+
+func opaqueDebrisColorFromPalette(palette []string, opacity float64) string {
+	if len(palette) == 0 {
+		return "#000000"
+	}
+	if len(palette) != 256 {
+		return palette[0]
+	}
+	level := int(math.Round(clampFloat(opacity, 0, 1) * 255))
 	return palette[level]
+}
+
+func traceDebrisShape(target js.Value, fragment *debrisFragment) {
+	if fragment.circle {
+		target.Call("arc", 0, 0, fragment.radius, 0, 2*math.Pi)
+	} else if fragment.roundness <= 0.001 {
+		target.Call("moveTo", fragment.points[0], fragment.points[1])
+		for point := 1; point < fragment.pointCount; point++ {
+			target.Call("lineTo", fragment.points[point*2], fragment.points[point*2+1])
+		}
+	} else {
+		cornerFraction := 0.08 + clampFloat(fragment.roundness, 0, 1)*0.34
+		last := fragment.pointCount - 1
+		startX := fragment.points[last*2] + (fragment.points[0]-fragment.points[last*2])*(1-cornerFraction)
+		startY := fragment.points[last*2+1] + (fragment.points[1]-fragment.points[last*2+1])*(1-cornerFraction)
+		target.Call("moveTo", startX, startY)
+		for point := 0; point < fragment.pointCount; point++ {
+			next := (point + 1) % fragment.pointCount
+			currentX := fragment.points[point*2]
+			currentY := fragment.points[point*2+1]
+			outX := currentX + (fragment.points[next*2]-currentX)*cornerFraction
+			outY := currentY + (fragment.points[next*2+1]-currentY)*cornerFraction
+			target.Call("quadraticCurveTo", currentX, currentY, outX, outY)
+		}
+	}
+	target.Call("closePath")
+}
+
+func ensureDebrisPath2DSupport() bool {
+	if debrisPath2DChecked {
+		return debrisPath2DSupported
+	}
+	debrisPath2DChecked = true
+	if !defaultDebrisUsePath2DCache {
+		return false
+	}
+	constructor := js.Global().Get("Path2D")
+	if constructor.IsUndefined() || constructor.IsNull() || constructor.Type() != js.TypeFunction {
+		return false
+	}
+	debrisPath2DConstructor = constructor
+	debrisPath2DSupported = true
+	return true
+}
+
+func rebuildDebrisRenderPath(fragment *debrisFragment) {
+	if fragment == nil {
+		return
+	}
+	fragment.renderPathReady = false
+	if (!fragment.circle && fragment.pointCount < 3) || !ensureDebrisPath2DSupport() {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			debrisPath2DSupported = false
+			fragment.renderPathReady = false
+		}
+	}()
+	path := debrisPath2DConstructor.New()
+	traceDebrisShape(path, fragment)
+	fragment.renderPath = path
+	fragment.renderPathReady = true
+}
+
+func updateDebrisAdaptiveRenderStride() {
+	if !defaultDebrisAdaptiveRendering || defaultDebrisAdaptiveMaxStride <= 1 {
+		debrisAdaptiveRenderStride = 1
+		return
+	}
+	if fpsCurrent <= 0 {
+		return
+	}
+
+	// Learn the machine/display ceiling only while no debris is present. This keeps
+	// a genuine 30 Hz display from being mistaken for a slow 60 Hz machine.
+	if len(brickDebris) == 0 {
+		if debrisAdaptiveBaselineFPS <= 0 {
+			debrisAdaptiveBaselineFPS = fpsCurrent
+		} else {
+			debrisAdaptiveBaselineFPS = debrisAdaptiveBaselineFPS*0.85 + fpsCurrent*0.15
+		}
+		debrisAdaptiveRenderStride = 1
+		return
+	}
+
+	baseline := debrisAdaptiveBaselineFPS
+	if baseline <= 0 {
+		baseline = defaultDebrisAdaptiveTargetFPS
+	}
+	target := math.Min(defaultDebrisAdaptiveTargetFPS, baseline*0.92)
+	target = math.Max(20, target)
+	ratio := fpsCurrent / target
+	maximumStride := max(1, defaultDebrisAdaptiveMaxStride)
+
+	switch {
+	case ratio < 0.65:
+		debrisAdaptiveRenderStride = maximumStride
+	case ratio < 0.85:
+		debrisAdaptiveRenderStride = min(2, maximumStride)
+	case ratio >= 0.95:
+		debrisAdaptiveRenderStride = 1
+	case ratio >= 0.90 && debrisAdaptiveRenderStride > 2:
+		debrisAdaptiveRenderStride = 2
+	}
+}
+
+func shouldDrawDebrisFragment(fragment *debrisFragment, speedSquared float64) bool {
+	stride := debrisAdaptiveRenderStride
+	if stride <= 1 || !defaultDebrisAdaptiveRendering {
+		return true
+	}
+	if fragment.age < defaultDebrisAdaptiveFreshSeconds {
+		return true
+	}
+	alwaysDrawSpeedSquared := defaultDebrisAdaptiveAlwaysDrawSpeed * defaultDebrisAdaptiveAlwaysDrawSpeed
+	if speedSquared >= alwaysDrawSpeedSquared {
+		return true
+	}
+	return fragment.renderID%uint32(stride) == 0
 }
 
 func debrisOpacity(fragment *debrisFragment) float64 {
@@ -6523,14 +6689,25 @@ func debrisOpacity(fragment *debrisFragment) float64 {
 	return clampFloat(opacity, 0, 1)
 }
 
-func drawBrickDebris(alpha float64) {
+func drawBrickDebris(alpha float64, frontLayer bool) {
 	if len(brickDebris) == 0 {
 		return
 	}
 	alpha = clampFloat(alpha, 0, 1)
+	thresholdSquared := debrisFrontLayerSpeed * debrisFrontLayerSpeed
+	lastFillStyle := ""
 	ctx.Call("save")
 	for i := range brickDebris {
 		fragment := &brickDebris[i]
+		speedSquared := fragment.vx*fragment.vx + fragment.vy*fragment.vy
+		fragmentFrontLayer := debrisFrontLayerSpeed <= 0 || speedSquared >= thresholdSquared
+		if fragmentFrontLayer != frontLayer {
+			continue
+		}
+		if !shouldDrawDebrisFragment(fragment, speedSquared) {
+			debrisSkippedLastFrame++
+			continue
+		}
 		opacity := debrisOpacity(fragment)
 		if opacity <= 0 || (!fragment.circle && fragment.pointCount < 3) {
 			continue
@@ -6538,37 +6715,27 @@ func drawBrickDebris(alpha float64) {
 		x := lerpFloat(fragment.previousX, fragment.x, alpha)
 		y := lerpFloat(fragment.previousY, fragment.y, alpha)
 		angle := lerpFloat(fragment.previousAngle, fragment.angle, alpha)
-
-		ctx.Call("save")
-		ctx.Set("fillStyle", opaqueDebrisColor(fragment.fillColor, palette[0], opacity))
-		ctx.Call("translate", x, y)
-		ctx.Call("rotate", angle)
-		ctx.Call("beginPath")
-		if fragment.circle {
-			ctx.Call("arc", 0, 0, fragment.radius, 0, 2*math.Pi)
-		} else if fragment.roundness <= 0.001 {
-			ctx.Call("moveTo", fragment.points[0], fragment.points[1])
-			for point := 1; point < fragment.pointCount; point++ {
-				ctx.Call("lineTo", fragment.points[point*2], fragment.points[point*2+1])
-			}
-		} else {
-			cornerFraction := 0.08 + clampFloat(fragment.roundness, 0, 1)*0.34
-			last := fragment.pointCount - 1
-			startX := fragment.points[last*2] + (fragment.points[0]-fragment.points[last*2])*(1-cornerFraction)
-			startY := fragment.points[last*2+1] + (fragment.points[1]-fragment.points[last*2+1])*(1-cornerFraction)
-			ctx.Call("moveTo", startX, startY)
-			for point := 0; point < fragment.pointCount; point++ {
-				next := (point + 1) % fragment.pointCount
-				currentX := fragment.points[point*2]
-				currentY := fragment.points[point*2+1]
-				outX := currentX + (fragment.points[next*2]-currentX)*cornerFraction
-				outY := currentY + (fragment.points[next*2+1]-currentY)*cornerFraction
-				ctx.Call("quadraticCurveTo", currentX, currentY, outX, outY)
-			}
+		cosAngle := 1.0
+		sinAngle := 0.0
+		if !fragment.circle {
+			cosAngle = math.Cos(angle)
+			sinAngle = math.Sin(angle)
 		}
-		ctx.Call("closePath")
-		ctx.Call("fill")
-		ctx.Call("restore")
+
+		fillStyle := opaqueDebrisColorFromPalette(fragment.renderColorPalette, opacity)
+		if fillStyle != lastFillStyle {
+			ctx.Set("fillStyle", fillStyle)
+			lastFillStyle = fillStyle
+		}
+		ctx.Call("setTransform", cosAngle, sinAngle, -sinAngle, cosAngle, x, y)
+		if fragment.renderPathReady && debrisPath2DSupported {
+			ctx.Call("fill", fragment.renderPath)
+		} else {
+			ctx.Call("beginPath")
+			traceDebrisShape(ctx, fragment)
+			ctx.Call("fill")
+		}
+		debrisRenderedLastFrame++
 	}
 	ctx.Call("restore")
 }
@@ -7428,6 +7595,8 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return formatConfigFloat(autoPaddleHitVariation), formatConfigFloat(defaultAutoPaddleHitVariation), "float", true
 	case "debrisLifetimeVariationPercent":
 		return formatConfigFloat(debrisLifetimeVariationPercent), formatConfigFloat(defaultDebrisLifetimeVariationPercent), "float", true
+	case "debrisFrontLayerSpeed":
+		return formatConfigFloat(debrisFrontLayerSpeed), formatConfigFloat(defaultDebrisFrontLayerSpeed), "float", true
 	default:
 		return "", "", "", false
 	}
@@ -7523,6 +7692,19 @@ func debugOverlayLines() []string {
 	}
 	return lines
 }
+func debrisPathCacheState() string {
+	if !defaultDebrisUsePath2DCache {
+		return "DISABLED"
+	}
+	if !debrisPath2DChecked {
+		return "READY"
+	}
+	if debrisPath2DSupported {
+		return "ON"
+	}
+	return "FALLBACK"
+}
+
 func physicsOverlayLines() []string {
 	status := "OK"
 	if physicsWarningTimer > 0 {
@@ -7548,6 +7730,7 @@ func physicsOverlayLines() []string {
 		"SIMULATION REALTIME " + fmt.Sprintf("%.1f%%", physicsRealtimePercent),
 		"PHYSICS COMPUTE LOAD " + fmt.Sprintf("%.1f%%", physicsComputeLoad),
 		"RENDER FPS          " + fmt.Sprintf("%.1f", fpsCurrent),
+		"RENDER FPS LOWEST   " + formatLowestRenderFPS(),
 		"RENDER INTERP       ON / alpha " + fmt.Sprintf("%.3f", renderInterpolationAlpha),
 		"STEPS LAST FRAME    " + strconv.Itoa(physicsLastFrameSteps),
 		"STEPS PEAK FRAME    " + strconv.Itoa(physicsPeakFrameSteps),
@@ -7555,6 +7738,10 @@ func physicsOverlayLines() []string {
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
 		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
+		"DEBRIS DRAWN       " + strconv.Itoa(debrisRenderedLastFrame) + " / skipped " + strconv.Itoa(debrisSkippedLastFrame),
+		"DEBRIS RENDER      1/" + strconv.Itoa(debrisAdaptiveRenderStride) + " old slow shards",
+		"DEBRIS BASELINE    " + fmt.Sprintf("%.1f FPS", debrisAdaptiveBaselineFPS),
+		"DEBRIS PATH CACHE  " + debrisPathCacheState(),
 		"RESCUE PERF GATE    " + rescueGate,
 		"FLOOR GRACE         " + fmt.Sprintf("%.0f px", ballBelowFloorGracePixels),
 		"RESCUE FAILURES B1  " + strconv.Itoa(ball.rescueFailureCount) + "/" + strconv.Itoa(ballRescueFailureLimit),
@@ -7637,13 +7824,50 @@ func debugOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeigh
 }
 
 func physicsOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
-	panelX, panelY, panelWidth, panelHeight, maxRows = debugOverlayGeometry(lineCount)
-	panelX = 10
-	return panelX, panelY, panelWidth, panelHeight, maxRows
+	return debugOverlayGeometry(lineCount)
 }
 
 func debugOverlayReport() string {
 	return strings.Join(debugOverlayLines(), "\n")
+}
+
+func formatLowestRenderFPS() string {
+	if fpsLowest <= 0 {
+		return "--"
+	}
+	return fmt.Sprintf("%.1f", fpsLowest)
+}
+
+// resetLowestRenderFPS starts a fresh visible-page minimum measurement. The
+// current partial half-second sample is discarded and the normal warm-up is
+// applied again, preventing the reset keypress itself from creating a bogus low.
+func resetLowestRenderFPS() {
+	fpsLowest = 0
+	fpsVisibleSamplesSeen = 0
+	fpsSampleElapsed = 0
+	fpsSampleFrames = 0
+	showStatus("Lowest FPS reset", 1.5)
+}
+
+func pageIsVisibleForFPS() bool {
+	hidden := doc.Get("hidden")
+	return hidden.IsUndefined() || hidden.IsNull() || !hidden.Bool()
+}
+
+// P cycles physics diagnostics -> level/config diagnostics -> off. I remains an
+// alias for the same cycle so older muscle memory still works.
+func cycleDiagnosticsOverlay() {
+	if physicsOverlayVisible {
+		physicsOverlayVisible = false
+		debugOverlayVisible = true
+		return
+	}
+	if debugOverlayVisible {
+		debugOverlayVisible = false
+		return
+	}
+	physicsOverlayVisible = true
+	debugOverlayVisible = false
 }
 
 func pointerCanvasPosition(e js.Value) (x, y float64, ok bool) {
@@ -7843,6 +8067,8 @@ func debrisEditorValue(key string) float64 {
 		return debrisMagnetScale
 	case "debrisMaxSpeed":
 		return debrisMaxSpeed
+	case "debrisFrontLayerSpeed":
+		return debrisFrontLayerSpeed
 	case "debrisOffscreenMargin":
 		return debrisOffscreenMargin
 	}
@@ -7925,6 +8151,8 @@ func setDebrisEditorRawValue(key string, value float64) {
 		debrisMagnetScale = value
 	case "debrisMaxSpeed":
 		debrisMaxSpeed = value
+	case "debrisFrontLayerSpeed":
+		debrisFrontLayerSpeed = value
 	case "debrisOffscreenMargin":
 		debrisOffscreenMargin = value
 	}
@@ -8014,6 +8242,8 @@ func defaultDebrisEditorValue(key string) float64 {
 		return defaultDebrisMagnetScale
 	case "debrisMaxSpeed":
 		return defaultDebrisMaxSpeed
+	case "debrisFrontLayerSpeed":
+		return defaultDebrisFrontLayerSpeed
 	case "debrisOffscreenMargin":
 		return defaultDebrisOffscreenMargin
 	}
@@ -8066,6 +8296,7 @@ func applyDebrisEditorSnapshot(snapshot debrisEditorSnapshot) {
 			}
 			brickDebris[i].radius *= ratio
 			brickDebris[i].mass *= ratio * ratio
+			rebuildDebrisRenderPath(&brickDebris[i])
 		}
 	}
 	for i := range brickDebris {
@@ -8132,6 +8363,7 @@ func applyDebrisEditorValue(spec debrisSliderSpec, value float64) {
 				}
 				brickDebris[i].radius *= ratio
 				brickDebris[i].mass *= ratio * ratio
+				rebuildDebrisRenderPath(&brickDebris[i])
 			}
 		}
 	case "debrisMaxSpeed":
@@ -8669,19 +8901,14 @@ func togglePhysicsEditor() {
 }
 
 func drawOverlayLines(lines []string) {
-	panelX, panelY, panelWidth, panelHeight, maxRows := debugOverlayGeometry(len(lines))
+	panelX, panelY, _, _, maxRows := debugOverlayGeometry(len(lines))
 
 	const lineHeight = 18.0
 	const padding = 12.0
 	const columnWidth = 420.0
 
 	ctx.Call("save")
-	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.82)")
-	ctx.Call("fillRect", panelX, panelY, panelWidth, panelHeight)
-	ctx.Set("strokeStyle", "rgba(255, 255, 255, 0.35)")
-	ctx.Set("lineWidth", 1)
-	ctx.Call("strokeRect", panelX, panelY, panelWidth, panelHeight)
-	ctx.Set("fillStyle", "#ffffff")
+	ctx.Set("fillStyle", palette[4])
 	ctx.Set("font", "14px GameFont, monospace")
 	ctx.Set("textAlign", "left")
 
@@ -8729,6 +8956,25 @@ func drawPhysicsOverlay() {
 	}
 }
 
+func drawFPSMiniOverlay() {
+	if !fpsMiniOverlayVisible || physicsOverlayVisible || debugOverlayVisible {
+		return
+	}
+
+	const margin = 10.0
+	const lineHeight = 20.0
+	x := canvasWidth - margin
+	y := canvasHeight - margin - lineHeight
+
+	ctx.Call("save")
+	ctx.Set("fillStyle", palette[4])
+	ctx.Set("font", "16px GameFont, monospace")
+	ctx.Set("textAlign", "right")
+	ctx.Call("fillText", "FPS "+fmt.Sprintf("%.1f", fpsCurrent), x, y)
+	ctx.Call("fillText", "LOWEST "+formatLowestRenderFPS(), x, y+lineHeight)
+	ctx.Call("restore")
+}
+
 func drawCenteredOverlay() {
 	ctx.Call("save")
 	ctx.Set("fillStyle", "rgba(0, 0, 0, 0.5)")
@@ -8741,14 +8987,20 @@ func draw(alpha float64) {
 	ctx.Set("fillStyle", palette[0])
 	ctx.Call("fillRect", 0, 0, canvasWidth, canvasHeight)
 
-	// Dynamic debris is drawn first so living bricks occlude it. Destroyed-brick
-	// gaps still reveal the fragments, and the balls/paddle remain above both.
-	drawBrickDebris(alpha)
+	debrisRenderedLastFrame = 0
+	debrisSkippedLastFrame = 0
+
+	// Slow debris stays behind living bricks. Fast debris gets a second depth pass
+	// after the brick cache, so energetic shards visibly fly over intact bricks.
+	// Each fragment is still drawn exactly once; the extra work is only a cheap
+	// velocity-squared classification during the second scan.
+	drawBrickDebris(alpha, false)
 
 	if bricksDirty {
 		rebuildBrickCanvas()
 	}
 	ctx.Call("drawImage", brickCanvas, 0, 0)
+	drawBrickDebris(alpha, true)
 	drawZapperBolts()
 
 	if renderState.blackHoleActive && showBlackHole {
@@ -8866,6 +9118,7 @@ func draw(alpha float64) {
 
 	drawDebugOverlay()
 	drawPhysicsOverlay()
+	drawFPSMiniOverlay()
 }
 
 func drawBall(x, y, radius, angle float64, fillColor, strokeColor string) {
@@ -8912,19 +9165,33 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 	}
 	lastTime = now
 
-	if rawDt > 0 && rawDt < 1.0 {
+	visibleForFPS := pageIsVisibleForFPS()
+	if visibleForFPS && rawDt > 0 && rawDt < 1.0 {
 		fpsSampleElapsed += rawDt
 		fpsSampleFrames++
-		if fpsSampleElapsed >= 0.5 {
+		if fpsSampleElapsed >= renderFPSSampleWindowSeconds {
 			sample := float64(fpsSampleFrames) / fpsSampleElapsed
 			if fpsCurrent == 0 {
 				fpsCurrent = sample
 			} else {
 				fpsCurrent = fpsCurrent*0.65 + sample*0.35
 			}
+
+			if fpsVisibleSamplesSeen >= renderFPSLowestWarmupSamples &&
+				(fpsLowest == 0 || sample < fpsLowest) {
+				fpsLowest = sample
+			}
+			fpsVisibleSamplesSeen++
+
+			updateDebrisAdaptiveRenderStride()
 			fpsSampleElapsed = 0
 			fpsSampleFrames = 0
 		}
+	} else if !visibleForFPS || rawDt >= 1.0 {
+		// Do not let a hidden/background tab or a long resume gap become the
+		// permanent session minimum. Start a fresh visible-page sample instead.
+		fpsSampleElapsed = 0
+		fpsSampleFrames = 0
 	}
 
 	frameDt := rawDt
@@ -9231,18 +9498,18 @@ func setupInput() {
 			return nil
 		}
 
-		// I: level/palette overrides. P: physics diagnostics.
-		if (key == "i" || key == "I") && !e.Get("repeat").Bool() {
-			debugOverlayVisible = !debugOverlayVisible
-			if debugOverlayVisible {
-				physicsOverlayVisible = false
-			}
+		// P cycles physics diagnostics -> level/config diagnostics -> off.
+		// I is retained as an alias. F independently toggles the compact FPS readout;
+		// Shift+F resets its visible-page LOWEST measurement without hiding it.
+		if (key == "p" || key == "P" || key == "i" || key == "I") && !e.Get("repeat").Bool() {
+			cycleDiagnosticsOverlay()
 			return nil
 		}
-		if (key == "p" || key == "P") && !e.Get("repeat").Bool() {
-			physicsOverlayVisible = !physicsOverlayVisible
-			if physicsOverlayVisible {
-				debugOverlayVisible = false
+		if (key == "f" || key == "F") && !e.Get("repeat").Bool() {
+			if e.Get("shiftKey").Bool() {
+				resetLowestRenderFPS()
+			} else {
+				fpsMiniOverlayVisible = !fpsMiniOverlayVisible
 			}
 			return nil
 		}

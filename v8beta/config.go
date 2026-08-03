@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260802-63e7b4c1a9d"
+	buildID = "20260803-67c1e8b5f4"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -57,6 +57,11 @@ const (
 	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
 	physicsWarningHoldSeconds = 3.0
 
+	// Render-FPS sampling. The lowest value ignores the first two visible-page
+	// samples so startup does not become the permanent session minimum.
+	renderFPSSampleWindowSeconds = 0.5
+	renderFPSLowestWarmupSamples = 2
+
 	// Default geometry and gameplay.
 	defaultCanvasWidth    = 1800.0
 	defaultCanvasHeight   = 900.0
@@ -102,8 +107,8 @@ const (
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
 	// effects from turning one frame into thousands of collision bodies.
 	defaultDebrisEnabled   = true
-	defaultDebrisPiecesMin = 17 //10
-	defaultDebrisPiecesMax = 35 //25
+	defaultDebrisPiecesMin = 6
+	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0
 	// Each new piece receives lifetime ├ù (1 ┬▒ variation/100). At 16.7% and
 	// a 9-second base lifetime, the approximate range is 7.5ΓÇô10.5 seconds.
@@ -140,8 +145,23 @@ const (
 	defaultDebrisFieldScale               = 0.80
 	defaultDebrisMagnetScale              = 0.65
 	defaultDebrisMaxSpeed                 = 1100.0
-	defaultDebrisMaxActivePieces          = 200 //150
-	defaultDebrisOffscreenMargin          = 120.0
+	// Shards at or above this linear speed are drawn over living bricks. Slower
+	// shards remain behind them. Zero puts every shard in the front layer.
+	defaultDebrisFrontLayerSpeed = 600.0
+	defaultDebrisMaxActivePieces = 150
+	defaultDebrisOffscreenMargin = 120.0
+
+	// Rendering optimizations for older machines. Path2D caches each shard outline,
+	// avoiding repeated Go/WASM -> JavaScript path commands on every frame.
+	defaultDebrisUsePath2DCache = true
+	// Adaptive rendering never removes debris physics. When the observed render rate
+	// drops relative to the no-debris baseline, it draws a stable subset of older,
+	// slow shards while always retaining fresh and fast-moving fragments.
+	defaultDebrisAdaptiveRendering       = true
+	defaultDebrisAdaptiveTargetFPS       = 60.0
+	defaultDebrisAdaptiveFreshSeconds    = 0.75
+	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
+	defaultDebrisAdaptiveMaxStride       = 3
 
 	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
 	// tilt measures movement along the orbit's minor axis. Only healthy fixed-step
@@ -274,7 +294,7 @@ const (
 	defaultEnableBreakUnbreakable = true
 	defaultEnableBigPaddle        = true
 
-	showBlackHole = true // false
+	showBlackHole = false // false
 
 	defaultMagicColor             = "#f1faee"
 	defaultMagicStrokeColor       = "#ffd700"
@@ -355,6 +375,7 @@ var debrisEditorSliderSpecs = []debrisSliderSpec{
 	{group: "Motion and settling", key: "debrisAngularDrag", label: "Angular drag", configName: "defaultDebrisAngularDrag", min: 0, max: 8, step: 0.05, precision: 2},
 	{group: "Motion and settling", key: "debrisAngularStopSpeed", label: "Angular stop threshold", configName: "defaultDebrisAngularStopSpeed", min: 0, max: 5, step: 0.05, precision: 2},
 	{group: "Motion and settling", key: "debrisMaxSpeed", label: "Maximum shard speed", configName: "defaultDebrisMaxSpeed", min: 0, max: 2500, step: 25, precision: 0},
+	{group: "Motion and settling", key: "debrisFrontLayerSpeed", label: "Front-layer speed threshold", configName: "defaultDebrisFrontLayerSpeed", min: 0, max: 2500, step: 25, precision: 0},
 	{group: "Motion and settling", key: "debrisOffscreenMargin", label: "Offscreen cleanup margin", configName: "defaultDebrisOffscreenMargin", min: 0, max: 500, step: 5, precision: 0},
 
 	{group: "Contact and fields", key: "debrisBrickCollisionDelay", label: "Brick collision delay", configName: "defaultDebrisBrickCollisionDelay", min: 0, max: 2, step: 0.01, precision: 2},
