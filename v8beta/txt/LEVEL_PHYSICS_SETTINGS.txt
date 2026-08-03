@@ -89,8 +89,9 @@ DYNAMIC BRICK DEBRIS
 These are separate gameplay/fragment settings rather than ball physics fields:
 
   debris=true
-  debrisPiecesMin=2
-  debrisPiecesMax=16
+  debrisShapeMode=mixed             # mixed, triangles, or circles
+  debrisPiecesMin=6
+  debrisPiecesMax=18
   debrisLifetime=9
   debrisLifetimeVariationPercent=16.7 # random +/- percent for new pieces
   debrisFadeDuration=3
@@ -115,13 +116,13 @@ These are separate gameplay/fragment settings rather than ball physics fields:
   debrisAirDrag=0.15
   debrisRestitution=0.48
   debrisFriction=1.00
-  debrisExplosionSpeedMin=150
-  debrisExplosionSpeedMax=1200
+  debrisExplosionSpeedMin=0
+  debrisExplosionSpeedMax=520
   debrisAngularSpeedMin=2
   debrisAngularSpeedMax=6
   debrisAngularDrag=1.10             # exponential rotational damping, >=0
   debrisAngularStopSpeed=0.10        # snap omega to zero below this, >=0
-  debrisBallInfluence=0.35
+  debrisBallInfluence=0
   debrisFieldScale=0.80
   debrisMagnetScale=0.65
   debrisMaxSpeed=1100

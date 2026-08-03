@@ -259,3 +259,18 @@ V65 RENDER OPTIMIZATIONS RETAINED
 Cached Path2D shard outlines, cached opaque color palettes, reduced Canvas state
 changes, and adaptive drawing of older slow debris remain enabled. Debris physics
 and collisions are never skipped. See DEBRIS_RENDER_OPTIMIZATION_v65.txt.
+
+
+V68 SELECTABLE DEBRIS SHAPE MODES
+--------------------------------
+
+config.go now contains:
+
+  defaultDebrisShapeMode = "mixed"
+
+Levels may override it with debrisShapeMode=mixed, triangles, or circles.
+Triangles mode uses only sharp three-edge cached Path2D fragments; circles mode
+uses only round chips. The existing mixed probabilities are unchanged and become
+active again when the mode returns to mixed. The P performance view displays the
+current mode. Debris defaults remain 6 minimum, 18 maximum, and cap 150. See
+DEBRIS_SHAPE_MODES_v68.txt.

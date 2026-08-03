@@ -328,6 +328,7 @@ var (
 
 	// Per-level dynamic debris settings.
 	debrisEnabled                  = defaultDebrisEnabled
+	debrisShapeMode                = defaultDebrisShapeMode
 	debrisPiecesMin                = defaultDebrisPiecesMin
 	debrisPiecesMax                = defaultDebrisPiecesMax
 	debrisLifetime                 = defaultDebrisLifetime
@@ -805,6 +806,25 @@ type debrisFragment struct {
 	renderPath         js.Value
 	renderPathReady    bool
 	renderColorPalette []string
+}
+
+const (
+	debrisShapeModeMixed     = "mixed"
+	debrisShapeModeTriangles = "triangles"
+	debrisShapeModeCircles   = "circles"
+)
+
+func parseDebrisShapeMode(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case debrisShapeModeMixed, "mix":
+		return debrisShapeModeMixed, true
+	case debrisShapeModeTriangles, "triangle":
+		return debrisShapeModeTriangles, true
+	case debrisShapeModeCircles, "circle":
+		return debrisShapeModeCircles, true
+	default:
+		return "", false
+	}
 }
 
 // ---- Level data ----
@@ -1501,6 +1521,13 @@ func brickDebrisColor(br *brick) string {
 }
 
 func normalizeDebrisSettings() {
+	if mode, ok := parseDebrisShapeMode(debrisShapeMode); ok {
+		debrisShapeMode = mode
+	} else if mode, ok := parseDebrisShapeMode(defaultDebrisShapeMode); ok {
+		debrisShapeMode = mode
+	} else {
+		debrisShapeMode = debrisShapeModeMixed
+	}
 	if debrisPiecesMin < 1 {
 		debrisPiecesMin = 1
 	}
@@ -1680,8 +1707,8 @@ func debrisStarPolygon(pointPairs int, radiusX, radiusY, rotation float64) ([32]
 	return points, pointCount
 }
 
-// buildDebrisShape deliberately mixes several cheap polygon families. Drawing
-// gets visual variety, while collision remains one conservative circle.
+// buildDebrisShape either forces one cheap family for browser comparisons or
+// uses the existing mixed families. Collision remains one conservative circle.
 func buildDebrisShape(cellWidth, cellHeight float64) (
 	points [32]float64,
 	pointCount int,
@@ -1698,6 +1725,35 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 	}
 	if halfHeight > halfWidth*debrisMaxChunkAspectRatio {
 		halfHeight = halfWidth * debrisRandomBetween(1.0, debrisMaxChunkAspectRatio)
+	}
+
+	switch debrisShapeMode {
+	case debrisShapeModeCircles:
+		// A true circular chip. Drawing and collision use the same radius.
+		radius = math.Min(halfWidth, halfHeight) * debrisRandomBetween(0.72, 0.96)
+		radius = math.Max(2, radius)
+		area = math.Pi * radius * radius
+		return points, 0, radius, area, 1, true
+
+	case debrisShapeModeTriangles:
+		// Deliberately sharp triangles: exactly three straight edges and no rounded
+		// corners, making this the cheapest non-circular Path2D test mode.
+		pointCount = 3
+		points = debrisRadialPolygon(
+			pointCount,
+			halfWidth,
+			halfHeight,
+			0.72,
+			1.06,
+			0.12,
+			debrisRandomBetween(-math.Pi, math.Pi),
+		)
+		rotateDebrisPoints(&points, pointCount, debrisRandomBetween(-0.18, 0.18))
+		for i := 0; i < pointCount; i++ {
+			radius = math.Max(radius, math.Hypot(points[i*2], points[i*2+1]))
+		}
+		area = debrisPolygonArea(points, pointCount)
+		return points, pointCount, math.Max(2, radius), math.Max(1, area), 0, false
 	}
 
 	shapeRoll := debrisRNG.Float64()
@@ -3135,6 +3191,7 @@ func resetGlobals() {
 	currentAudioRoom = defaultAudioRoom
 	currentAudioRoomDry = defaultAudioRoomDry
 	debrisEnabled = defaultDebrisEnabled
+	debrisShapeMode = defaultDebrisShapeMode
 	debrisPiecesMin = defaultDebrisPiecesMin
 	debrisPiecesMax = defaultDebrisPiecesMax
 	debrisLifetime = defaultDebrisLifetime
@@ -3478,6 +3535,13 @@ func applyConfig(config map[string]string) {
 				debrisEnabled = b
 			} else {
 				log(key + " must be true or false")
+			}
+		case "debrisShapeMode":
+			if mode, ok := parseDebrisShapeMode(val); ok {
+				debrisShapeMode = mode
+				config[key] = mode
+			} else {
+				log("debrisShapeMode must be mixed, triangles, or circles")
 			}
 		case "debrisPiecesMin":
 			if i, err := strconv.Atoi(val); err == nil && i >= 1 && i <= 32 {
@@ -7593,6 +7657,8 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return formatConfigFloat(paddleHeight), formatConfigFloat(defaultPaddleHeight), "float", true
 	case "autoPaddleHitVariation":
 		return formatConfigFloat(autoPaddleHitVariation), formatConfigFloat(defaultAutoPaddleHitVariation), "float", true
+	case "debrisShapeMode":
+		return debrisShapeMode, defaultDebrisShapeMode, "string", true
 	case "debrisLifetimeVariationPercent":
 		return formatConfigFloat(debrisLifetimeVariationPercent), formatConfigFloat(defaultDebrisLifetimeVariationPercent), "float", true
 	case "debrisFrontLayerSpeed":
@@ -7738,6 +7804,7 @@ func physicsOverlayLines() []string {
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
 		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
+		"DEBRIS SHAPE       " + strings.ToUpper(debrisShapeMode),
 		"DEBRIS DRAWN       " + strconv.Itoa(debrisRenderedLastFrame) + " / skipped " + strconv.Itoa(debrisSkippedLastFrame),
 		"DEBRIS RENDER      1/" + strconv.Itoa(debrisAdaptiveRenderStride) + " old slow shards",
 		"DEBRIS BASELINE    " + fmt.Sprintf("%.1f FPS", debrisAdaptiveBaselineFPS),
