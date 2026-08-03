@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260803-67c1e8b5f4"
+	buildID = "20260803-68b7d3f6a1"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -106,7 +106,10 @@ const (
 	// Dynamic brick debris. Fragments use bounded lightweight rigid-body physics
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
 	// effects from turning one frame into thousands of collision bodies.
-	defaultDebrisEnabled   = true
+	defaultDebrisEnabled = true
+	// mixed preserves the existing varied debris. triangles and circles force every
+	// newly created shard into one cheap shape family for browser performance tests.
+	defaultDebrisShapeMode = "circles" //mixed circles triangles
 	defaultDebrisPiecesMin = 6
 	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0

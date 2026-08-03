@@ -1,4 +1,4 @@
-BRICK DEBRIS PHYSICS — v61
+BRICK DEBRIS PHYSICS — v68
 ==========================
 
 Every destroyed brick produces configurable physical fragments. Each fragment
@@ -8,8 +8,9 @@ rotation, velocity and lifetime.
 ATTACHED CONFIG DEFAULTS
 
   debris=true
-  debrisPiecesMin=2
-  debrisPiecesMax=16
+  debrisShapeMode=mixed
+  debrisPiecesMin=6
+  debrisPiecesMax=18
   debrisLifetime=9
   debrisLifetimeVariationPercent=16.7
   debrisFadeDuration=3
@@ -34,13 +35,13 @@ ATTACHED CONFIG DEFAULTS
   debrisAirDrag=0.15
   debrisRestitution=0.48
   debrisFriction=1.00
-  debrisExplosionSpeedMin=150
-  debrisExplosionSpeedMax=1200
+  debrisExplosionSpeedMin=0
+  debrisExplosionSpeedMax=520
   debrisAngularSpeedMin=2
   debrisAngularSpeedMax=6
   debrisAngularDrag=1.10
   debrisAngularStopSpeed=0.10
-  debrisBallInfluence=0.35
+  debrisBallInfluence=0
   debrisFieldScale=0.80
   debrisMagnetScale=0.65
   debrisMaxSpeed=1100
@@ -73,9 +74,20 @@ current level background. Pieces retain the muted colors produced by opacity,
 but overlapping debris occludes rather than accumulating transparency. The
 opening flash and end fade are also represented by opaque blended colors.
 
+SHAPE MODE
+
+The global config.go default and per-level debrisShapeMode setting accept:
+
+  mixed       use the existing varied shape probabilities
+  triangles   force every new shard to a sharp three-edge triangle
+  circles     force every new shard to a circular chip
+
+Only newly spawned debris changes. In forced modes, the individual family
+chance settings are retained but ignored until the mode returns to mixed.
+
 SHAPE MIX
 
-New configurable families supplement circles, compact chunks and rare slivers:
+In mixed mode, configurable families supplement circles, compact chunks and rare slivers:
 
   triangles                    3 corners
   stars                        4..7 points / 8..14 corners
