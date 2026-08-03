@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260803-66d4f9a2c7"
+	buildID = "20260803-67c1e8b5f4"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -107,8 +107,8 @@ const (
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
 	// effects from turning one frame into thousands of collision bodies.
 	defaultDebrisEnabled   = true
-	defaultDebrisPiecesMin = 6 //17
-	defaultDebrisPiecesMax = 18 //35
+	defaultDebrisPiecesMin = 6
+	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0
 	// Each new piece receives lifetime ├ù (1 ┬▒ variation/100). At 16.7% and
 	// a 9-second base lifetime, the approximate range is 7.5ΓÇô10.5 seconds.
@@ -148,7 +148,7 @@ const (
 	// Shards at or above this linear speed are drawn over living bricks. Slower
 	// shards remain behind them. Zero puts every shard in the front layer.
 	defaultDebrisFrontLayerSpeed = 600.0
-	defaultDebrisMaxActivePieces = 150 //200
+	defaultDebrisMaxActivePieces = 150
 	defaultDebrisOffscreenMargin = 120.0
 
 	// Rendering optimizations for older machines. Path2D caches each shard outline,

@@ -7838,6 +7838,17 @@ func formatLowestRenderFPS() string {
 	return fmt.Sprintf("%.1f", fpsLowest)
 }
 
+// resetLowestRenderFPS starts a fresh visible-page minimum measurement. The
+// current partial half-second sample is discarded and the normal warm-up is
+// applied again, preventing the reset keypress itself from creating a bogus low.
+func resetLowestRenderFPS() {
+	fpsLowest = 0
+	fpsVisibleSamplesSeen = 0
+	fpsSampleElapsed = 0
+	fpsSampleFrames = 0
+	showStatus("Lowest FPS reset", 1.5)
+}
+
 func pageIsVisibleForFPS() bool {
 	hidden := doc.Get("hidden")
 	return hidden.IsUndefined() || hidden.IsNull() || !hidden.Bool()
@@ -9488,13 +9499,18 @@ func setupInput() {
 		}
 
 		// P cycles physics diagnostics -> level/config diagnostics -> off.
-		// I is retained as an alias. F independently toggles the compact FPS readout.
+		// I is retained as an alias. F independently toggles the compact FPS readout;
+		// Shift+F resets its visible-page LOWEST measurement without hiding it.
 		if (key == "p" || key == "P" || key == "i" || key == "I") && !e.Get("repeat").Bool() {
 			cycleDiagnosticsOverlay()
 			return nil
 		}
 		if (key == "f" || key == "F") && !e.Get("repeat").Bool() {
-			fpsMiniOverlayVisible = !fpsMiniOverlayVisible
+			if e.Get("shiftKey").Bool() {
+				resetLowestRenderFPS()
+			} else {
+				fpsMiniOverlayVisible = !fpsMiniOverlayVisible
+			}
 			return nil
 		}
 

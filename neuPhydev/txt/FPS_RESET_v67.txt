@@ -1,0 +1,42 @@
+BREAKOUT v67 — RESETTABLE LOWEST RENDER FPS
+
+Build ID
+  20260803-67c1e8b5f4
+
+Controls
+  F         Toggle the compact bottom-right FPS display.
+  Shift+F   Reset LOWEST FPS without changing whether the display is visible.
+
+Mini display
+  FPS       Smoothed current requestAnimationFrame / draw rate.
+  LOWEST    Lowest valid visible-page half-second render sample since startup
+            or the most recent Shift+F reset.
+
+Reset behavior
+  - LOWEST immediately becomes "--".
+  - Any partially collected sample is discarded.
+  - The normal two-sample warm-up runs again.
+  - Hidden-tab time and long resume gaps remain excluded.
+  - The compact display stays visible or hidden exactly as it was.
+
+Debris defaults retained for the office-machine test
+  defaultDebrisPiecesMin       = 6
+  defaultDebrisPiecesMax       = 18
+  defaultDebrisMaxActivePieces = 150
+
+Render-cycle improvements retained
+  - Cached Path2D shard outlines.
+  - Cached 256-step opaque color palettes.
+  - setTransform instead of per-shard save/translate/rotate/restore.
+  - Redundant fillStyle changes avoided.
+  - Adaptive drawing of older slow debris when render FPS falls.
+  - Fresh and fast shards always remain visible.
+  - Full debris physics and collisions remain active.
+  - Slow debris draws behind bricks; fast debris draws in front.
+
+Suggested observation procedure
+  1. Press F to show the compact display.
+  2. Enter the level or effect you want to measure.
+  3. Press Shift+F just before the test.
+  4. Trigger debris-heavy gameplay for a repeatable interval.
+  5. Record current FPS, LOWEST, debris count, and PHYSICS COMPUTE LOAD.
