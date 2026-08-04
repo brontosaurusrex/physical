@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260803-68b7d3f6a1"
+	buildID = "20260804-238589e21fb9"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -109,12 +109,12 @@ const (
 	defaultDebrisEnabled = true
 	// mixed preserves the existing varied debris. triangles and circles force every
 	// newly created shard into one cheap shape family for browser performance tests.
-	defaultDebrisShapeMode = "circles" //mixed circles triangles
+	defaultDebrisShapeMode = "mixed" //mixed circles triangles
 	defaultDebrisPiecesMin = 6
 	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0
-	// Each new piece receives lifetime ├ù (1 ┬▒ variation/100). At 16.7% and
-	// a 9-second base lifetime, the approximate range is 7.5ΓÇô10.5 seconds.
+	// Each new piece receives lifetime x (1 +/- variation/100). At 16.7% and
+	// a 9-second base lifetime, the approximate range is 7.5-10.5 seconds.
 	defaultDebrisLifetimeVariationPercent = 16.7
 	defaultDebrisFadeDuration             = 3.0
 	defaultDebrisStartOpacity             = 0.35
@@ -160,7 +160,7 @@ const (
 	// Adaptive rendering never removes debris physics. When the observed render rate
 	// drops relative to the no-debris baseline, it draws a stable subset of older,
 	// slow shards while always retaining fresh and fast-moving fragments.
-	defaultDebrisAdaptiveRendering       = true
+	defaultDebrisAdaptiveRendering       = true // sucks
 	defaultDebrisAdaptiveTargetFPS       = 60.0
 	defaultDebrisAdaptiveFreshSeconds    = 0.75
 	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
@@ -186,7 +186,7 @@ const (
 	// Mouse position is direct. This only caps the measured surface velocity used
 	// for collision/spin calculations after a large cursor jump. It is part of
 	// physicsSettings so levels and the in-game physics editor may override it.
-	defaultPhysicsMousePaddleSpinVelocityLimit = 6000.0
+	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
 
 	defaultPaddleRadius      = 12.0
 	defaultBrickRadius       = 6.0
@@ -220,7 +220,7 @@ const (
 	defaultPhysicsFrictionCoeff       = 0.14 // was 0.10
 	defaultPhysicsPaddleBoost         = 900.0
 	defaultPhysicsBrickBoost          = 100.0
-	defaultPhysicsMaxSpeed            = 1000.0 // was 1170.0
+	defaultPhysicsMaxSpeed            = 920.0 // was 1000.0
 	defaultPhysicsMaxSpin             = 1530.0
 	defaultPhysicsStuckSpeedThreshold = 85.0
 	defaultPhysicsStuckDuration       = 1.2 // was 3.0

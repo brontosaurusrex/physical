@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260802-62d5f1a8c3"
+	buildID = "20260803-6679240613e2"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -57,6 +57,11 @@ const (
 	physicsMaxFrameDelta      = physicsStepSeconds * physicsMaxCatchUpSteps
 	physicsWarningHoldSeconds = 3.0
 
+	// Render-FPS sampling. The lowest value ignores the first two visible-page
+	// samples so startup does not become the permanent session minimum.
+	renderFPSSampleWindowSeconds = 0.5
+	renderFPSLowestWarmupSamples = 2
+
 	// Default geometry and gameplay.
 	defaultCanvasWidth    = 1800.0
 	defaultCanvasHeight   = 900.0
@@ -101,12 +106,15 @@ const (
 	// Dynamic brick debris. Fragments use bounded lightweight rigid-body physics
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction
 	// effects from turning one frame into thousands of collision bodies.
-	defaultDebrisEnabled   = true
-	defaultDebrisPiecesMin = 17 //10
-	defaultDebrisPiecesMax = 35 //25
+	defaultDebrisEnabled = true
+	// mixed preserves the existing varied debris. triangles and circles force every
+	// newly created shard into one cheap shape family for browser performance tests.
+	defaultDebrisShapeMode = "mixed" //mixed circles triangles
+	defaultDebrisPiecesMin = 6
+	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0
-	// Each new piece receives lifetime × (1 ± variation/100). At 16.7% and
-	// a 9-second base lifetime, the approximate range is 7.5–10.5 seconds.
+	// Each new piece receives lifetime x (1 +/- variation/100). At 16.7% and
+	// a 9-second base lifetime, the approximate range is 7.5-10.5 seconds.
 	defaultDebrisLifetimeVariationPercent = 16.7
 	defaultDebrisFadeDuration             = 3.0
 	defaultDebrisStartOpacity             = 0.35
@@ -140,8 +148,23 @@ const (
 	defaultDebrisFieldScale               = 0.80
 	defaultDebrisMagnetScale              = 0.65
 	defaultDebrisMaxSpeed                 = 1100.0
-	defaultDebrisMaxActivePieces          = 200 //150
-	defaultDebrisOffscreenMargin          = 120.0
+	// Shards at or above this linear speed are drawn over living bricks. Slower
+	// shards remain behind them. Zero puts every shard in the front layer.
+	defaultDebrisFrontLayerSpeed = 600.0
+	defaultDebrisMaxActivePieces = 150
+	defaultDebrisOffscreenMargin = 120.0
+
+	// Rendering optimizations for older machines. Path2D caches each shard outline,
+	// avoiding repeated Go/WASM -> JavaScript path commands on every frame.
+	defaultDebrisUsePath2DCache = true
+	// Adaptive rendering never removes debris physics. When the observed render rate
+	// drops relative to the no-debris baseline, it draws a stable subset of older,
+	// slow shards while always retaining fresh and fast-moving fragments.
+	defaultDebrisAdaptiveRendering       = true // sucks
+	defaultDebrisAdaptiveTargetFPS       = 60.0
+	defaultDebrisAdaptiveFreshSeconds    = 0.75
+	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
+	defaultDebrisAdaptiveMaxStride       = 3
 
 	// Last-resort ball rescue. A normal TILT! measures total movement; Orbital
 	// tilt measures movement along the orbit's minor axis. Only healthy fixed-step
@@ -163,15 +186,26 @@ const (
 	// Mouse position is direct. This only caps the measured surface velocity used
 	// for collision/spin calculations after a large cursor jump. It is part of
 	// physicsSettings so levels and the in-game physics editor may override it.
-	defaultPhysicsMousePaddleSpinVelocityLimit = 6000.0
+	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
 
-	defaultPaddleRadius         = 12.0
-	defaultBrickRadius          = 6.0
-	defaultUnbreakableChance    = 0.15
-	defaultMagicChance          = 0.3
-	defaultPowerUpDuration      = 10.0
-	defaultBlackHoleStrength    = 800.0
-	defaultBlackHoleRange       = 200.0
+	defaultPaddleRadius      = 12.0
+	defaultBrickRadius       = 6.0
+	defaultUnbreakableChance = 0.15
+	defaultMagicChance       = 0.3
+	defaultPowerUpDuration   = 10.0
+	defaultBlackHoleStrength = 800.0
+	// Horizontal path radius. 600 px is three times the previous 200 px travel.
+	defaultBlackHoleRange = 600.0
+	// The black hole follows a different smooth curved path on each activation,
+	// centered slightly above the middle of the playfield.
+	defaultBlackHolePathVerticalRange       = 120.0
+	defaultBlackHolePathCenterYOffset       = -70.0
+	defaultBlackHolePathHorizontalCyclesMin = 0.95
+	defaultBlackHolePathHorizontalCyclesMax = 1.15
+	defaultBlackHolePathVerticalCyclesMin   = 1.65
+	defaultBlackHolePathVerticalCyclesMax   = 2.35
+	defaultBlackHolePathWobble              = 0.18
+
 	defaultMagnetStrength       = 600.0
 	defaultMagnetRange          = 300.0
 	defaultInfluencerMultiplier = 5.0
@@ -186,7 +220,7 @@ const (
 	defaultPhysicsFrictionCoeff       = 0.14 // was 0.10
 	defaultPhysicsPaddleBoost         = 900.0
 	defaultPhysicsBrickBoost          = 100.0
-	defaultPhysicsMaxSpeed            = 1000.0 // was 1170.0
+	defaultPhysicsMaxSpeed            = 920.0 // was 1000.0
 	defaultPhysicsMaxSpin             = 1530.0
 	defaultPhysicsStuckSpeedThreshold = 85.0
 	defaultPhysicsStuckDuration       = 1.2 // was 3.0
@@ -263,7 +297,7 @@ const (
 	defaultEnableBreakUnbreakable = true
 	defaultEnableBigPaddle        = true
 
-	showBlackHole = true // false
+	showBlackHole = false // false
 
 	defaultMagicColor             = "#f1faee"
 	defaultMagicStrokeColor       = "#ffd700"
@@ -344,6 +378,7 @@ var debrisEditorSliderSpecs = []debrisSliderSpec{
 	{group: "Motion and settling", key: "debrisAngularDrag", label: "Angular drag", configName: "defaultDebrisAngularDrag", min: 0, max: 8, step: 0.05, precision: 2},
 	{group: "Motion and settling", key: "debrisAngularStopSpeed", label: "Angular stop threshold", configName: "defaultDebrisAngularStopSpeed", min: 0, max: 5, step: 0.05, precision: 2},
 	{group: "Motion and settling", key: "debrisMaxSpeed", label: "Maximum shard speed", configName: "defaultDebrisMaxSpeed", min: 0, max: 2500, step: 25, precision: 0},
+	{group: "Motion and settling", key: "debrisFrontLayerSpeed", label: "Front-layer speed threshold", configName: "defaultDebrisFrontLayerSpeed", min: 0, max: 2500, step: 25, precision: 0},
 	{group: "Motion and settling", key: "debrisOffscreenMargin", label: "Offscreen cleanup margin", configName: "defaultDebrisOffscreenMargin", min: 0, max: 500, step: 5, precision: 0},
 
 	{group: "Contact and fields", key: "debrisBrickCollisionDelay", label: "Brick collision delay", configName: "defaultDebrisBrickCollisionDelay", min: 0, max: 2, step: 0.01, precision: 2},

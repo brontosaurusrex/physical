@@ -326,6 +326,10 @@ var (
 	currentAudioRoom    = defaultAudioRoom
 	currentAudioRoomDry = defaultAudioRoomDry
 
+	// Persistent master gate for dynamic debris. The per-level debrisEnabled value
+	// still controls each level, but the master switch may disable debris globally.
+	debrisMasterEnabled = true
+
 	// Per-level dynamic debris settings.
 	debrisEnabled                  = defaultDebrisEnabled
 	debrisShapeMode                = defaultDebrisShapeMode
@@ -806,6 +810,63 @@ type debrisFragment struct {
 	renderPath         js.Value
 	renderPathReady    bool
 	renderColorPalette []string
+}
+
+const debrisMasterStorageKey = "breakout.debrisMasterEnabled"
+
+func debrisIsEnabled() bool {
+	return debrisMasterEnabled && debrisEnabled
+}
+
+func loadDebrisMasterPreference() {
+	// localStorage may be unavailable or blocked. Keep the safe default (ON) if
+	// access throws or the saved value is missing/invalid.
+	defer func() {
+		if recover() != nil {
+			debrisMasterEnabled = true
+		}
+	}()
+
+	storage := js.Global().Get("localStorage")
+	if storage.IsUndefined() || storage.IsNull() {
+		return
+	}
+	value := storage.Call("getItem", debrisMasterStorageKey)
+	if value.IsUndefined() || value.IsNull() {
+		return
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(value.String()))
+	if err == nil {
+		debrisMasterEnabled = enabled
+	}
+}
+
+func saveDebrisMasterPreference() {
+	defer func() {
+		_ = recover()
+	}()
+
+	storage := js.Global().Get("localStorage")
+	if storage.IsUndefined() || storage.IsNull() {
+		return
+	}
+	storage.Call("setItem", debrisMasterStorageKey, strconv.FormatBool(debrisMasterEnabled))
+}
+
+func toggleDebrisMaster() {
+	debrisMasterEnabled = !debrisMasterEnabled
+	if !debrisMasterEnabled {
+		brickDebris = brickDebris[:0]
+		debrisRenderedLastFrame = 0
+		debrisSkippedLastFrame = 0
+		debrisAdaptiveRenderStride = 1
+	}
+	saveDebrisMasterPreference()
+	if debrisMasterEnabled {
+		showStatus("Debris ON (saved)", 2.0)
+	} else {
+		showStatus("Debris OFF (saved)", 2.0)
+	}
 }
 
 const (
@@ -1891,7 +1952,7 @@ func buildDebrisShape(cellWidth, cellHeight float64) (
 }
 
 func spawnBrickDebris(br *brick, impactSpeed float64) {
-	if !debrisEnabled || br == nil || debrisMaxActivePieces <= 0 {
+	if !debrisIsEnabled() || br == nil || debrisMaxActivePieces <= 0 {
 		return
 	}
 	normalizeDebrisSettings()
@@ -7659,6 +7720,8 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 		return formatConfigFloat(autoPaddleHitVariation), formatConfigFloat(defaultAutoPaddleHitVariation), "float", true
 	case "debrisShapeMode":
 		return debrisShapeMode, defaultDebrisShapeMode, "string", true
+	case "debrisSizeScale":
+		return formatConfigFloat(debrisSizeScale), formatConfigFloat(defaultDebrisSizeScale), "float", true
 	case "debrisLifetimeVariationPercent":
 		return formatConfigFloat(debrisLifetimeVariationPercent), formatConfigFloat(defaultDebrisLifetimeVariationPercent), "float", true
 	case "debrisFrontLayerSpeed":
@@ -7785,11 +7848,19 @@ func physicsOverlayLines() []string {
 	if autoPaddleEnabled {
 		autoPaddleState = "ON"
 	}
+	debrisMasterState := "OFF"
+	if debrisMasterEnabled {
+		debrisMasterState = "ON"
+	}
+	debrisLevelState := "OFF"
+	if debrisEnabled {
+		debrisLevelState = "ON"
+	}
 
 	lines := []string{
 		"BUILD " + buildID,
 		"AUTO PADDLE        " + autoPaddleState,
-		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / ┬▒%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
+		"AUTO HIT OFFSET    " + fmt.Sprintf("%+.2f / +/-%.2f", autoPaddleHitOffset, autoPaddleHitVariation),
 		"PHYSICS FIXED STEP " + fmt.Sprintf("%.0f Hz / %.3f ms", physicsStepHz, physicsStepSeconds*1000),
 		"MAX TRAVEL / TICK  " + fmt.Sprintf("%.2f px", physicsConfig.maxSpeed*physicsStepSeconds),
 		"PHYSICS ACTUAL     " + fmt.Sprintf("%.1f Hz", physicsStepRateCurrent),
@@ -7803,6 +7874,8 @@ func physicsOverlayLines() []string {
 		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
+		"DEBRIS MASTER      " + debrisMasterState + " (R, saved)",
+		"DEBRIS LEVEL       " + debrisLevelState,
 		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
 		"DEBRIS SHAPE       " + strings.ToUpper(debrisShapeMode),
 		"DEBRIS DRAWN       " + strconv.Itoa(debrisRenderedLastFrame) + " / skipped " + strconv.Itoa(debrisSkippedLastFrame),
@@ -8661,7 +8734,7 @@ func ensurePhysicsEditorPanel() {
 	header.Call("appendChild", title)
 
 	hint := doc.Call("createElement", "div")
-	hint.Set("textContent", "E closes + copies ┬╖ O auto paddle")
+	hint.Set("textContent", "E closes + copies | O auto paddle")
 	setStyle(hint, "fontSize", "13px")
 	setStyle(hint, "opacity", "0.70")
 	header.Call("appendChild", hint)
@@ -9581,6 +9654,13 @@ func setupInput() {
 			return nil
 		}
 
+		// R toggles the persistent debris master gate. It is deliberately handled
+		// before game-state checks so it works on READY, pause, win, and game-over.
+		if (key == "r" || key == "R") && !e.Get("repeat").Bool() {
+			toggleDebrisMaster()
+			return nil
+		}
+
 		// Page Up / Page Down navigate levels in every game state, including the
 		// win and game-over screens. Check both key and code for browser/keyboard
 		// compatibility.
@@ -10069,6 +10149,7 @@ func main() {
 	hudLevelValue = -1
 	hudScoreValue = -1
 	ensureBrickCanvas()
+	loadDebrisMasterPreference()
 
 	loadLevels()
 	setupInput()

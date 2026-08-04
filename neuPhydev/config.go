@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260803-68b7d3f6a1"
+	buildID = "20260804-238589e21fb9"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -109,12 +109,12 @@ const (
 	defaultDebrisEnabled = true
 	// mixed preserves the existing varied debris. triangles and circles force every
 	// newly created shard into one cheap shape family for browser performance tests.
-	defaultDebrisShapeMode = "circles" //mixed circles triangles
+	defaultDebrisShapeMode = "mixed" //mixed circles triangles
 	defaultDebrisPiecesMin = 6
 	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0
-	// Each new piece receives lifetime ├ù (1 ┬▒ variation/100). At 16.7% and
-	// a 9-second base lifetime, the approximate range is 7.5ΓÇô10.5 seconds.
+	// Each new piece receives lifetime x (1 +/- variation/100). At 16.7% and
+	// a 9-second base lifetime, the approximate range is 7.5-10.5 seconds.
 	defaultDebrisLifetimeVariationPercent = 16.7
 	defaultDebrisFadeDuration             = 3.0
 	defaultDebrisStartOpacity             = 0.35
@@ -160,7 +160,7 @@ const (
 	// Adaptive rendering never removes debris physics. When the observed render rate
 	// drops relative to the no-debris baseline, it draws a stable subset of older,
 	// slow shards while always retaining fresh and fast-moving fragments.
-	defaultDebrisAdaptiveRendering       = false  // sucks
+	defaultDebrisAdaptiveRendering       = true // sucks
 	defaultDebrisAdaptiveTargetFPS       = 60.0
 	defaultDebrisAdaptiveFreshSeconds    = 0.75
 	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
