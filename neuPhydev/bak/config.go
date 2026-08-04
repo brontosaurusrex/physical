@@ -109,7 +109,7 @@ const (
 	defaultDebrisEnabled = true
 	// mixed preserves the existing varied debris. triangles and circles force every
 	// newly created shard into one cheap shape family for browser performance tests.
-	defaultDebrisShapeMode = "circles" //mixed circles triangles
+	defaultDebrisShapeMode = "mixed" //mixed circles triangles
 	defaultDebrisPiecesMin = 6
 	defaultDebrisPiecesMax = 18
 	defaultDebrisLifetime  = 9.0
@@ -160,7 +160,7 @@ const (
 	// Adaptive rendering never removes debris physics. When the observed render rate
 	// drops relative to the no-debris baseline, it draws a stable subset of older,
 	// slow shards while always retaining fresh and fast-moving fragments.
-	defaultDebrisAdaptiveRendering       = false // sucks
+	defaultDebrisAdaptiveRendering       = true // sucks
 	defaultDebrisAdaptiveTargetFPS       = 60.0
 	defaultDebrisAdaptiveFreshSeconds    = 0.75
 	defaultDebrisAdaptiveAlwaysDrawSpeed = 500.0
