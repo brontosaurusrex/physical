@@ -10216,8 +10216,13 @@ func setupInput() {
 		if pointerType == "mouse" {
 			button := e.Get("button")
 			if button.Type() == js.TypeNumber && button.Int() == 2 {
+				leftPressed = false
+				rightPressed = false
 				if pointerLockActive() {
 					releaseMousePointerLock()
+				} else {
+					setMousePaddleTarget(e)
+					requestMousePointerLock()
 				}
 				return nil
 			}
@@ -10243,10 +10248,6 @@ func setupInput() {
 			}
 			leftPressed = false
 			rightPressed = false
-			if !pointerLockActive() {
-				setMousePaddleTarget(e)
-				requestMousePointerLock()
-			}
 		}
 
 		if gameOver && win {
@@ -10332,14 +10333,11 @@ func setupInput() {
 	})
 	canvas.Call("addEventListener", "pointerdown", pointerDown)
 
-	// Suppress the browser menu and use right-click as the deliberate mouse-release
-	// gesture. Escape remains the browser-provided emergency Pointer Lock release.
+	// Suppress the browser menu and use right-click as the deliberate Pointer Lock
+	// toggle gesture. Escape remains the browser-provided emergency release.
 	contextMenu := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if len(args) > 0 {
 			args[0].Call("preventDefault")
-		}
-		if pointerLockActive() {
-			releaseMousePointerLock()
 		}
 		return nil
 	})
