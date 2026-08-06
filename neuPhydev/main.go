@@ -7943,7 +7943,7 @@ func physicsOverlayLines() []string {
 		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
-		"MOUSE CAPTURE      " + mouseLockState + " (click)",
+		"MOUSE CAPTURE      " + mouseLockState + " (left lock / right release)",
 		"PHONE TILT         " + tiltState,
 		"DEBRIS MASTER      " + debrisMasterState + " (R, saved)",
 		"DEBRIS LEVEL       " + debrisLevelState,
@@ -9715,7 +9715,7 @@ func setupPointerLock() {
 			mouseControlActive = true
 			leftPressed = false
 			rightPressed = false
-			showStatus("Mouse captured - click to release", 2.0)
+			showStatus("Mouse captured - right-click to release", 2.0)
 		} else {
 			mouseControlActive = false
 			paddle.vx = 0
@@ -10212,6 +10212,17 @@ func setupInput() {
 			return nil
 		}
 
+		pointerType := e.Get("pointerType").String()
+		if pointerType == "mouse" {
+			button := e.Get("button")
+			if button.Type() == js.TypeNumber && button.Int() == 2 {
+				if pointerLockActive() {
+					releaseMousePointerLock()
+				}
+				return nil
+			}
+		}
+
 		// Clicking or tapping the visible debug panel copies its complete text.
 		// Consume the event so it does not also launch, unpause, or move the paddle.
 		if report, inside := overlayReportAtPointer(e); inside {
@@ -10225,8 +10236,6 @@ func setupInput() {
 
 		unlockAudioFromGesture()
 
-		pointerType := e.Get("pointerType").String()
-
 		if pointerType == "mouse" {
 			button := e.Get("button")
 			if button.Type() == js.TypeNumber && button.Int() != 0 {
@@ -10234,12 +10243,10 @@ func setupInput() {
 			}
 			leftPressed = false
 			rightPressed = false
-			if pointerLockActive() {
-				releaseMousePointerLock()
-				return nil
+			if !pointerLockActive() {
+				setMousePaddleTarget(e)
+				requestMousePointerLock()
 			}
-			setMousePaddleTarget(e)
-			requestMousePointerLock()
 		}
 
 		if gameOver && win {
@@ -10324,6 +10331,20 @@ func setupInput() {
 		return nil
 	})
 	canvas.Call("addEventListener", "pointerdown", pointerDown)
+
+	// Suppress the browser menu and use right-click as the deliberate mouse-release
+	// gesture. Escape remains the browser-provided emergency Pointer Lock release.
+	contextMenu := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) > 0 {
+			args[0].Call("preventDefault")
+		}
+		if pointerLockActive() {
+			releaseMousePointerLock()
+		}
+		return nil
+	})
+	browserUICallbacks = append(browserUICallbacks, contextMenu)
+	canvas.Call("addEventListener", "contextmenu", contextMenu)
 
 	pointerMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if paused || len(args) == 0 {
