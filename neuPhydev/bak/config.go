@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260803-6679240613e2"
+	buildID = "20260804-238589e21fb9"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00

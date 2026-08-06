@@ -1,0 +1,11 @@
+{
+  "name": "Postgravity",
+  "short_name": "Postgravity",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["games"]
+}

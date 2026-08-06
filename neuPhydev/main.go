@@ -403,6 +403,7 @@ var (
 
 	mouseControlActive bool
 	mousePaddleTargetX float64
+	mousePointerLocked bool
 
 	mobileControlsEnabled  bool
 	mobileControlMode      = defaultMobileControlMode
@@ -568,14 +569,19 @@ var (
 	fpsVisibleSamplesSeen int
 	fpsMiniOverlayVisible bool
 
-	loopFunc      js.Func
-	keyDown       js.Func
-	keyUp         js.Func
-	pointerMove   js.Func
-	pointerDown   js.Func
-	pointerUp     js.Func
-	pointerCancel js.Func
-	mouseLeave    js.Func
+	loopFunc           js.Func
+	keyDown            js.Func
+	keyUp              js.Func
+	pointerMove        js.Func
+	pointerDown        js.Func
+	pointerUp          js.Func
+	pointerCancel      js.Func
+	mouseLeave         js.Func
+	lockedMouseMove    js.Func
+	pointerLockChange  js.Func
+	pointerLockError   js.Func
+	fullscreenToggle   js.Func
+	browserUICallbacks []js.Func
 
 	// Independent power-up states. Timed effects can coexist.
 	lowGravityActive     bool
@@ -5575,7 +5581,6 @@ func selectMobileControlMode(mode string) {
 	if mode == "tilt" {
 		phoneTiltAvailable = false
 		recalibratePhoneTilt()
-		requestPhoneTiltPermission()
 	}
 }
 
@@ -5711,7 +5716,7 @@ func setupMobileControlSelector() {
 	</button>
 	<button class="mobileControlChoice" data-mode="tilt">
 		Phone tilt
-		<small>Rotate the phone left or right. Selecting this also calibrates it.</small>
+		<small>Rotate the phone left or right. iPhone/iPad will ask for motion permission.</small>
 	</button>
 	<button class="mobileControlChoice" data-mode="follow">
 		Follow finger
@@ -5751,13 +5756,18 @@ func setupMobileControlSelector() {
 					args[0].Call("stopPropagation")
 				}
 				selectMobileControlMode(selectedMode)
+				if selectedMode == "tilt" {
+					// iOS requires the permission request to run directly from a
+					// completed user gesture. A click is more reliable than pointerdown.
+					requestPhoneTiltPermission()
+				}
 				hideMobileControlSelector()
 				return nil
 			}
 		}(mode))
 
 		mobileControlCallbacks = append(mobileControlCallbacks, callback)
-		button.Call("addEventListener", "pointerdown", callback)
+		button.Call("addEventListener", "click", callback)
 	}
 
 	savedMode := ""
@@ -5775,6 +5785,11 @@ func setupMobileControlSelector() {
 
 	if validMobileControlMode(savedMode) {
 		selectMobileControlMode(savedMode)
+		if savedMode == "tilt" {
+			// iOS permission cannot be requested during startup. Show the chooser
+			// again so a completed click can grant or refresh motion access.
+			showMobileControlSelector()
+		}
 	} else {
 		showMobileControlSelector()
 	}
@@ -5856,6 +5871,13 @@ func installPhoneTiltListener() {
 
 func requestPhoneTiltPermission() {
 	window := js.Global().Get("window")
+	secureContext := window.Get("isSecureContext")
+	if secureContext.Type() == js.TypeBoolean && !secureContext.Bool() {
+		phoneTiltPermissionAsked = false
+		showStatus("Tilt needs HTTPS", 3.0)
+		return
+	}
+
 	orientationEvent := window.Get("DeviceOrientationEvent")
 	if orientationEvent.IsUndefined() || orientationEvent.IsNull() {
 		orientationEvent = js.Global().Get("DeviceOrientationEvent")
@@ -5869,19 +5891,40 @@ func requestPhoneTiltPermission() {
 	if requestPermission.Type() != js.TypeFunction {
 		installPhoneTiltListener()
 		recalibratePhoneTilt()
+		showStatus("Tilt ready", 1.5)
 		return
 	}
 
-	if phoneTiltPermissionAsked && phoneTiltListenerSet {
+	if phoneTiltListenerSet {
 		recalibratePhoneTilt()
+		showStatus("Tilt recalibrated", 1.5)
+		return
+	}
+	if phoneTiltPermissionAsked {
 		return
 	}
 
 	phoneTiltPermissionAsked = true
-	promise := orientationEvent.Call("requestPermission")
+	promise := js.Undefined()
+	callSucceeded := false
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				phoneTiltPermissionAsked = false
+				log("Tilt permission request failed: " + fmt.Sprint(recovered))
+			}
+		}()
+		promise = orientationEvent.Call("requestPermission")
+		callSucceeded = true
+	}()
+	if !callSucceeded || promise.IsUndefined() || promise.IsNull() || promise.Type() != js.TypeObject {
+		phoneTiltPermissionAsked = false
+		showStatus("Tap again to allow tilt", 2.0)
+		return
+	}
 
 	granted := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if len(args) > 0 && args[0].String() == "granted" {
+		if len(args) > 0 && strings.EqualFold(args[0].String(), "granted") {
 			installPhoneTiltListener()
 			recalibratePhoneTilt()
 			showStatus("Tilt ready", 1.5)
@@ -5893,7 +5936,12 @@ func requestPhoneTiltPermission() {
 	})
 	rejected := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		phoneTiltPermissionAsked = false
-		showStatus("Tilt unavailable", 2.0)
+		reason := "request rejected"
+		if len(args) > 0 {
+			reason = fmt.Sprint(args[0])
+		}
+		log("Tilt permission rejected: " + reason)
+		showStatus("Tap again to allow tilt", 2.0)
 		return nil
 	})
 
@@ -6046,7 +6094,11 @@ func trackFullscreenPromise(promise js.Value, action string) {
 			reason = fmt.Sprint(args[0])
 		}
 		log("Fullscreen " + action + " failed: " + reason)
-		showStatus("Fullscreen blocked by browser", 2.0)
+		if appleMobileBrowser() {
+			showIOSStandaloneHint()
+		} else {
+			showStatus("Fullscreen blocked by browser", 2.0)
+		}
 		return nil
 	})
 	keepGamepadFullscreenCallback(failureCallback)
@@ -6103,7 +6155,11 @@ func handleGamepadFullscreenPress() {
 
 	target := doc.Get("documentElement")
 	if !callFullscreenMethod(target, "requestFullscreen", "webkitRequestFullscreen", "request") {
-		showStatus("Fullscreen unavailable", 2.0)
+		if appleMobileBrowser() {
+			showIOSStandaloneHint()
+		} else {
+			showStatus("Fullscreen unavailable", 2.0)
+		}
 	}
 }
 
@@ -7856,6 +7912,19 @@ func physicsOverlayLines() []string {
 	if debrisEnabled {
 		debrisLevelState = "ON"
 	}
+	mouseLockState := "UNAVAILABLE"
+	if pointerLockSupported() {
+		mouseLockState = "READY"
+		if mousePointerLocked {
+			mouseLockState = "LOCKED"
+		}
+	}
+	tiltState := "WAITING"
+	if phoneTiltListenerSet && phoneTiltAvailable {
+		tiltState = "ACTIVE"
+	} else if phoneTiltListenerSet {
+		tiltState = "READY"
+	}
 
 	lines := []string{
 		"BUILD " + buildID,
@@ -7874,6 +7943,8 @@ func physicsOverlayLines() []string {
 		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
+		"MOUSE CAPTURE      " + mouseLockState + " (click)",
+		"PHONE TILT         " + tiltState,
 		"DEBRIS MASTER      " + debrisMasterState + " (R, saved)",
 		"DEBRIS LEVEL       " + debrisLevelState,
 		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
@@ -9513,6 +9584,291 @@ func verticalDragToHorizontalDelta(deltaY float64) float64 {
 	return deltaY * scaleY * 2.2
 }
 
+// ---- Desktop pointer lock and iOS standalone helpers ----
+func pointerLockElement() js.Value {
+	element := doc.Get("pointerLockElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	element = doc.Get("mozPointerLockElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	element = doc.Get("webkitPointerLockElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	return js.Null()
+}
+
+func pointerLockActive() bool {
+	element := pointerLockElement()
+	return !element.IsNull() && element.Equal(canvas)
+}
+
+func pointerLockMethod(target js.Value, names ...string) string {
+	if target.IsUndefined() || target.IsNull() {
+		return ""
+	}
+	for _, name := range names {
+		fn := target.Get(name)
+		if !fn.IsUndefined() && !fn.IsNull() && fn.Type() == js.TypeFunction {
+			return name
+		}
+	}
+	return ""
+}
+
+func pointerLockSupported() bool {
+	return pointerLockMethod(canvas, "requestPointerLock", "mozRequestPointerLock", "webkitRequestPointerLock") != ""
+}
+
+func requestMousePointerLock() bool {
+	method := pointerLockMethod(canvas, "requestPointerLock", "mozRequestPointerLock", "webkitRequestPointerLock")
+	if method == "" {
+		return false
+	}
+
+	succeeded := true
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				succeeded = false
+				log("Pointer lock request failed: " + fmt.Sprint(recovered))
+				showStatus("Mouse capture unavailable", 2.0)
+			}
+		}()
+		promise := canvas.Call(method)
+		if !promise.IsUndefined() && !promise.IsNull() && promise.Type() == js.TypeObject {
+			catchMethod := promise.Get("catch")
+			if catchMethod.Type() == js.TypeFunction {
+				failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+					reason := "request rejected"
+					if len(args) > 0 {
+						reason = fmt.Sprint(args[0])
+					}
+					log("Pointer lock rejected: " + reason)
+					showStatus("Mouse capture unavailable", 2.0)
+					return nil
+				})
+				browserUICallbacks = append(browserUICallbacks, failure)
+				promise.Call("catch", failure)
+			}
+		}
+	}()
+	return succeeded
+}
+
+func releaseMousePointerLock() bool {
+	method := pointerLockMethod(doc, "exitPointerLock", "mozExitPointerLock", "webkitExitPointerLock")
+	if method == "" {
+		return false
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log("Pointer lock release failed: " + fmt.Sprint(recovered))
+		}
+	}()
+	doc.Call(method)
+	return true
+}
+
+func movePaddleByLockedMouse(e js.Value) {
+	movement := e.Get("movementX")
+	if movement.Type() != js.TypeNumber {
+		movement = e.Get("mozMovementX")
+	}
+	if movement.Type() != js.TypeNumber {
+		movement = e.Get("webkitMovementX")
+	}
+	if movement.Type() != js.TypeNumber {
+		return
+	}
+
+	rect := canvas.Call("getBoundingClientRect")
+	displayWidth := rect.Get("width").Float()
+	if displayWidth <= 0 {
+		return
+	}
+
+	deltaX := movement.Float() * canvasWidth / displayWidth * defaultMousePointerLockSensitivity
+	maxX := math.Max(0, canvasWidth-paddle.w)
+	mousePaddleTargetX = clampFloat(mousePaddleTargetX+deltaX, 0, maxX)
+	mouseControlActive = true
+	leftPressed = false
+	rightPressed = false
+
+	if !paused && !gameOver && !waitingForStart && !levelAdvancePending {
+		paddle.x = mousePaddleTargetX
+	}
+}
+
+func setupPointerLock() {
+	pointerLockChange = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		locked := pointerLockActive()
+		if locked == mousePointerLocked {
+			return nil
+		}
+		mousePointerLocked = locked
+		if locked {
+			mousePaddleTargetX = paddle.x
+			mouseControlActive = true
+			leftPressed = false
+			rightPressed = false
+			showStatus("Mouse captured - click to release", 2.0)
+		} else {
+			mouseControlActive = false
+			paddle.vx = 0
+			resetPaddleSpinHistory()
+			showStatus("Mouse released", 1.5)
+		}
+		return nil
+	})
+	pointerLockError = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		mousePointerLocked = false
+		showStatus("Mouse capture unavailable", 2.0)
+		return nil
+	})
+	lockedMouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if !mousePointerLocked || paused || len(args) == 0 {
+			return nil
+		}
+		movePaddleByLockedMouse(args[0])
+		return nil
+	})
+
+	doc.Call("addEventListener", "pointerlockchange", pointerLockChange)
+	doc.Call("addEventListener", "mozpointerlockchange", pointerLockChange)
+	doc.Call("addEventListener", "webkitpointerlockchange", pointerLockChange)
+	doc.Call("addEventListener", "pointerlockerror", pointerLockError)
+	doc.Call("addEventListener", "mozpointerlockerror", pointerLockError)
+	doc.Call("addEventListener", "webkitpointerlockerror", pointerLockError)
+	doc.Call("addEventListener", "mousemove", lockedMouseMove)
+}
+
+func appleMobileBrowser() bool {
+	navigator := js.Global().Get("navigator")
+	if navigator.IsUndefined() || navigator.IsNull() {
+		return false
+	}
+	userAgent := strings.ToLower(navigator.Get("userAgent").String())
+	if strings.Contains(userAgent, "iphone") || strings.Contains(userAgent, "ipad") || strings.Contains(userAgent, "ipod") {
+		return true
+	}
+	platform := navigator.Get("platform").String()
+	maxTouchPoints := navigator.Get("maxTouchPoints")
+	return platform == "MacIntel" && maxTouchPoints.Type() == js.TypeNumber && maxTouchPoints.Int() > 1
+}
+
+func standaloneDisplayMode() bool {
+	navigator := js.Global().Get("navigator")
+	if !navigator.IsUndefined() && !navigator.IsNull() {
+		standalone := navigator.Get("standalone")
+		if standalone.Type() == js.TypeBoolean && standalone.Bool() {
+			return true
+		}
+	}
+	window := js.Global().Get("window")
+	matchMedia := window.Get("matchMedia")
+	if matchMedia.Type() == js.TypeFunction {
+		return window.Call("matchMedia", "(display-mode: standalone)").Get("matches").Bool()
+	}
+	return false
+}
+
+func ensureMeta(name, content string) {
+	head := doc.Get("head")
+	if head.IsUndefined() || head.IsNull() {
+		return
+	}
+	selector := `meta[name="` + name + `"]`
+	meta := head.Call("querySelector", selector)
+	if meta.IsUndefined() || meta.IsNull() {
+		meta = doc.Call("createElement", "meta")
+		meta.Set("name", name)
+		head.Call("appendChild", meta)
+	}
+	meta.Set("content", content)
+}
+
+func ensureStandaloneMetadata() {
+	appTitle := strings.TrimSpace(doc.Get("title").String())
+	if appTitle == "" {
+		appTitle = "Postgravity"
+	}
+	ensureMeta("apple-mobile-web-app-capable", "yes")
+	ensureMeta("apple-mobile-web-app-title", appTitle)
+	ensureMeta("apple-mobile-web-app-status-bar-style", "black-translucent")
+	ensureMeta("theme-color", "#000000")
+
+	head := doc.Get("head")
+	if head.IsUndefined() || head.IsNull() {
+		return
+	}
+	viewport := head.Call("querySelector", `meta[name="viewport"]`)
+	if viewport.IsUndefined() || viewport.IsNull() {
+		viewport = doc.Call("createElement", "meta")
+		viewport.Set("name", "viewport")
+		viewport.Set("content", "width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover")
+		head.Call("appendChild", viewport)
+	} else {
+		content := viewport.Get("content").String()
+		if !strings.Contains(content, "viewport-fit=cover") {
+			if strings.TrimSpace(content) != "" {
+				content += ","
+			}
+			viewport.Set("content", content+"viewport-fit=cover")
+		}
+	}
+
+	manifest := head.Call("querySelector", `link[rel="manifest"]`)
+	if manifest.IsUndefined() || manifest.IsNull() {
+		manifest = doc.Call("createElement", "link")
+		manifest.Set("rel", "manifest")
+		manifest.Set("href", "manifest.webmanifest")
+		head.Call("appendChild", manifest)
+	}
+}
+
+func showIOSStandaloneHint() {
+	if standaloneDisplayMode() {
+		showStatus("Already running from Home Screen", 2.0)
+		return
+	}
+
+	existing := doc.Call("getElementById", "iosStandaloneHint")
+	if !existing.IsUndefined() && !existing.IsNull() {
+		existing.Get("style").Set("display", "flex")
+		return
+	}
+
+	overlay := doc.Call("createElement", "div")
+	overlay.Set("id", "iosStandaloneHint")
+	overlay.Set("innerHTML", `<div style="box-sizing:border-box;width:min(560px,92vw);padding:22px;border:1px solid rgba(255,255,255,.25);border-radius:12px;background:#16213e;color:#fff;font:700 15px/1.45 GameFont,monospace;text-align:center;box-shadow:0 16px 50px rgba(0,0,0,.55)"><div style="font-size:22px;margin-bottom:10px">Full-screen on iPhone</div><div style="color:rgba(255,255,255,.78);margin-bottom:16px">In Safari, tap <b>Share</b>, choose <b>Add to Home Screen</b>, then launch the game from its icon.</div><button id="iosStandaloneHintClose" style="padding:10px 18px;border:1px solid rgba(255,255,255,.3);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;font:700 15px GameFont,monospace">Close</button></div>`)
+	style := overlay.Get("style")
+	style.Set("position", "fixed")
+	style.Set("inset", "0")
+	style.Set("zIndex", "100001")
+	style.Set("display", "flex")
+	style.Set("alignItems", "center")
+	style.Set("justifyContent", "center")
+	style.Set("padding", "max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left))")
+	style.Set("background", "rgba(8,10,24,.94)")
+	doc.Get("body").Call("appendChild", overlay)
+
+	closeButton := doc.Call("getElementById", "iosStandaloneHintClose")
+	closeCallback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) > 0 {
+			args[0].Call("preventDefault")
+			args[0].Call("stopPropagation")
+		}
+		overlay.Get("style").Set("display", "none")
+		return nil
+	})
+	browserUICallbacks = append(browserUICallbacks, closeCallback)
+	closeButton.Call("addEventListener", "click", closeCallback)
+}
+
 // ---- Input ----
 func pointerPaddleX(e js.Value) (float64, bool) {
 	rect := canvas.Call("getBoundingClientRect")
@@ -9576,6 +9932,8 @@ func bindMobileButton(id string, handler func()) {
 }
 
 func setupInput() {
+	setupPointerLock()
+
 	keyDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -9869,6 +10227,21 @@ func setupInput() {
 
 		pointerType := e.Get("pointerType").String()
 
+		if pointerType == "mouse" {
+			button := e.Get("button")
+			if button.Type() == js.TypeNumber && button.Int() != 0 {
+				return nil
+			}
+			leftPressed = false
+			rightPressed = false
+			if pointerLockActive() {
+				releaseMousePointerLock()
+				return nil
+			}
+			setMousePaddleTarget(e)
+			requestMousePointerLock()
+		}
+
 		if gameOver && win {
 			jumpToLevel(0)
 			return nil
@@ -9936,20 +10309,16 @@ func setupInput() {
 					touchControlActive = mobileLeftHeld || mobileRightHeld
 					canvas.Call("setPointerCapture", e.Get("pointerId"))
 				case "tilt":
-					requestPhoneTiltPermission()
+					if phoneTiltListenerSet {
+						recalibratePhoneTilt()
+					}
 				}
 			}
 			return nil
 		}
 
-		if pointerType == "mouse" {
-			leftPressed = false
-			rightPressed = false
-			setMousePaddleTarget(e)
-
-			if gameOver && !win {
-				retryCurrentLevel()
-			}
+		if pointerType == "mouse" && gameOver && !win {
+			retryCurrentLevel()
 		}
 
 		return nil
@@ -9996,9 +10365,11 @@ func setupInput() {
 
 		if pointerType == "mouse" {
 			e.Call("preventDefault")
-			leftPressed = false
-			rightPressed = false
-			setMousePaddleTarget(e)
+			if !mousePointerLocked {
+				leftPressed = false
+				rightPressed = false
+				setMousePaddleTarget(e)
+			}
 		}
 
 		return nil
@@ -10009,6 +10380,11 @@ func setupInput() {
 		if len(args) > 0 {
 			e := args[0]
 			pointerID := e.Get("pointerId").Int()
+			pointerType := e.Get("pointerType").String()
+			if (pointerType == "touch" || pointerType == "pen") &&
+				mobileControlsEnabled && mobileControlMode == "tilt" {
+				requestPhoneTiltPermission()
+			}
 
 			if mobileControlMode == "two-thumb" {
 				if pointerID == mobileLeftPointerID {
@@ -10065,10 +10441,22 @@ func setupInput() {
 	canvas.Call("addEventListener", "pointercancel", pointerCancel)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		mouseControlActive = false
+		if !mousePointerLocked {
+			mouseControlActive = false
+		}
 		return nil
 	})
 	canvas.Call("addEventListener", "mouseleave", mouseLeave)
+
+	fullscreenToggle = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		handleGamepadFullscreenPress()
+		return nil
+	})
+	js.Global().Set("breakoutToggleFullscreen", fullscreenToggle)
+
+	bindMobileButton("fullscreenButton", func() {
+		handleGamepadFullscreenPress()
+	})
 
 	bindMobileButton("pauseButton", func() {
 		if physicsEditorVisible || gameOver {
@@ -10134,6 +10522,7 @@ func main() {
 	}()
 
 	log("main: starting")
+	ensureStandaloneMetadata()
 	canvas = doc.Call("getElementById", "gameCanvas")
 	if canvas.IsNull() {
 		log("canvas not found!")
