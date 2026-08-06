@@ -1,0 +1,44 @@
+gravity=180
+brickWidth=52
+brickHeight=26
+brickPadding=14
+brickOffsetTop=70
+ballX=900
+ballY=720
+ballVx=-260
+ballVy=-380
+ballRadius=10
+powerUpDuration=12
+
+
+
+// pastel harmony
+
+backgroundColor=#99c1b9
+paddleColor=#8e7dbe
+brickColor=#d88c9a
+brickStrokeColor=#d88c9a
+unbreakableColor=#8e7dbe
+unbreakableStrokeColor=#8e7dbe
+magicColor=#f1e3d3
+magicStrokeColor=#F1e3d3
+ballColor=#8e7dbe
+spinColor=#8e7dbe
+secondBallColor=#f2d0a9
+textColor=#8e7dbe
+secondBallSpinColor=#f2d0a9
+title="GRINDER"
+---
+           UU           
+         U####U         
+       U###MM###U       
+     U###M####M###U     
+   U###M########M###U   
+ U###M############M###U 
+U###M######MM######M###U
+ U###M############M###U 
+   U###M########M###U   
+     U###M####M###U     
+       U###MM###U       
+         U####U         
+           UU           
