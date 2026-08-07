@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260804-238589e21fb9"
+	buildID = "20260806-82f914944537"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -187,6 +187,8 @@ const (
 	// for collision/spin calculations after a large cursor jump. It is part of
 	// physicsSettings so levels and the in-game physics editor may override it.
 	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
+	// Relative desktop mouse distance multiplier while Pointer Lock is active.
+	defaultMousePointerLockSensitivity = 1.0
 
 	defaultPaddleRadius      = 12.0
 	defaultBrickRadius       = 6.0

@@ -1,0 +1,41 @@
+brickWidth=122
+brickHeight=122
+brickPadding=6
+brickOffsetTop=80
+ballX=1750
+ballY=720
+ballVx=240
+ballVy=-350
+ballRadius=11
+paddleBoost=1100
+
+backgroundColor=#2a2b2e
+paddleColor=#87ff65
+brickColor=#a4c2a8
+brickStrokeColor=#a4c2a8
+ballColor=#87ff65
+spinColor=#87ff65
+secondBallColor=#87ff65
+secondBallSpinColor=#87ff65
+textColor=#87ff65
+unbreakableColor=#5a5a66
+unbreakableStrokeColor=#5a5a66
+magicColor=#aceb98
+magicStrokeColor=#aceb98
+
+audioRoom=smallhall
+audioRoomDry=0.75
+title="PATTERNS"
+---
+X X X X X X X X X X
+ X X X X X X X X X 
+X X M X X M X X M X
+ X X X X X X X X X 
+X X X X X X X X X X
+ X X X X X X X X X 
+X X M X X M X X M X
+ X X X X X X X X X 
+X X X X X X X X X X
+ X X X X X X X X X 
+X X M X X M X X M X
+
