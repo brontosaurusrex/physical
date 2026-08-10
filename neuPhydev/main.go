@@ -6096,8 +6096,6 @@ func trackFullscreenPromise(promise js.Value, action string) {
 		log("Fullscreen " + action + " failed: " + reason)
 		if appleMobileBrowser() {
 			showIOSStandaloneHint()
-		} else {
-			showStatus("Fullscreen blocked by browser", 2.0)
 		}
 		return nil
 	})
