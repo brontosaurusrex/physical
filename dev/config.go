@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260806-82f914944537"
+	buildID = "20260810-cornerphysics-08-metrics"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -252,6 +252,18 @@ const (
 	defaultPhysicsWallTopTiltDegrees     = 3.45 // was 0.45
 	defaultPhysicsWallCornerFadeDistance = 40.0
 
+	// Brick-corner collisions. Physics uses the same brickRadius as the visible
+	// roundRect. Amount blends from the stable classic axis normal (0) to the
+	// rounded-corner radial normal (1).
+	defaultPhysicsCornerPhysicsEnabled = true
+	defaultPhysicsCornerPhysicsAmount  = 1.0
+	// false = passable-gap rule; true = every rounded brick corner may respond.
+	defaultPhysicsCornerPhysicsAllBricks = false
+
+	// Corner-hit diagnostics. Genuine corner responses are written only to the
+	// browser console and numbered sequentially for the whole game session.
+	enableCornerPhysicsDebug = true
+
 	wallNoiseIDLeft  int = 1
 	wallNoiseIDRight int = 2
 	wallNoiseIDTop   int = 3
@@ -339,6 +351,7 @@ var physicsEditorSliderSpecs = []physicsSliderSpec{
 	{group: "Surface contact", key: "overspeedHalfLife", label: "Overspeed half-life", configName: "defaultPhysicsOverspeedHalfLife", min: 0.05, max: 2, step: 0.05, precision: 2},
 	{group: "Geometry", key: "wallTopTiltDegrees", label: "Top-wall roughness", configName: "defaultPhysicsWallTopTiltDegrees", min: 0, max: 8, step: 0.05, precision: 2},
 	{group: "Geometry", key: "wallSideTiltDegrees", label: "Side-wall roughness", configName: "defaultPhysicsWallSideTiltDegrees", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Geometry", key: "cornerPhysicsAmount", label: "Corner physics amount", configName: "defaultPhysicsCornerPhysicsAmount", min: 0, max: 1, step: 0.05, precision: 2},
 	{group: "Geometry", key: "brickTiltMaxDegrees", label: "Maximum brick tilt", configName: "defaultPhysicsBrickTiltMaxDegrees", min: 0, max: 5, step: 0.05, precision: 2},
 }
 
