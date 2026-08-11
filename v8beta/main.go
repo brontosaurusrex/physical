@@ -65,6 +65,13 @@ type physicsSettings struct {
 	wallTopTiltDegrees     float64
 	wallCornerFadeDistance float64
 
+	// Brick-corner response. Amount 0 keeps the classic axis normal; 1 uses the
+	// geometric circle-vs-corner normal on genuine corner hits. When
+	// cornerPhysicsAllBricks is true, the normal passable-gap suppression is bypassed.
+	cornerPhysicsEnabled   bool
+	cornerPhysicsAmount    float64
+	cornerPhysicsAllBricks bool
+
 	brickTiltMinDegrees float64
 	brickTiltMaxDegrees float64
 	drawBrickTilt       bool
@@ -158,6 +165,10 @@ func defaultPhysicsSettings() physicsSettings {
 		wallTopTiltDegrees:     defaultPhysicsWallTopTiltDegrees,
 		wallCornerFadeDistance: defaultPhysicsWallCornerFadeDistance,
 
+		cornerPhysicsEnabled:   defaultPhysicsCornerPhysicsEnabled,
+		cornerPhysicsAmount:    defaultPhysicsCornerPhysicsAmount,
+		cornerPhysicsAllBricks: defaultPhysicsCornerPhysicsAllBricks,
+
 		brickTiltMinDegrees: defaultPhysicsBrickTiltMinDegrees,
 		brickTiltMaxDegrees: defaultPhysicsBrickTiltMaxDegrees,
 		drawBrickTilt:       defaultPhysicsDrawBrickTilt,
@@ -243,6 +254,8 @@ func setPhysicsFloatSetting(settings *physicsSettings, key string, value float64
 		settings.wallTopTiltDegrees = value
 	case "wallCornerFadeDistance":
 		settings.wallCornerFadeDistance = value
+	case "cornerPhysicsAmount":
+		settings.cornerPhysicsAmount = value
 	case "brickTiltMinDegrees":
 		settings.brickTiltMinDegrees = value
 	case "brickTiltMaxDegrees":
@@ -483,6 +496,14 @@ type statusMessage struct {
 	timer float64
 }
 
+type cornerPhysicsDebugEvent struct {
+	count    int
+	row, col int
+	amount   float64
+	nx, ny   float64
+	impact   float64
+}
+
 // A feature sample may be long (for example blackhole.wav). Only one voice for
 // a given feature is allowed at once; retriggering gently replaces it.
 type magicFeatureVoice struct {
@@ -628,6 +649,11 @@ var (
 
 	statusMessages []statusMessage
 
+	// Session-wide sequence number for genuine corner responses written to the
+	// browser console. It intentionally does not reset between levels.
+	cornerPhysicsDebugHitCount int
+	cornerPhysicsDebugPending  []cornerPhysicsDebugEvent
+
 	gridOffsetLeft float64
 	gridOffsetTop  float64
 	gridCellWidth  float64
@@ -663,20 +689,22 @@ var (
 	debugOverlayVisible   bool
 	physicsOverlayVisible bool
 
-	physicsEditorVisible                 bool
-	physicsEditorPreviousPaused          bool
-	physicsEditorLiveSimulation          bool
-	physicsEditorOpeningConfig           physicsSettings
-	physicsEditorOpeningDebris           debrisEditorSnapshot
-	physicsEditorOpeningAutoHitVariation float64
-	physicsEditorPanel                   js.Value
-	physicsEditorExportSelect            js.Value
-	physicsEditorLiveCheckbox            js.Value
-	physicsEditorDebrisCheckbox          js.Value
-	physicsEditorAutoPaddleCheck         js.Value
-	physicsEditorInputs                  = make(map[string]js.Value)
-	physicsEditorValueLabels             = make(map[string]js.Value)
-	physicsEditorCallbacks               []js.Func
+	physicsEditorVisible                        bool
+	physicsEditorPreviousPaused                 bool
+	physicsEditorLiveSimulation                 bool
+	physicsEditorOpeningConfig                  physicsSettings
+	physicsEditorOpeningDebris                  debrisEditorSnapshot
+	physicsEditorOpeningAutoHitVariation        float64
+	physicsEditorPanel                          js.Value
+	physicsEditorExportSelect                   js.Value
+	physicsEditorLiveCheckbox                   js.Value
+	physicsEditorDebrisCheckbox                 js.Value
+	physicsEditorCornerPhysicsCheckbox          js.Value
+	physicsEditorCornerPhysicsAllBricksCheckbox js.Value
+	physicsEditorAutoPaddleCheck                js.Value
+	physicsEditorInputs                         = make(map[string]js.Value)
+	physicsEditorValueLabels                    = make(map[string]js.Value)
+	physicsEditorCallbacks                      []js.Func
 
 	// O toggles an automatic inspection paddle. It predicts the next crossing of
 	// the paddle line and moves with bounded acceleration instead of teleporting.
@@ -3414,6 +3442,18 @@ func applyConfig(config map[string]string) {
 			} else {
 				log("drawBrickTilt must be true or false")
 			}
+		case "cornerPhysics", "cornerPhysicsEnabled":
+			if b, err := strconv.ParseBool(val); err == nil {
+				physicsConfig.cornerPhysicsEnabled = b
+			} else {
+				log(key + " must be true or false")
+			}
+		case "cornerPhysicsAllBricks", "allBrickCorners":
+			if b, err := strconv.ParseBool(val); err == nil {
+				physicsConfig.cornerPhysicsAllBricks = b
+			} else {
+				log(key + " must be true or false")
+			}
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				powerUpDuration = f
@@ -5076,6 +5116,7 @@ type brickContact struct {
 	impact         float64
 	swept          bool
 	time           float64
+	cornerApplied  bool
 }
 
 func sweptPointAABB(
@@ -5134,6 +5175,238 @@ func penetrationForBrickNormal(b *Ball, br *brick, nx, ny float64) float64 {
 	}
 }
 
+func pointIntervalDistance(value, minimum, maximum float64) float64 {
+	if value < minimum {
+		return minimum - value
+	}
+	if value > maximum {
+		return value - maximum
+	}
+	return 0
+}
+
+// brickCornerGapPassable decides whether the two outward sides of one specific
+// brick corner are genuinely exposed to the ball. Two neighboring bricks whose
+// gap is narrower than the ball diameter have overlapping ball-centre exclusion
+// zones, so their facing corners should behave like one continuous surface.
+// Once the gap is wide enough for the current ball to pass, those corners become
+// real corners again. Destroyed bricks are ignored, so a newly opened gap takes
+// effect immediately.
+func brickCornerGapPassable(brickIndex int, cornerX, cornerY, sideX, sideY, radius float64) bool {
+	if brickIndex < 0 || brickIndex >= len(bricks) || radius <= 0 {
+		return true
+	}
+	br := &bricks[brickIndex]
+	clearance := math.Max(0, physicsConfig.collisionSlop)
+	requiredGap := 2*radius + 2*clearance
+	perpendicularReach := radius + clearance
+	const epsilon = 1e-6
+
+	// Only bricks whose grid cells overlap the small region around this corner can
+	// possibly close either outward gap. This replaces the previous full-brick scan
+	// on every qualifying corner contact while preserving the exact gap tests below.
+	// If the spatial grid is unavailable, retain the old full scan as a safe fallback.
+	minX, maxX := cornerX-perpendicularReach, cornerX+perpendicularReach
+	minY, maxY := cornerY-perpendicularReach, cornerY+perpendicularReach
+	if sideX > 0 {
+		maxX = cornerX + requiredGap
+	} else if sideX < 0 {
+		minX = cornerX - requiredGap
+	}
+	if sideY > 0 {
+		maxY = cornerY + requiredGap
+	} else if sideY < 0 {
+		minY = cornerY - requiredGap
+	}
+
+	checkBrick := func(i int) bool {
+		if i == brickIndex || i < 0 || i >= len(bricks) || !bricks[i].alive {
+			return false
+		}
+		other := &bricks[i]
+
+		if sideX > 0 && other.x >= br.x+br.w-epsilon {
+			gap := other.x - (br.x + br.w)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerY, other.y, other.y+other.h) <= perpendicularReach {
+				return true
+			}
+		} else if sideX < 0 && other.x+other.w <= br.x+epsilon {
+			gap := br.x - (other.x + other.w)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerY, other.y, other.y+other.h) <= perpendicularReach {
+				return true
+			}
+		}
+
+		if sideY > 0 && other.y >= br.y+br.h-epsilon {
+			gap := other.y - (br.y + br.h)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerX, other.x, other.x+other.w) <= perpendicularReach {
+				return true
+			}
+		} else if sideY < 0 && other.y+other.h <= br.y+epsilon {
+			gap := br.y - (other.y + other.h)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerX, other.x, other.x+other.w) <= perpendicularReach {
+				return true
+			}
+		}
+		return false
+	}
+
+	if gridRows <= 0 || gridCols <= 0 || gridCellWidth <= 0 || gridCellHeight <= 0 || brickGrid == nil {
+		for i := range bricks {
+			if checkBrick(i) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// A brick can overlap the search region even when its cell origin lies up to
+	// one brick width/height before the region, so include that extent when mapping
+	// world coordinates back to grid cells.
+	minCol := int(math.Ceil((minX - br.w - gridOffsetLeft - epsilon) / gridCellWidth))
+	maxCol := int(math.Floor((maxX - gridOffsetLeft + epsilon) / gridCellWidth))
+	minRow := int(math.Ceil((minY - br.h - gridOffsetTop - epsilon) / gridCellHeight))
+	maxRow := int(math.Floor((maxY - gridOffsetTop + epsilon) / gridCellHeight))
+
+	if minCol < 0 {
+		minCol = 0
+	}
+	if minRow < 0 {
+		minRow = 0
+	}
+	if maxCol >= gridCols {
+		maxCol = gridCols - 1
+	}
+	if maxRow >= gridRows {
+		maxRow = gridRows - 1
+	}
+	if minCol > maxCol || minRow > maxRow {
+		return true
+	}
+
+	for row := minRow; row <= maxRow; row++ {
+		for col := minCol; col <= maxCol; col++ {
+			for _, i := range brickGrid[gridKey(row, col)] {
+				if checkBrick(i) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// brickCornerResponse makes collision geometry follow the same rounded corners
+// that are drawn with roundRect(..., brickRadius). The rounded-rectangle corner
+// arc is expanded by the ball radius, so a visible curved hit produces a radial
+// normal rather than requiring the ball centre to reach the old mathematical
+// square corner. The final bool reports whether the broad-phase AABB overlap is
+// a real rounded-rectangle contact; false lets the ball pass through the visual
+// cut-away outside a rounded corner.
+func brickCornerResponse(b *Ball, brickIndex int, br *brick, axisNX, axisNY, axisPenetration float64) (float64, float64, float64, bool, bool) {
+	// Canvas roundRect effectively cannot have a corner radius larger than half
+	// the shorter side. Clamp physics the same way so level geometry stays sane.
+	roundRadius := clampFloat(brickRadius, 0, math.Min(br.w, br.h)/2)
+	innerLeft := br.x + roundRadius
+	innerRight := br.x + br.w - roundRadius
+	innerTop := br.y + roundRadius
+	innerBottom := br.y + br.h - roundRadius
+
+	sideX := 0.0
+	cornerCenterX := b.x
+	outerCornerX := b.x
+	switch {
+	case b.x < innerLeft:
+		sideX = -1
+		cornerCenterX = innerLeft
+		outerCornerX = br.x
+	case b.x > innerRight:
+		sideX = 1
+		cornerCenterX = innerRight
+		outerCornerX = br.x + br.w
+	}
+
+	sideY := 0.0
+	cornerCenterY := b.y
+	outerCornerY := b.y
+	switch {
+	case b.y < innerTop:
+		sideY = -1
+		cornerCenterY = innerTop
+		outerCornerY = br.y
+	case b.y > innerBottom:
+		sideY = 1
+		cornerCenterY = innerBottom
+		outerCornerY = br.y + br.h
+	}
+
+	// If only one axis lies beyond the inner rounded core, this is a normal flat
+	// top/bottom/side hit, not a curved-corner hit.
+	if sideX == 0 || sideY == 0 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	dx := b.x - cornerCenterX
+	dy := b.y - cornerCenterY
+	distanceSquared := dx*dx + dy*dy
+	combinedRadius := roundRadius + b.r
+
+	// The expanded AABB used by the broad phase includes the empty cut-away around
+	// a rounded corner. Reject that false overlap so physics matches the drawing.
+	if distanceSquared >= combinedRadius*combinedRadius {
+		return axisNX, axisNY, axisPenetration, false, false
+	}
+	if distanceSquared <= 1e-12 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	if !physicsConfig.cornerPhysicsEnabled {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+	amount := clampFloat(physicsConfig.cornerPhysicsAmount, 0, 1)
+	if amount <= 0 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	if !physicsConfig.cornerPhysicsAllBricks &&
+		!brickCornerGapPassable(brickIndex, outerCornerX, outerCornerY, sideX, sideY, b.r) {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	distance := math.Sqrt(distanceSquared)
+	cornerNX := dx / distance
+	cornerNY := dy / distance
+	nx := lerpFloat(axisNX, cornerNX, amount)
+	ny := lerpFloat(axisNY, cornerNY, amount)
+	length := math.Hypot(nx, ny)
+	if length <= 1e-12 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+	nx /= length
+	ny /= length
+
+	cornerPenetration := math.Max(0, combinedRadius-distance)
+	penetration := lerpFloat(axisPenetration, cornerPenetration, amount)
+	return nx, ny, penetration, true, true
+}
+
+func flushCornerPhysicsDebugLogs() {
+	if len(cornerPhysicsDebugPending) == 0 {
+		return
+	}
+	for _, event := range cornerPhysicsDebugPending {
+		log(fmt.Sprintf(
+			"%03d CORNER HIT row=%d col=%d amount=%.2f normal=(%.3f, %.3f) impact=%.1f",
+			event.count, event.row, event.col, event.amount, event.nx, event.ny, event.impact,
+		))
+	}
+	cornerPhysicsDebugPending = cornerPhysicsDebugPending[:0]
+}
+
 func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
 	contacts := make([]brickContact, 0, 4)
 	for _, i := range candidateBrickIndices(b) {
@@ -5173,26 +5446,32 @@ func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
 			penetration = penetrationForBrickNormal(b, br, axisNX, axisNY)
 		}
 
-		// The broad-phase geometry remains the existing axis-aligned brick, but
-		// the actual collision response follows the brick's tiny visual angle.
-		// Correct penetration by the normal's axis component so separation still
-		// fully clears the brick boundary.
-		nx, ny := rotateVector(axisNX, axisNY, br.tiltRadians)
-		axisComponent := math.Abs(nx*axisNX + ny*axisNY)
+		// Match the visible rounded brick corner without reintroducing seam bounces.
+		// cornerPhysicsAmount=0 is the classic axis behavior; 1 uses the full radial
+		// roundRect-corner normal. The tiny visual brick tilt is applied last.
+		responseNX, responseNY, penetration, cornerApplied, contactValid := brickCornerResponse(
+			b, i, br, axisNX, axisNY, penetration,
+		)
+		if !contactValid {
+			continue
+		}
+		nx, ny := rotateVector(responseNX, responseNY, br.tiltRadians)
+		axisComponent := math.Abs(nx*responseNX + ny*responseNY)
 		if axisComponent > 0.000001 {
 			penetration /= axisComponent
 		}
 
 		contacts = append(contacts, brickContact{
-			index:       i,
-			nx:          nx,
-			ny:          ny,
-			axisNX:      axisNX,
-			axisNY:      axisNY,
-			penetration: math.Max(0, penetration),
-			impact:      math.Max(0, -(b.vx*nx + b.vy*ny)),
-			swept:       swept,
-			time:        hitTime,
+			index:         i,
+			nx:            nx,
+			ny:            ny,
+			axisNX:        axisNX,
+			axisNY:        axisNY,
+			penetration:   math.Max(0, penetration),
+			impact:        math.Max(0, -(b.vx*nx + b.vy*ny)),
+			swept:         swept,
+			time:          hitTime,
+			cornerApplied: cornerApplied,
 		})
 	}
 	return contacts
@@ -5264,6 +5543,20 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 		bestIndex = 0
 	}
 	best := contacts[bestIndex]
+
+	if enableCornerPhysicsDebug && best.cornerApplied {
+		cornerPhysicsDebugHitCount++
+		br := &bricks[best.index]
+		cornerPhysicsDebugPending = append(cornerPhysicsDebugPending, cornerPhysicsDebugEvent{
+			count:  cornerPhysicsDebugHitCount,
+			row:    br.row,
+			col:    br.col,
+			amount: clampFloat(physicsConfig.cornerPhysicsAmount, 0, 1),
+			nx:     best.nx,
+			ny:     best.ny,
+			impact: best.impact,
+		})
+	}
 
 	b.x += best.nx * (best.penetration + physicsConfig.collisionSlop)
 	b.y += best.ny * (best.penetration + physicsConfig.collisionSlop)
@@ -7582,6 +7875,8 @@ func physicsFloatSettingValue(settings *physicsSettings, key string) float64 {
 		return settings.wallTopTiltDegrees
 	case "wallCornerFadeDistance":
 		return settings.wallCornerFadeDistance
+	case "cornerPhysicsAmount":
+		return settings.cornerPhysicsAmount
 	case "brickTiltMinDegrees":
 		return settings.brickTiltMinDegrees
 	case "brickTiltMaxDegrees":
@@ -7619,7 +7914,7 @@ func parsePhysicsFloatConfigKey(key string) (field string, ok bool) {
 		"minimumCollisionGrip", "minimumPaddleGrip", "collisionSlop",
 		"paddleSpinGraceSeconds", "mousePaddleSpinVelocityLimit", "overspeedHalfLife",
 		"wallNoiseCellSize", "wallSideTiltDegrees", "wallTopTiltDegrees",
-		"wallCornerFadeDistance", "brickTiltMinDegrees", "brickTiltMaxDegrees",
+		"wallCornerFadeDistance", "cornerPhysicsAmount", "brickTiltMinDegrees", "brickTiltMaxDegrees",
 		"orbitMinimumSpeed", "orbitMinimumHitSpeed", "orbitMinorSpeedRatio",
 		"orbitMinorSpeedFloor", "orbitDetectionWindow", "orbitMaximumMinorProgress",
 		"orbitHitCooldown", "orbitEscapeSpeed", "orbitEscapeDuration",
@@ -7634,7 +7929,7 @@ func parsePhysicsFloatConfigKey(key string) (field string, ok bool) {
 
 func validPhysicsFloatSetting(key string, value float64) bool {
 	switch key {
-	case "restitution":
+	case "restitution", "cornerPhysicsAmount":
 		return value >= 0 && value <= 1
 	case "maxSpeed", "maxSpin":
 		return value > 0
@@ -7658,6 +7953,14 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 	if key == "drawBrickTilt" {
 		return strconv.FormatBool(physicsConfig.drawBrickTilt),
 			strconv.FormatBool(defaults.drawBrickTilt), "bool", true
+	}
+	if key == "cornerPhysics" || key == "cornerPhysicsEnabled" {
+		return strconv.FormatBool(physicsConfig.cornerPhysicsEnabled),
+			strconv.FormatBool(defaults.cornerPhysicsEnabled), "bool", true
+	}
+	if key == "cornerPhysicsAllBricks" || key == "allBrickCorners" {
+		return strconv.FormatBool(physicsConfig.cornerPhysicsAllBricks),
+			strconv.FormatBool(defaults.cornerPhysicsAllBricks), "bool", true
 	}
 	switch key {
 	case "audioRoom":
@@ -8605,6 +8908,12 @@ func physicsEditorSpecValue(spec physicsSliderSpec) float64 {
 }
 
 func refreshPhysicsEditorControls() {
+	if !physicsEditorCornerPhysicsCheckbox.IsUndefined() && !physicsEditorCornerPhysicsCheckbox.IsNull() {
+		physicsEditorCornerPhysicsCheckbox.Set("checked", physicsConfig.cornerPhysicsEnabled)
+	}
+	if !physicsEditorCornerPhysicsAllBricksCheckbox.IsUndefined() && !physicsEditorCornerPhysicsAllBricksCheckbox.IsNull() {
+		physicsEditorCornerPhysicsAllBricksCheckbox.Set("checked", physicsConfig.cornerPhysicsAllBricks)
+	}
 	for _, spec := range physicsEditorSliderSpecs {
 		input, inputOK := physicsEditorInputs[spec.key]
 		label, labelOK := physicsEditorValueLabels[spec.key]
@@ -8650,10 +8959,12 @@ func applyPhysicsEditorValue(spec physicsSliderSpec, value float64) {
 }
 
 func physicsEditorLevelText() string {
-	lines := make([]string, 0, len(autoPaddleEditorSliderSpecs)+len(physicsEditorSliderSpecs)+len(debrisEditorSliderSpecs)+1)
+	lines := make([]string, 0, len(autoPaddleEditorSliderSpecs)+len(physicsEditorSliderSpecs)+len(debrisEditorSliderSpecs)+2)
 	for _, spec := range autoPaddleEditorSliderSpecs {
 		lines = append(lines, spec.key+"="+formatAutoPaddleSliderValue(spec, autoPaddleEditorValue(spec.key)))
 	}
+	lines = append(lines, "cornerPhysicsEnabled="+strconv.FormatBool(physicsConfig.cornerPhysicsEnabled))
+	lines = append(lines, "cornerPhysicsAllBricks="+strconv.FormatBool(physicsConfig.cornerPhysicsAllBricks))
 	for _, spec := range physicsEditorSliderSpecs {
 		value := physicsEditorSpecValue(spec)
 		lines = append(lines, spec.key+"="+formatPhysicsSliderValue(spec, value))
@@ -8670,6 +8981,8 @@ func physicsEditorConfigText() string {
 	for _, spec := range autoPaddleEditorSliderSpecs {
 		lines = append(lines, spec.configName+" = "+formatAutoPaddleSliderValue(spec, autoPaddleEditorValue(spec.key)))
 	}
+	lines = append(lines, "defaultPhysicsCornerPhysicsEnabled = "+strconv.FormatBool(physicsConfig.cornerPhysicsEnabled))
+	lines = append(lines, "defaultPhysicsCornerPhysicsAllBricks = "+strconv.FormatBool(physicsConfig.cornerPhysicsAllBricks))
 	for _, spec := range physicsEditorSliderSpecs {
 		value := physicsEditorSpecValue(spec)
 		lines = append(lines, spec.configName+" = "+formatPhysicsSliderValue(spec, value))
@@ -8887,6 +9200,18 @@ func ensurePhysicsEditorPanel() {
 	})
 	physicsEditorDebrisCheckbox = debrisLabel.Call("querySelector", "input")
 	modeRow.Call("appendChild", debrisLabel)
+
+	cornerLabel := createPhysicsEditorCheckbox("Corner physics", physicsConfig.cornerPhysicsEnabled, func(enabled bool) {
+		physicsConfig.cornerPhysicsEnabled = enabled
+	})
+	physicsEditorCornerPhysicsCheckbox = cornerLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", cornerLabel)
+
+	allCornersLabel := createPhysicsEditorCheckbox("All brick corners", physicsConfig.cornerPhysicsAllBricks, func(enabled bool) {
+		physicsConfig.cornerPhysicsAllBricks = enabled
+	})
+	physicsEditorCornerPhysicsAllBricksCheckbox = allCornersLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", allCornersLabel)
 	panel.Call("appendChild", modeRow)
 
 	appendPhysicsEditorGroup(panel, "AUTO PADDLE")
@@ -8950,6 +9275,7 @@ func ensurePhysicsEditorPanel() {
 			setStyle(group, "letterSpacing", "0.04em")
 			panel.Call("appendChild", group)
 			lastGroup = spec.group
+
 		}
 
 		row := doc.Call("createElement", "label")
@@ -8985,6 +9311,17 @@ func ensurePhysicsEditorPanel() {
 			if err != nil {
 				return nil
 			}
+
+			// Keep this new control deliberately direct. Apart from avoiding any
+			// stale generic-value lookup in the UI, this makes the displayed amount
+			// exactly the value that the collision code reads on the next physics step.
+			if specCopy.key == "cornerPhysicsAmount" {
+				value = clampFloat(value, specCopy.min, specCopy.max)
+				physicsConfig.cornerPhysicsAmount = value
+				valueLabel.Set("textContent", formatPhysicsSliderValue(specCopy, value))
+				return nil
+			}
+
 			applyPhysicsEditorValue(specCopy, value)
 			valueLabel.Set("textContent", formatPhysicsSliderValue(specCopy, physicsEditorSpecValue(specCopy)))
 			return nil
@@ -9431,6 +9768,10 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 		physicsWarningTimer = physicsWarningHoldSeconds
 	}
 	computeSeconds := (js.Global().Get("performance").Call("now").Float() - computeStart) / 1000.0
+
+	// Console I/O is intentionally outside the physics-compute timer. The hit
+	// detection itself is still measured; only browser DevTools logging is excluded.
+	flushCornerPhysicsDebugLogs()
 
 	physicsLastFrameSteps = steps
 	if steps > physicsPeakFrameSteps {
@@ -10538,6 +10879,8 @@ func main() {
 		}
 	}()
 
+	js.Global().Set("breakoutBuildID", buildID)
+	log("BUILD " + buildID)
 	log("main: starting")
 	ensureStandaloneMetadata()
 	canvas = doc.Call("getElementById", "gameCanvas")
