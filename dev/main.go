@@ -504,6 +504,59 @@ type cornerPhysicsDebugEvent struct {
 	impact   float64
 }
 
+// levelRunStats is reset when a level starts and frozen when it is cleared.
+// Only clear, player-readable records live here: completion time, fastest ball
+// speed reached on this level, fastest absolute spin, and the largest brick
+// chain caused by one physical ball-to-brick hit.
+type levelRunStatsData struct {
+	elapsedSeconds float64
+	fastestSpeed   float64
+	fastestSpin    float64
+	bestChain      int
+}
+
+type levelBestStatsData struct {
+	timeMs       int
+	timeFound    bool
+	fastestSpeed int
+	speedFound   bool
+	fastestSpin  int
+	spinFound    bool
+	bestChain    int
+	chainFound   bool
+}
+
+type levelRecordFlags struct {
+	time  bool
+	speed bool
+	spin  bool
+	chain bool
+}
+
+// fullGameRunState tracks a continuous level-1-through-final-level attempt.
+// It deliberately does not survive reloads. Pauses, READY screens, and manual
+// level-complete screens do not add time; the run time is the sum of active
+// per-level play time.
+type fullGameRunStateData struct {
+	active         bool
+	recordEligible bool
+	elapsedSeconds float64
+	nextLevel      int
+	levelCount     int
+}
+
+type fullGameCompletionData struct {
+	valid              bool
+	recordEligible     bool
+	timeMs             int
+	newRecord          bool
+	previousBestTimeMs int
+	previousBestFound  bool
+	bestTimeMs         int
+	bestFound          bool
+	levelCount         int
+}
+
 // A feature sample may be long (for example blackhole.wav). Only one voice for
 // a given feature is allowed at once; retriggering gently replaces it.
 type magicFeatureVoice struct {
@@ -673,11 +726,27 @@ var (
 	hudLevelText  string
 	hudScoreText  string
 
-	// Per-level measured peaks. Speed records the fastest incoming collision
-	// speed, before paddle boost or collision response. Spin records the greatest
-	// absolute spin reached. Both survive life loss and reset with the level.
+	// Per-level measured peaks. Speed is the fastest instantaneous ball speed
+	// actually reached; spin is the greatest absolute spin reached. Both include
+	// either active ball, survive life loss, and reset with the level.
 	levelMeasuredMaxSpeed float64
 	levelMeasuredMaxSpin  float64
+
+	// Per-level run stats and persistent personal bests. The live HUD stays clean;
+	// these appear only in diagnostics panel 3 and on the level-complete screen.
+	levelRunStats             levelRunStatsData
+	levelCompletedStats       levelRunStatsData
+	levelCompletedStatsValid  bool
+	levelPreviousBests        levelBestStatsData
+	levelCurrentBests         levelBestStatsData
+	levelCompletionNewRecords levelRecordFlags
+	levelRunRecordEligible    bool
+
+	// Continuous whole-game attempt and its final result. The persistent best is
+	// scoped by the current number of levels so expanding the campaign starts a
+	// fair new record table instead of comparing 31 levels against an old 30-level run.
+	fullGameRun        fullGameRunStateData
+	fullGameCompletion fullGameCompletionData
 
 	// ---- Level system ----
 	currentLevelIndex    int
@@ -688,6 +757,7 @@ var (
 	devAllLevelsUnlocked  bool
 	debugOverlayVisible   bool
 	physicsOverlayVisible bool
+	statsOverlayVisible   bool
 
 	physicsEditorVisible                        bool
 	physicsEditorPreviousPaused                 bool
@@ -2161,11 +2231,24 @@ func recordMeasuredBallSpin(b *Ball) {
 		return
 	}
 
-	levelMeasuredMaxSpin = math.Max(levelMeasuredMaxSpin, math.Abs(b.omega))
+	spin := math.Abs(b.omega)
+	levelMeasuredMaxSpin = math.Max(levelMeasuredMaxSpin, spin)
+	levelRunStats.fastestSpin = math.Max(levelRunStats.fastestSpin, spin)
+}
+
+func recordMeasuredBallSpeed(b *Ball) {
+	if b == nil {
+		return
+	}
+
+	speed := math.Hypot(b.vx, b.vy)
+	levelMeasuredMaxSpeed = math.Max(levelMeasuredMaxSpeed, speed)
+	levelRunStats.fastestSpeed = math.Max(levelRunStats.fastestSpeed, speed)
 }
 
 func recordIncomingCollisionSpeed(speed float64) {
 	levelMeasuredMaxSpeed = math.Max(levelMeasuredMaxSpeed, speed)
+	levelRunStats.fastestSpeed = math.Max(levelRunStats.fastestSpeed, speed)
 }
 
 func updateHUDCache() {
@@ -3988,6 +4071,8 @@ func resolveCollisionDebug(
 	if impulse, collided := resolveCollisionBall(b, nx, ny, surfVx, surfVy, frictionScale); collided {
 		recordIncomingCollisionSpeed(incomingSpeed)
 		tangentialImpulse = impulse
+		recordMeasuredBallSpeed(b)
+		recordMeasuredBallSpin(b)
 	}
 
 	if record {
@@ -4564,6 +4649,212 @@ func writeStoredInt(key string, value int) {
 	storage.Call("setItem", key, strconv.Itoa(value))
 }
 
+func levelBestStorageKey(levelIndex int, metric string) string {
+	return "breakout.best.v1.level." + strconv.Itoa(levelIndex+1) + "." + metric
+}
+
+func fullGameBestStorageKey(levelCount int) string {
+	return "breakout.best.v1.fullGame." + strconv.Itoa(levelCount) + ".timeMs"
+}
+
+func loadFullGameBestTime(levelCount int) (int, bool) {
+	if levelCount <= 0 {
+		return 0, false
+	}
+	return readStoredInt(fullGameBestStorageKey(levelCount))
+}
+
+func beginFullGameRun() {
+	fullGameRun = fullGameRunStateData{
+		active:         true,
+		recordEligible: !autoPaddleEnabled,
+		nextLevel:      0,
+		levelCount:     len(levels),
+	}
+	fullGameCompletion = fullGameCompletionData{}
+}
+
+func cancelFullGameRun() {
+	fullGameRun.active = false
+	fullGameRun.recordEligible = false
+}
+
+// recordFullGameLevelCompletion accepts only the exact next level in a run that
+// began at level 1. Manual navigation, game-over retries from later levels, or
+// any other break in sequence therefore cannot produce a full-game record.
+func recordFullGameLevelCompletion() {
+	if !fullGameRun.active {
+		return
+	}
+	if fullGameRun.levelCount != len(levels) ||
+		currentLevelIndex != fullGameRun.nextLevel ||
+		currentLevelIndex < 0 || currentLevelIndex >= len(levels) {
+		cancelFullGameRun()
+		return
+	}
+
+	fullGameRun.elapsedSeconds += levelCompletedStats.elapsedSeconds
+	if !levelRunRecordEligible {
+		fullGameRun.recordEligible = false
+	}
+	fullGameRun.nextLevel++
+
+	if fullGameRun.nextLevel < fullGameRun.levelCount {
+		return
+	}
+
+	result := fullGameCompletionData{
+		valid:          true,
+		recordEligible: fullGameRun.recordEligible,
+		timeMs:         int(math.Round(fullGameRun.elapsedSeconds * 1000)),
+		levelCount:     fullGameRun.levelCount,
+	}
+	result.previousBestTimeMs, result.previousBestFound = loadFullGameBestTime(result.levelCount)
+	result.bestTimeMs = result.previousBestTimeMs
+	result.bestFound = result.previousBestFound
+	if result.recordEligible && (!result.previousBestFound || result.timeMs < result.previousBestTimeMs) {
+		writeStoredInt(fullGameBestStorageKey(result.levelCount), result.timeMs)
+		result.bestTimeMs = result.timeMs
+		result.bestFound = true
+		result.newRecord = true
+	}
+	fullGameCompletion = result
+	fullGameRun.active = false
+}
+
+func loadLevelBestStats(levelIndex int) levelBestStatsData {
+	var best levelBestStatsData
+	best.timeMs, best.timeFound = readStoredInt(levelBestStorageKey(levelIndex, "timeMs"))
+	best.fastestSpeed, best.speedFound = readStoredInt(levelBestStorageKey(levelIndex, "fastestSpeed"))
+	best.fastestSpin, best.spinFound = readStoredInt(levelBestStorageKey(levelIndex, "fastestSpin"))
+	best.bestChain, best.chainFound = readStoredInt(levelBestStorageKey(levelIndex, "bestChain"))
+	return best
+}
+
+func saveBestIfLower(levelIndex int, metric string, value int, oldValue int, found bool) (int, bool, bool) {
+	if !found || value < oldValue {
+		writeStoredInt(levelBestStorageKey(levelIndex, metric), value)
+		return value, true, true
+	}
+	return oldValue, found, false
+}
+
+func saveBestIfHigher(levelIndex int, metric string, value int, oldValue int, found bool) (int, bool, bool) {
+	if !found || value > oldValue {
+		writeStoredInt(levelBestStorageKey(levelIndex, metric), value)
+		return value, true, true
+	}
+	return oldValue, found, false
+}
+
+func resetLevelRunStats(levelIndex int) {
+	levelRunStats = levelRunStatsData{}
+	levelCompletedStats = levelRunStatsData{}
+	levelCompletedStatsValid = false
+	levelCompletionNewRecords = levelRecordFlags{}
+	levelCurrentBests = loadLevelBestStats(levelIndex)
+	levelPreviousBests = levelCurrentBests
+	levelRunRecordEligible = !autoPaddleEnabled
+}
+
+func markLevelRunAssisted() {
+	if levelAdvancePending || gameOver {
+		return
+	}
+	levelRunRecordEligible = false
+	if fullGameRun.active {
+		fullGameRun.recordEligible = false
+	}
+}
+
+func recordLevelCompletionStats() {
+	// Freeze the measured peaks into the result snapshot before saving records.
+	levelRunStats.fastestSpeed = math.Max(levelRunStats.fastestSpeed, levelMeasuredMaxSpeed)
+	levelRunStats.fastestSpin = math.Max(levelRunStats.fastestSpin, levelMeasuredMaxSpin)
+	levelCompletedStats = levelRunStats
+	levelCompletedStatsValid = true
+	levelCompletionNewRecords = levelRecordFlags{}
+	// Preserve the personal bests exactly as they were before this clear. The
+	// results table uses this snapshot for the WAS column even when a new record
+	// immediately replaces the stored BEST value below.
+	levelPreviousBests = levelCurrentBests
+	if !levelRunRecordEligible {
+		return
+	}
+
+	timeMs := int(math.Round(levelCompletedStats.elapsedSeconds * 1000))
+	speed := int(math.Round(levelCompletedStats.fastestSpeed))
+	spin := int(math.Round(levelCompletedStats.fastestSpin))
+	levelCurrentBests.timeMs, levelCurrentBests.timeFound, levelCompletionNewRecords.time =
+		saveBestIfLower(currentLevelIndex, "timeMs", timeMs, levelCurrentBests.timeMs, levelCurrentBests.timeFound)
+	levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound, levelCompletionNewRecords.speed =
+		saveBestIfHigher(currentLevelIndex, "fastestSpeed", speed, levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound)
+	levelCurrentBests.fastestSpin, levelCurrentBests.spinFound, levelCompletionNewRecords.spin =
+		saveBestIfHigher(currentLevelIndex, "fastestSpin", spin, levelCurrentBests.fastestSpin, levelCurrentBests.spinFound)
+	levelCurrentBests.bestChain, levelCurrentBests.chainFound, levelCompletionNewRecords.chain =
+		saveBestIfHigher(currentLevelIndex, "bestChain", levelCompletedStats.bestChain, levelCurrentBests.bestChain, levelCurrentBests.chainFound)
+}
+
+func formatLevelTimeSeconds(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	return formatLevelTimeMs(int(math.Round(seconds * 1000)))
+}
+
+func formatLevelTimeMs(milliseconds int) string {
+	if milliseconds < 0 {
+		milliseconds = 0
+	}
+	minutes := milliseconds / 60000
+	seconds := (milliseconds / 1000) % 60
+	hundredths := (milliseconds % 1000) / 10
+	return fmt.Sprintf("%02d:%02d.%02d", minutes, seconds, hundredths)
+}
+
+func durationUnit(value int, singular string) string {
+	if value == 1 {
+		return singular
+	}
+	return singular + "s"
+}
+
+func formatFullGameDurationMs(milliseconds int) string {
+	if milliseconds < 0 {
+		milliseconds = 0
+	}
+	totalSeconds := int(math.Round(float64(milliseconds) / 1000.0))
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds / 60) % 60
+	seconds := totalSeconds % 60
+	if hours > 0 {
+		return fmt.Sprintf("%d %s %d %s and %d %s",
+			hours, durationUnit(hours, "hour"),
+			minutes, durationUnit(minutes, "minute"),
+			seconds, durationUnit(seconds, "second"))
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%d %s and %d %s",
+			minutes, durationUnit(minutes, "minute"),
+			seconds, durationUnit(seconds, "second"))
+	}
+	return fmt.Sprintf("%d %s", seconds, durationUnit(seconds, "second"))
+}
+
+func formatBestInt(value int, found bool) string {
+	if !found {
+		return "--"
+	}
+	return strconv.Itoa(value)
+}
+
+func formatBestTime(best levelBestStatsData) string {
+	if !best.timeFound {
+		return "--"
+	}
+	return formatLevelTimeMs(best.timeMs)
+}
+
 func saveCurrentLevel() {
 	writeStoredInt(savedLevelKey, currentLevelIndex)
 }
@@ -4708,6 +4999,18 @@ func startLevel(index int) {
 	// User toggles never carry into a new level.
 	magnetCheat = false
 	zapperCheat = false
+	resetLevelRunStats(index)
+
+	// Level 1 always begins a fresh whole-game attempt. Later levels preserve that
+	// attempt only when they are the exact next sequential level reached through
+	// normal completion.
+	if index == 0 {
+		beginFullGameRun()
+	} else if !fullGameRun.active || fullGameRun.levelCount != len(levels) || index != fullGameRun.nextLevel {
+		cancelFullGameRun()
+	} else if autoPaddleEnabled {
+		fullGameRun.recordEligible = false
+	}
 
 	// Reset all globals and level-only state before applying config.
 	resetGlobals()
@@ -4728,10 +5031,12 @@ func startLevel(index int) {
 	ball.stuckTimer = 0
 	ball.soundCooldown = 0
 	ball.r = ballRadius
-	// Use the real launch speed as the baseline. Later updates are made only
-	// from incoming speeds immediately before actual collisions.
+	// Use the real launch state as the baseline. Peaks then track the fastest
+	// instantaneous ball speed and absolute spin actually reached on this level.
 	levelMeasuredMaxSpeed = math.Hypot(ball.vx, ball.vy)
 	levelMeasuredMaxSpin = math.Abs(ball.omega)
+	levelRunStats.fastestSpeed = levelMeasuredMaxSpeed
+	levelRunStats.fastestSpin = levelMeasuredMaxSpin
 	resetFastOrbitState(&ball)
 	resetFastOrbitState(&secondBall)
 	resetBallRescueState(&ball, true)
@@ -4809,6 +5114,9 @@ func jumpToLevel(index int) {
 
 	gameOver = false
 	win = false
+	if index != 0 {
+		cancelFullGameRun()
+	}
 	startLevel(index)
 }
 
@@ -4836,6 +5144,9 @@ func retryCurrentLevel() {
 	leftPressed = false
 	rightPressed = false
 	paddle.vx = 0
+	if currentLevelIndex != 0 {
+		cancelFullGameRun()
+	}
 	startLevel(currentLevelIndex)
 }
 
@@ -5483,6 +5794,17 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 		return
 	}
 
+	// A chain is the number of bricks destroyed as a consequence of one physical
+	// ball-to-brick contact event. This naturally includes immediate Nuke/Influencer
+	// secondary destruction, but not unrelated Zapper kills that happen later.
+	scoreBeforeHit := score
+	defer func() {
+		chain := score - scoreBeforeHit
+		if chain > levelRunStats.bestChain {
+			levelRunStats.bestChain = chain
+		}
+	}()
+
 	if passActive {
 		for _, contact := range contacts {
 			br := &bricks[contact.index]
@@ -5752,6 +6074,8 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 
 		preventVerticalLock(b, preferredDirection)
 		clampBallToPhysicsSettings(b, physics)
+		recordMeasuredBallSpeed(b)
+		recordMeasuredBallSpin(b)
 		maybeShowHighSpin(spinBeforePaddle, b.omega)
 		if isPrimary {
 			recordLastPaddleSpinDebug(true, spinBeforePaddle, b.omega)
@@ -5799,6 +6123,7 @@ func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 
 func updateBall(b *Ball, dt float64, isPrimary bool) {
 	updateBallAdaptive(b, dt, isPrimary)
+	recordMeasuredBallSpeed(b)
 	recordMeasuredBallSpin(b)
 }
 
@@ -5818,6 +6143,7 @@ func loseLife() {
 	if lives == 0 {
 		gameOver = true
 		win = false
+		cancelFullGameRun()
 		playGameOver()
 	} else {
 		resetBalls()
@@ -6334,7 +6660,11 @@ func gamepadButtonPressed(button js.Value) bool {
 }
 
 func handleGamepadFirePress() {
-	if physicsEditorVisible || gameOver || levelAdvancePending {
+	if physicsEditorVisible || gameOver {
+		return
+	}
+	if levelAdvancePending {
+		advanceFromLevelComplete()
 		return
 	}
 
@@ -6816,6 +7146,7 @@ func collideDebrisWithBall(fragment *debrisFragment, b *Ball) {
 	clampDebrisSpeed(fragment)
 	fragment.omega -= tangentVelocity * 0.025 / math.Max(1, fragment.radius)
 	resetFastOrbitCandidate(b)
+	recordMeasuredBallSpeed(b)
 	recordMeasuredBallSpin(b)
 }
 
@@ -7356,6 +7687,9 @@ func refreshAutoPaddleControl() {
 
 func setAutoPaddleEnabled(enabled bool, announce bool) {
 	autoPaddleEnabled = enabled
+	if enabled {
+		markLevelRunAssisted()
+	}
 	resetAutoPaddleHitPlan()
 	if enabled && waitingForStart && !gameOver {
 		waitingForStart = false
@@ -7392,24 +7726,14 @@ func update(dt float64) {
 	}
 
 	if levelAdvancePending {
-		// Keep the final brick explosion alive during the level-complete hold.
+		// Stay on the results screen until the player explicitly continues.
+		// Debris may keep animating, but the frozen completion stats do not change.
 		updateBrickDebris(dt)
-		levelCompleteTimer -= dt
-		if levelCompleteTimer <= 0 {
-			levelCompleteTimer = 0
-			levelAdvancePending = false
-
-			nextLevel := currentLevelIndex + 1
-			if nextLevel >= len(levels) {
-				gameOver = true
-				win = true
-				playYouWin()
-			} else {
-				startLevel(nextLevel)
-			}
-		}
 		return
 	}
+
+	// Active-play time excludes READY, pause, and the level-complete screen.
+	levelRunStats.elapsedSeconds += dt
 
 	// Keyboard and two-thumb controls use acceleration rather than jumping
 	// immediately to one fixed speed. Short taps make small corrections;
@@ -7615,12 +7939,17 @@ func update(dt float64) {
 		// Only one ball was active.
 		loseLife()
 	}
-	// Hold the cleared level on screen for three seconds.
+	// Freeze run stats and hold the results screen until the player continues.
 	if !gameOver && !levelAdvancePending && remainingBreakableBricks == 0 {
+		recordLevelCompletionStats()
+		recordFullGameLevelCompletion()
 		lives++
 		unlockNextLevel()
 		levelAdvancePending = true
-		levelCompleteTimer = 3.0
+		levelCompleteTimer = 0
+		debugOverlayVisible = false
+		physicsOverlayVisible = false
+		statsOverlayVisible = false
 		leftPressed = false
 		rightPressed = false
 		touchControlActive = false
@@ -7632,6 +7961,21 @@ func update(dt float64) {
 		playLevelComplete()
 		showStatus("Level complete! +1 life", 3.0)
 	}
+}
+
+func advanceFromLevelComplete() {
+	if !levelAdvancePending {
+		return
+	}
+	levelAdvancePending = false
+	nextLevel := currentLevelIndex + 1
+	if nextLevel >= len(levels) {
+		gameOver = true
+		win = true
+		playYouWin()
+		return
+	}
+	startLevel(nextLevel)
 }
 
 // ---- Reset balls on life lost ----
@@ -8343,6 +8687,51 @@ func debugOverlayReport() string {
 	return strings.Join(debugOverlayLines(), "\n")
 }
 
+func statsOverlayLines() []string {
+	run := levelRunStats
+	if levelCompletedStatsValid && levelAdvancePending {
+		run = levelCompletedStats
+	}
+	eligibility := "YES"
+	if !levelRunRecordEligible {
+		eligibility = "NO (ASSISTED)"
+	}
+	wasChain := "--"
+	if levelPreviousBests.chainFound {
+		wasChain = strconv.Itoa(levelPreviousBests.bestChain) + " bricks"
+	}
+	bestChain := "--"
+	if levelCurrentBests.chainFound {
+		bestChain = strconv.Itoa(levelCurrentBests.bestChain) + " bricks"
+	}
+	newTag := func(isNew bool) string {
+		if isNew {
+			return " NEW BEST!"
+		}
+		return ""
+	}
+	lines := []string{
+		"LEVEL RECORDS - LEVEL " + strconv.Itoa(currentLevelIndex+1),
+		"",
+		fmt.Sprintf("%-16s %-14s %-14s %-14s", "", "THIS RUN", "WAS", "BEST"),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "TIME", formatLevelTimeSeconds(run.elapsedSeconds), formatBestTime(levelPreviousBests), formatBestTime(levelCurrentBests), newTag(levelCompletionNewRecords.time)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "FASTEST BALL", fmt.Sprintf("%.0f", run.fastestSpeed), formatBestInt(levelPreviousBests.fastestSpeed, levelPreviousBests.speedFound), formatBestInt(levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound), newTag(levelCompletionNewRecords.speed)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "FASTEST SPIN", fmt.Sprintf("%.0f", run.fastestSpin), formatBestInt(levelPreviousBests.fastestSpin, levelPreviousBests.spinFound), formatBestInt(levelCurrentBests.fastestSpin, levelCurrentBests.spinFound), newTag(levelCompletionNewRecords.spin)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "BEST CHAIN", strconv.Itoa(run.bestChain)+" bricks", wasChain, bestChain, newTag(levelCompletionNewRecords.chain)),
+		"",
+		"RECORD ELIGIBLE " + eligibility,
+	}
+	return lines
+}
+
+func statsOverlayReport() string {
+	return strings.Join(statsOverlayLines(), "\n")
+}
+
+func statsOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
+	return debugOverlayGeometry(lineCount)
+}
+
 func formatLowestRenderFPS() string {
 	if fpsLowest <= 0 {
 		return "--"
@@ -8366,20 +8755,27 @@ func pageIsVisibleForFPS() bool {
 	return hidden.IsUndefined() || hidden.IsNull() || !hidden.Bool()
 }
 
-// P cycles physics diagnostics -> level/config diagnostics -> off. I remains an
-// alias for the same cycle so older muscle memory still works.
+// P cycles physics diagnostics -> level/config diagnostics -> level records -> off.
+// I remains an alias for the same cycle so older muscle memory still works.
 func cycleDiagnosticsOverlay() {
 	if physicsOverlayVisible {
 		physicsOverlayVisible = false
 		debugOverlayVisible = true
+		statsOverlayVisible = false
 		return
 	}
 	if debugOverlayVisible {
 		debugOverlayVisible = false
+		statsOverlayVisible = true
+		return
+	}
+	if statsOverlayVisible {
+		statsOverlayVisible = false
 		return
 	}
 	physicsOverlayVisible = true
 	debugOverlayVisible = false
+	statsOverlayVisible = false
 }
 
 func pointerCanvasPosition(e js.Value) (x, y float64, ok bool) {
@@ -8410,6 +8806,12 @@ func overlayReportAtPointer(e js.Value) (string, bool) {
 		panelX, panelY, panelWidth, panelHeight, _ := physicsOverlayGeometry(len(physicsOverlayLines()))
 		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
 			return physicsOverlayReport(), true
+		}
+	}
+	if statsOverlayVisible {
+		panelX, panelY, panelWidth, panelHeight, _ := statsOverlayGeometry(len(statsOverlayLines()))
+		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
+			return statsOverlayReport(), true
 		}
 	}
 	return "", false
@@ -9395,6 +9797,7 @@ func openPhysicsEditor() {
 	if physicsEditorVisible {
 		return
 	}
+	markLevelRunAssisted()
 	ensurePhysicsEditorPanel()
 	physicsEditorPreviousPaused = paused
 	physicsEditorLiveSimulation = !paused
@@ -9412,6 +9815,7 @@ func openPhysicsEditor() {
 	resetPaddleSpinHistory()
 	debugOverlayVisible = false
 	physicsOverlayVisible = false
+	statsOverlayVisible = false
 	refreshPhysicsEditorControls()
 	physicsEditorPanel.Get("style").Set("display", "block")
 }
@@ -9502,8 +9906,14 @@ func drawPhysicsOverlay() {
 	}
 }
 
+func drawStatsOverlay() {
+	if statsOverlayVisible {
+		drawPhysicsOverlayLines(statsOverlayLines())
+	}
+}
+
 func drawFPSMiniOverlay() {
-	if !fpsMiniOverlayVisible || physicsOverlayVisible || debugOverlayVisible {
+	if !fpsMiniOverlayVisible || physicsOverlayVisible || debugOverlayVisible || statsOverlayVisible {
 		return
 	}
 
@@ -9593,14 +10003,12 @@ func draw(alpha float64) {
 	ctx.Call("fillText", hudScoreText, hudTextX, hudFirstLineY+2*hudLineStep)
 
 	currentSpeed := math.Hypot(ball.vx, ball.vy)
-	ctx.Call("fillText", "Speed: "+fmt.Sprintf("%.0f", currentSpeed)+
-		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpeed)+")", hudTextX, hudFirstLineY+3*hudLineStep)
+	ctx.Call("fillText", "Speed: "+fmt.Sprintf("%.0f", currentSpeed), hudTextX, hudFirstLineY+3*hudLineStep)
 
 	if math.Abs(ball.omega) > 100 {
 		ctx.Set("fillStyle", "#ff0000")
 	}
-	ctx.Call("fillText", "Spin:  "+fmt.Sprintf("%+.0f", ball.omega)+
-		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpin)+")", hudTextX, hudFirstLineY+4*hudLineStep)
+	ctx.Call("fillText", "Spin:  "+fmt.Sprintf("%+.0f", ball.omega), hudTextX, hudFirstLineY+4*hudLineStep)
 	ctx.Set("fillStyle", palette[4])
 
 	for i, message := range statusMessages {
@@ -9621,10 +10029,89 @@ func draw(alpha float64) {
 
 	if levelAdvancePending && !gameOver {
 		drawCenteredOverlay()
+		run := levelRunStats
+		if levelCompletedStatsValid {
+			run = levelCompletedStats
+		}
+		centerX := canvasWidth / 2
+		centerY := canvasHeight / 2
+		assisted := !levelRunRecordEligible
+
+		// Center the complete title/table/prompt composition as one vertical block.
+		// The title keeps its original large 64px size; only the result table is smaller.
+		blockHeight := 382.0
+		if assisted {
+			blockHeight += 42.0
+		}
+		blockTop := centerY - blockHeight/2
+		titleY := blockTop + 58.0
+		headerY := titleY + 56.0
+		rowY := headerY + 38.0
+
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
 		ctx.Set("font", "64px GameFont, monospace")
-		ctx.Call("fillText", "LEVEL COMPLETE", canvasWidth/2, canvasHeight/2)
+		ctx.Call("fillText", "LEVEL COMPLETE", centerX, titleY)
+
+		// Results are a centered table, while every cell is left-aligned.
+		const (
+			tableWidth = 1080.0
+			labelWidth = 235.0
+			runWidth   = 195.0
+			wasWidth   = 195.0
+			bestWidth  = 195.0
+			rowStep    = 36.0
+		)
+		tableLeft := centerX - tableWidth/2
+		labelX := tableLeft
+		runX := tableLeft + labelWidth
+		wasX := runX + runWidth
+		bestX := wasX + wasWidth
+		newX := bestX + bestWidth
+
+		ctx.Set("textAlign", "left")
+		ctx.Set("font", "18px GameFont, monospace")
+		ctx.Call("fillText", "THIS RUN", runX, headerY)
+		ctx.Call("fillText", "WAS", wasX, headerY)
+		ctx.Call("fillText", "BEST", bestX, headerY)
+
+		ctx.Set("font", "24px GameFont, monospace")
+		drawResultRow := func(row int, label, current, was, best string, isNew bool) {
+			y := rowY + float64(row)*rowStep
+			ctx.Call("fillText", label, labelX, y)
+			ctx.Call("fillText", current, runX, y)
+			ctx.Call("fillText", was, wasX, y)
+			ctx.Call("fillText", best, bestX, y)
+			if isNew {
+				ctx.Call("fillText", "NEW BEST!", newX, y)
+			}
+		}
+
+		wasChain := "--"
+		if levelPreviousBests.chainFound {
+			wasChain = strconv.Itoa(levelPreviousBests.bestChain) + " bricks"
+		}
+		bestChain := "--"
+		if levelCurrentBests.chainFound {
+			bestChain = strconv.Itoa(levelCurrentBests.bestChain) + " bricks"
+		}
+		drawResultRow(0, "TIME", formatLevelTimeSeconds(run.elapsedSeconds), formatBestTime(levelPreviousBests), formatBestTime(levelCurrentBests), levelCompletionNewRecords.time)
+		drawResultRow(1, "FASTEST BALL", fmt.Sprintf("%.0f", run.fastestSpeed), formatBestInt(levelPreviousBests.fastestSpeed, levelPreviousBests.speedFound), formatBestInt(levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound), levelCompletionNewRecords.speed)
+		drawResultRow(2, "FASTEST SPIN", fmt.Sprintf("%.0f", run.fastestSpin), formatBestInt(levelPreviousBests.fastestSpin, levelPreviousBests.spinFound), formatBestInt(levelCurrentBests.fastestSpin, levelCurrentBests.spinFound), levelCompletionNewRecords.spin)
+		drawResultRow(3, "BEST CHAIN", strconv.Itoa(run.bestChain)+" bricks", wasChain, bestChain, levelCompletionNewRecords.chain)
+
+		lastRowY := rowY + 3*rowStep
+		nextY := lastRowY + 112.0
+		ctx.Set("textAlign", "center")
+		if assisted {
+			ctx.Set("font", "20px GameFont, monospace")
+			ctx.Call("fillText", "ASSISTED RUN - PERSONAL BESTS NOT UPDATED", centerX, nextY)
+			nextY += 42.0
+		}
+
+		// Keep the continue prompt large and centered, with about twice the title-to-stats gap below the table.
+		ctx.Set("font", "28px GameFont, monospace")
+		ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO CONTINUE", centerX, nextY)
 		ctx.Set("textAlign", "start")
 	}
 
@@ -9643,27 +10130,95 @@ func draw(alpha float64) {
 		drawCenteredOverlay()
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
+		centerX := canvasWidth / 2
+		centerY := canvasHeight / 2
 
-		msg := "GAME OVER"
-		fontSize := "88px GameFont, monospace"
-		instruction := "Press Space, Enter, click, or touch to retry"
 		if win {
-			msg = "YOU WIN!"
-			fontSize = "112px GameFont, monospace"
-			instruction = "Press Space, Enter, click, or touch to start again"
+			if fullGameCompletion.valid && fullGameCompletion.levelCount == len(levels) {
+				assisted := !fullGameCompletion.recordEligible
+				blockHeight := 330.0
+				if assisted {
+					blockHeight += 40.0
+				}
+				blockTop := centerY - blockHeight/2
+				titleY := blockTop + 100.0
+				descriptionY := titleY + 58.0
+				fullHeaderY := descriptionY + 52.0
+				fullRowY := fullHeaderY + 36.0
+
+				ctx.Set("font", "112px GameFont, monospace")
+				ctx.Call("fillText", "YOU WIN!", centerX, titleY)
+				ctx.Set("font", "22px GameFont, monospace")
+				ctx.Call("fillText", "You beat the full game in one go.", centerX, descriptionY)
+
+				wasTime := "--"
+				if fullGameCompletion.previousBestFound {
+					wasTime = formatFullGameDurationMs(fullGameCompletion.previousBestTimeMs)
+				}
+				bestTime := "--"
+				if fullGameCompletion.bestFound {
+					bestTime = formatFullGameDurationMs(fullGameCompletion.bestTimeMs)
+				}
+
+				// Center the full table as a block; individual cells remain left-aligned.
+				const (
+					fullTableWidth = 1280.0
+					fullLabelWidth = 150.0
+					fullRunWidth   = 330.0
+					fullWasWidth   = 330.0
+					fullBestWidth  = 330.0
+				)
+				fullLeft := centerX - fullTableWidth/2
+				fullLabelX := fullLeft
+				fullRunX := fullLabelX + fullLabelWidth
+				fullWasX := fullRunX + fullRunWidth
+				fullBestX := fullWasX + fullWasWidth
+				fullNewX := fullBestX + fullBestWidth
+
+				ctx.Set("textAlign", "left")
+				ctx.Set("font", "16px GameFont, monospace")
+				ctx.Call("fillText", "THIS RUN", fullRunX, fullHeaderY)
+				ctx.Call("fillText", "WAS", fullWasX, fullHeaderY)
+				ctx.Call("fillText", "BEST", fullBestX, fullHeaderY)
+				ctx.Set("font", "20px GameFont, monospace")
+				ctx.Call("fillText", "TIME", fullLabelX, fullRowY)
+				ctx.Call("fillText", formatFullGameDurationMs(fullGameCompletion.timeMs), fullRunX, fullRowY)
+				ctx.Call("fillText", wasTime, fullWasX, fullRowY)
+				ctx.Call("fillText", bestTime, fullBestX, fullRowY)
+				if fullGameCompletion.recordEligible && fullGameCompletion.newRecord {
+					ctx.Call("fillText", "NEW RECORD!", fullNewX, fullRowY)
+				}
+
+				nextY := fullRowY + 40.0
+				ctx.Set("textAlign", "center")
+				if assisted {
+					ctx.Set("font", "18px GameFont, monospace")
+					ctx.Call("fillText", "ASSISTED RUN - FULL-GAME RECORD NOT UPDATED", centerX, nextY)
+					nextY += 40.0
+				}
+				ctx.Set("font", "28px GameFont, monospace")
+				ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO CONTINUE", centerX, nextY+22.0)
+			} else {
+				// Fallback win screen, also centered as one composition.
+				ctx.Set("font", "112px GameFont, monospace")
+				ctx.Call("fillText", "YOU WIN!", centerX, centerY-34.0)
+				ctx.Set("font", "28px GameFont, monospace")
+				ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO CONTINUE", centerX, centerY+72.0)
+			}
+		} else {
+			// Keep the ordinary game-over composition centered as well.
+			ctx.Set("font", "88px GameFont, monospace")
+			ctx.Call("fillText", "GAME OVER", centerX, centerY-32.0)
+			ctx.Set("font", "28px GameFont, monospace")
+			ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO RETRY", centerX, centerY+70.0)
 		}
-
-		ctx.Set("font", fontSize)
-		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2-10)
-
-		ctx.Set("font", "28px GameFont, monospace")
-		ctx.Call("fillText", instruction, canvasWidth/2, canvasHeight/2+70)
 
 		ctx.Set("textAlign", "start")
 	}
 
 	drawDebugOverlay()
 	drawPhysicsOverlay()
+	drawStatsOverlay()
 	drawFPSMiniOverlay()
 }
 
@@ -10335,7 +10890,7 @@ func setupInput() {
 			return nil
 		}
 
-		// P cycles physics diagnostics -> level/config diagnostics -> off.
+		// P cycles physics diagnostics -> level/config diagnostics -> level records -> off.
 		// I is retained as an alias. F independently toggles the compact FPS readout;
 		// Shift+F resets its visible-page LOWEST measurement without hiding it.
 		if (key == "p" || key == "P" || key == "i" || key == "I") && !e.Get("repeat").Bool() {
@@ -10417,6 +10972,9 @@ func setupInput() {
 		}
 
 		if levelAdvancePending {
+			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
+				advanceFromLevelComplete()
+			}
 			return nil
 		}
 
@@ -10425,6 +10983,7 @@ func setupInput() {
 		// because this is an explicit player action.
 		if (key == "t" || key == "T") && !e.Get("repeat").Bool() {
 			if !paused {
+				markLevelRunAssisted()
 				teleportBallToSafeArea(&ball, true)
 			}
 			return nil
@@ -10438,6 +10997,7 @@ func setupInput() {
 
 		// Toggle magnetism relative to the level default.
 		if (key == "m" || key == "M") && !e.Get("repeat").Bool() {
+			markLevelRunAssisted()
 			magnetCheat = !magnetCheat
 			if magnetIsActive() {
 				showStatus("Magnets on", 2.0)
@@ -10449,6 +11009,7 @@ func setupInput() {
 
 		// Toggle Zapper relative to the level default.
 		if (key == "z" || key == "Z") && !e.Get("repeat").Bool() {
+			markLevelRunAssisted()
 			zapperCheat = !zapperCheat
 			zapperTargetIndex = -1
 			zapperHitTimer = 0
@@ -10461,6 +11022,7 @@ func setupInput() {
 		}
 
 		if key == "2" && !e.Get("repeat").Bool() {
+			markLevelRunAssisted()
 			if !secondBallActive {
 				secondBallActive = true
 				secondBall = ball
@@ -10591,6 +11153,11 @@ func setupInput() {
 
 		if gameOver && win {
 			jumpToLevel(0)
+			return nil
+		}
+
+		if levelAdvancePending {
+			advanceFromLevelComplete()
 			return nil
 		}
 
@@ -10851,6 +11418,7 @@ func setupInput() {
 	})
 
 	bindMobileButton("magnetsButton", func() {
+		markLevelRunAssisted()
 		magnetCheat = !magnetCheat
 		if magnetIsActive() {
 			showStatus("Magnets on", 2.0)
@@ -10860,6 +11428,7 @@ func setupInput() {
 	})
 
 	bindMobileButton("zapperButton", func() {
+		markLevelRunAssisted()
 		zapperCheat = !zapperCheat
 		zapperTargetIndex = -1
 		zapperHitTimer = 0

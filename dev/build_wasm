@@ -1,1 +1,1 @@
-GOOS=js GOARCH=wasm go build -o physical155.wasm .
+GOOS=js GOARCH=wasm go build -o physicalXYZ.wasm .
