@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260804-238589e21fb9"
+	buildID = "20260810-cornerphysics-08-metrics"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -187,6 +187,8 @@ const (
 	// for collision/spin calculations after a large cursor jump. It is part of
 	// physicsSettings so levels and the in-game physics editor may override it.
 	defaultPhysicsMousePaddleSpinVelocityLimit = 3000.0 //6000.0
+	// Relative desktop mouse distance multiplier while Pointer Lock is active.
+	defaultMousePointerLockSensitivity = 1.0
 
 	defaultPaddleRadius      = 12.0
 	defaultBrickRadius       = 6.0
@@ -249,6 +251,18 @@ const (
 	defaultPhysicsWallSideTiltDegrees    = 0.15
 	defaultPhysicsWallTopTiltDegrees     = 3.45 // was 0.45
 	defaultPhysicsWallCornerFadeDistance = 40.0
+
+	// Brick-corner collisions. Physics uses the same brickRadius as the visible
+	// roundRect. Amount blends from the stable classic axis normal (0) to the
+	// rounded-corner radial normal (1).
+	defaultPhysicsCornerPhysicsEnabled = true
+	defaultPhysicsCornerPhysicsAmount  = 1.0
+	// false = passable-gap rule; true = every rounded brick corner may respond.
+	defaultPhysicsCornerPhysicsAllBricks = false
+
+	// Corner-hit diagnostics. Genuine corner responses are written only to the
+	// browser console and numbered sequentially for the whole game session.
+	enableCornerPhysicsDebug = true
 
 	wallNoiseIDLeft  int = 1
 	wallNoiseIDRight int = 2
@@ -337,6 +351,7 @@ var physicsEditorSliderSpecs = []physicsSliderSpec{
 	{group: "Surface contact", key: "overspeedHalfLife", label: "Overspeed half-life", configName: "defaultPhysicsOverspeedHalfLife", min: 0.05, max: 2, step: 0.05, precision: 2},
 	{group: "Geometry", key: "wallTopTiltDegrees", label: "Top-wall roughness", configName: "defaultPhysicsWallTopTiltDegrees", min: 0, max: 8, step: 0.05, precision: 2},
 	{group: "Geometry", key: "wallSideTiltDegrees", label: "Side-wall roughness", configName: "defaultPhysicsWallSideTiltDegrees", min: 0, max: 4, step: 0.05, precision: 2},
+	{group: "Geometry", key: "cornerPhysicsAmount", label: "Corner physics amount", configName: "defaultPhysicsCornerPhysicsAmount", min: 0, max: 1, step: 0.05, precision: 2},
 	{group: "Geometry", key: "brickTiltMaxDegrees", label: "Maximum brick tilt", configName: "defaultPhysicsBrickTiltMaxDegrees", min: 0, max: 5, step: 0.05, precision: 2},
 }
 

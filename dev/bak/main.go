@@ -65,6 +65,13 @@ type physicsSettings struct {
 	wallTopTiltDegrees     float64
 	wallCornerFadeDistance float64
 
+	// Brick-corner response. Amount 0 keeps the classic axis normal; 1 uses the
+	// geometric circle-vs-corner normal on genuine corner hits. When
+	// cornerPhysicsAllBricks is true, the normal passable-gap suppression is bypassed.
+	cornerPhysicsEnabled   bool
+	cornerPhysicsAmount    float64
+	cornerPhysicsAllBricks bool
+
 	brickTiltMinDegrees float64
 	brickTiltMaxDegrees float64
 	drawBrickTilt       bool
@@ -158,6 +165,10 @@ func defaultPhysicsSettings() physicsSettings {
 		wallTopTiltDegrees:     defaultPhysicsWallTopTiltDegrees,
 		wallCornerFadeDistance: defaultPhysicsWallCornerFadeDistance,
 
+		cornerPhysicsEnabled:   defaultPhysicsCornerPhysicsEnabled,
+		cornerPhysicsAmount:    defaultPhysicsCornerPhysicsAmount,
+		cornerPhysicsAllBricks: defaultPhysicsCornerPhysicsAllBricks,
+
 		brickTiltMinDegrees: defaultPhysicsBrickTiltMinDegrees,
 		brickTiltMaxDegrees: defaultPhysicsBrickTiltMaxDegrees,
 		drawBrickTilt:       defaultPhysicsDrawBrickTilt,
@@ -243,6 +254,8 @@ func setPhysicsFloatSetting(settings *physicsSettings, key string, value float64
 		settings.wallTopTiltDegrees = value
 	case "wallCornerFadeDistance":
 		settings.wallCornerFadeDistance = value
+	case "cornerPhysicsAmount":
+		settings.cornerPhysicsAmount = value
 	case "brickTiltMinDegrees":
 		settings.brickTiltMinDegrees = value
 	case "brickTiltMaxDegrees":
@@ -403,6 +416,7 @@ var (
 
 	mouseControlActive bool
 	mousePaddleTargetX float64
+	mousePointerLocked bool
 
 	mobileControlsEnabled  bool
 	mobileControlMode      = defaultMobileControlMode
@@ -480,6 +494,71 @@ type Ball struct {
 type statusMessage struct {
 	text  string
 	timer float64
+}
+
+type cornerPhysicsDebugEvent struct {
+	count    int
+	row, col int
+	amount   float64
+	nx, ny   float64
+	impact   float64
+}
+
+// levelRunStats is reset when a level starts and frozen when it is cleared.
+// Only clear, player-readable records live here: completion time, fastest ball
+// speed reached on this level, fastest absolute spin, the largest brick chain
+// caused by one physical ball-to-brick hit, and the fewest balls lost.
+type levelRunStatsData struct {
+	elapsedSeconds float64
+	fastestSpeed   float64
+	fastestSpin    float64
+	bestChain      int
+	ballsLost      int
+}
+
+type levelBestStatsData struct {
+	timeMs         int
+	timeFound      bool
+	fastestSpeed   int
+	speedFound     bool
+	fastestSpin    int
+	spinFound      bool
+	bestChain      int
+	chainFound     bool
+	ballsLost      int
+	ballsLostFound bool
+}
+
+type levelRecordFlags struct {
+	time      bool
+	speed     bool
+	spin      bool
+	chain     bool
+	ballsLost bool
+}
+
+// fullGameRunState tracks a continuous level-1-through-final-level attempt.
+// It deliberately does not survive reloads. Pauses, READY screens, and manual
+// level-complete screens do not add time; the run time is the sum of active
+// per-level play time.
+type fullGameRunStateData struct {
+	active         bool
+	recordEligible bool
+	elapsedSeconds float64
+	nextLevel      int
+	levelCount     int
+}
+
+type fullGameCompletionData struct {
+	valid              bool
+	recordEligible     bool
+	timeMs             int
+	newRecord          bool
+	previousBestTimeMs int
+	previousBestFound  bool
+	bestTimeMs         int
+	bestFound          bool
+	levelCount         int
 }
 
 // A feature sample may be long (for example blackhole.wav). Only one voice for
@@ -568,14 +647,19 @@ var (
 	fpsVisibleSamplesSeen int
 	fpsMiniOverlayVisible bool
 
-	loopFunc      js.Func
-	keyDown       js.Func
-	keyUp         js.Func
-	pointerMove   js.Func
-	pointerDown   js.Func
-	pointerUp     js.Func
-	pointerCancel js.Func
-	mouseLeave    js.Func
+	loopFunc           js.Func
+	keyDown            js.Func
+	keyUp              js.Func
+	pointerMove        js.Func
+	pointerDown        js.Func
+	pointerUp          js.Func
+	pointerCancel      js.Func
+	mouseLeave         js.Func
+	lockedMouseMove    js.Func
+	pointerLockChange  js.Func
+	pointerLockError   js.Func
+	fullscreenToggle   js.Func
+	browserUICallbacks []js.Func
 
 	// Independent power-up states. Timed effects can coexist.
 	lowGravityActive     bool
@@ -622,6 +706,11 @@ var (
 
 	statusMessages []statusMessage
 
+	// Session-wide sequence number for genuine corner responses written to the
+	// browser console. It intentionally does not reset between levels.
+	cornerPhysicsDebugHitCount int
+	cornerPhysicsDebugPending  []cornerPhysicsDebugEvent
+
 	gridOffsetLeft float64
 	gridOffsetTop  float64
 	gridCellWidth  float64
@@ -641,11 +730,27 @@ var (
 	hudLevelText  string
 	hudScoreText  string
 
-	// Per-level measured peaks. Speed records the fastest incoming collision
-	// speed, before paddle boost or collision response. Spin records the greatest
-	// absolute spin reached. Both survive life loss and reset with the level.
+	// Per-level measured peaks. Speed is the fastest instantaneous ball speed
+	// actually reached; spin is the greatest absolute spin reached. Both include
+	// either active ball, survive life loss, and reset with the level.
 	levelMeasuredMaxSpeed float64
 	levelMeasuredMaxSpin  float64
+
+	// Per-level run stats and persistent personal bests. The live HUD stays clean;
+	// these appear only in diagnostics panel 3 and on the level-complete screen.
+	levelRunStats             levelRunStatsData
+	levelCompletedStats       levelRunStatsData
+	levelCompletedStatsValid  bool
+	levelPreviousBests        levelBestStatsData
+	levelCurrentBests         levelBestStatsData
+	levelCompletionNewRecords levelRecordFlags
+	levelRunRecordEligible    bool
+
+	// Continuous whole-game attempt and its final result. The persistent best is
+	// scoped by the current number of levels so expanding the campaign starts a
+	// fair new record table instead of comparing 31 levels against an old 30-level run.
+	fullGameRun        fullGameRunStateData
+	fullGameCompletion fullGameCompletionData
 
 	// ---- Level system ----
 	currentLevelIndex    int
@@ -656,21 +761,24 @@ var (
 	devAllLevelsUnlocked  bool
 	debugOverlayVisible   bool
 	physicsOverlayVisible bool
+	statsOverlayVisible   bool
 
-	physicsEditorVisible                 bool
-	physicsEditorPreviousPaused          bool
-	physicsEditorLiveSimulation          bool
-	physicsEditorOpeningConfig           physicsSettings
-	physicsEditorOpeningDebris           debrisEditorSnapshot
-	physicsEditorOpeningAutoHitVariation float64
-	physicsEditorPanel                   js.Value
-	physicsEditorExportSelect            js.Value
-	physicsEditorLiveCheckbox            js.Value
-	physicsEditorDebrisCheckbox          js.Value
-	physicsEditorAutoPaddleCheck         js.Value
-	physicsEditorInputs                  = make(map[string]js.Value)
-	physicsEditorValueLabels             = make(map[string]js.Value)
-	physicsEditorCallbacks               []js.Func
+	physicsEditorVisible                        bool
+	physicsEditorPreviousPaused                 bool
+	physicsEditorLiveSimulation                 bool
+	physicsEditorOpeningConfig                  physicsSettings
+	physicsEditorOpeningDebris                  debrisEditorSnapshot
+	physicsEditorOpeningAutoHitVariation        float64
+	physicsEditorPanel                          js.Value
+	physicsEditorExportSelect                   js.Value
+	physicsEditorLiveCheckbox                   js.Value
+	physicsEditorDebrisCheckbox                 js.Value
+	physicsEditorCornerPhysicsCheckbox          js.Value
+	physicsEditorCornerPhysicsAllBricksCheckbox js.Value
+	physicsEditorAutoPaddleCheck                js.Value
+	physicsEditorInputs                         = make(map[string]js.Value)
+	physicsEditorValueLabels                    = make(map[string]js.Value)
+	physicsEditorCallbacks                      []js.Func
 
 	// O toggles an automatic inspection paddle. It predicts the next crossing of
 	// the paddle line and moves with bounded acceleration instead of teleporting.
@@ -2127,11 +2235,24 @@ func recordMeasuredBallSpin(b *Ball) {
 		return
 	}
 
-	levelMeasuredMaxSpin = math.Max(levelMeasuredMaxSpin, math.Abs(b.omega))
+	spin := math.Abs(b.omega)
+	levelMeasuredMaxSpin = math.Max(levelMeasuredMaxSpin, spin)
+	levelRunStats.fastestSpin = math.Max(levelRunStats.fastestSpin, spin)
+}
+
+func recordMeasuredBallSpeed(b *Ball) {
+	if b == nil {
+		return
+	}
+
+	speed := math.Hypot(b.vx, b.vy)
+	levelMeasuredMaxSpeed = math.Max(levelMeasuredMaxSpeed, speed)
+	levelRunStats.fastestSpeed = math.Max(levelRunStats.fastestSpeed, speed)
 }
 
 func recordIncomingCollisionSpeed(speed float64) {
 	levelMeasuredMaxSpeed = math.Max(levelMeasuredMaxSpeed, speed)
+	levelRunStats.fastestSpeed = math.Max(levelRunStats.fastestSpeed, speed)
 }
 
 func updateHUDCache() {
@@ -3408,6 +3529,18 @@ func applyConfig(config map[string]string) {
 			} else {
 				log("drawBrickTilt must be true or false")
 			}
+		case "cornerPhysics", "cornerPhysicsEnabled":
+			if b, err := strconv.ParseBool(val); err == nil {
+				physicsConfig.cornerPhysicsEnabled = b
+			} else {
+				log(key + " must be true or false")
+			}
+		case "cornerPhysicsAllBricks", "allBrickCorners":
+			if b, err := strconv.ParseBool(val); err == nil {
+				physicsConfig.cornerPhysicsAllBricks = b
+			} else {
+				log(key + " must be true or false")
+			}
 		case "powerUpDuration":
 			if f, err := strconv.ParseFloat(val, 64); err == nil {
 				powerUpDuration = f
@@ -3942,6 +4075,8 @@ func resolveCollisionDebug(
 	if impulse, collided := resolveCollisionBall(b, nx, ny, surfVx, surfVy, frictionScale); collided {
 		recordIncomingCollisionSpeed(incomingSpeed)
 		tangentialImpulse = impulse
+		recordMeasuredBallSpeed(b)
+		recordMeasuredBallSpin(b)
 	}
 
 	if record {
@@ -4518,6 +4653,215 @@ func writeStoredInt(key string, value int) {
 	storage.Call("setItem", key, strconv.Itoa(value))
 }
 
+func levelBestStorageKey(levelIndex int, metric string) string {
+	return "breakout.best.v1.level." + strconv.Itoa(levelIndex+1) + "." + metric
+}
+
+func fullGameBestStorageKey(levelCount int) string {
+	return "breakout.best.v1.fullGame." + strconv.Itoa(levelCount) + ".timeMs"
+}
+
+func loadFullGameBestTime(levelCount int) (int, bool) {
+	if levelCount <= 0 {
+		return 0, false
+	}
+	return readStoredInt(fullGameBestStorageKey(levelCount))
+}
+
+func beginFullGameRun() {
+	fullGameRun = fullGameRunStateData{
+		active:         true,
+		recordEligible: !autoPaddleEnabled,
+		nextLevel:      0,
+		levelCount:     len(levels),
+	}
+	fullGameCompletion = fullGameCompletionData{}
+}
+
+func cancelFullGameRun() {
+	fullGameRun.active = false
+	fullGameRun.recordEligible = false
+}
+
+// recordFullGameLevelCompletion accepts only the exact next level in a run that
+// began at level 1. Manual navigation, game-over retries from later levels, or
+// any other break in sequence therefore cannot produce a full-game record.
+func recordFullGameLevelCompletion() {
+	if !fullGameRun.active {
+		return
+	}
+	if fullGameRun.levelCount != len(levels) ||
+		currentLevelIndex != fullGameRun.nextLevel ||
+		currentLevelIndex < 0 || currentLevelIndex >= len(levels) {
+		cancelFullGameRun()
+		return
+	}
+
+	fullGameRun.elapsedSeconds += levelCompletedStats.elapsedSeconds
+	if !levelRunRecordEligible {
+		fullGameRun.recordEligible = false
+	}
+	fullGameRun.nextLevel++
+
+	if fullGameRun.nextLevel < fullGameRun.levelCount {
+		return
+	}
+
+	result := fullGameCompletionData{
+		valid:          true,
+		recordEligible: fullGameRun.recordEligible,
+		timeMs:         int(math.Round(fullGameRun.elapsedSeconds * 1000)),
+		levelCount:     fullGameRun.levelCount,
+	}
+	result.previousBestTimeMs, result.previousBestFound = loadFullGameBestTime(result.levelCount)
+	result.bestTimeMs = result.previousBestTimeMs
+	result.bestFound = result.previousBestFound
+	if result.recordEligible && (!result.previousBestFound || result.timeMs < result.previousBestTimeMs) {
+		writeStoredInt(fullGameBestStorageKey(result.levelCount), result.timeMs)
+		result.bestTimeMs = result.timeMs
+		result.bestFound = true
+		result.newRecord = true
+	}
+	fullGameCompletion = result
+	fullGameRun.active = false
+}
+
+func loadLevelBestStats(levelIndex int) levelBestStatsData {
+	var best levelBestStatsData
+	best.timeMs, best.timeFound = readStoredInt(levelBestStorageKey(levelIndex, "timeMs"))
+	best.fastestSpeed, best.speedFound = readStoredInt(levelBestStorageKey(levelIndex, "fastestSpeed"))
+	best.fastestSpin, best.spinFound = readStoredInt(levelBestStorageKey(levelIndex, "fastestSpin"))
+	best.bestChain, best.chainFound = readStoredInt(levelBestStorageKey(levelIndex, "bestChain"))
+	best.ballsLost, best.ballsLostFound = readStoredInt(levelBestStorageKey(levelIndex, "ballsLost"))
+	return best
+}
+
+func saveBestIfLower(levelIndex int, metric string, value int, oldValue int, found bool) (int, bool, bool) {
+	if !found || value < oldValue {
+		writeStoredInt(levelBestStorageKey(levelIndex, metric), value)
+		return value, true, true
+	}
+	return oldValue, found, false
+}
+
+func saveBestIfHigher(levelIndex int, metric string, value int, oldValue int, found bool) (int, bool, bool) {
+	if !found || value > oldValue {
+		writeStoredInt(levelBestStorageKey(levelIndex, metric), value)
+		return value, true, true
+	}
+	return oldValue, found, false
+}
+
+func resetLevelRunStats(levelIndex int) {
+	levelRunStats = levelRunStatsData{}
+	levelCompletedStats = levelRunStatsData{}
+	levelCompletedStatsValid = false
+	levelCompletionNewRecords = levelRecordFlags{}
+	levelCurrentBests = loadLevelBestStats(levelIndex)
+	levelPreviousBests = levelCurrentBests
+	levelRunRecordEligible = !autoPaddleEnabled
+}
+
+func markLevelRunAssisted() {
+	if levelAdvancePending || gameOver {
+		return
+	}
+	levelRunRecordEligible = false
+	if fullGameRun.active {
+		fullGameRun.recordEligible = false
+	}
+}
+
+func recordLevelCompletionStats() {
+	// Freeze the measured peaks into the result snapshot before saving records.
+	levelRunStats.fastestSpeed = math.Max(levelRunStats.fastestSpeed, levelMeasuredMaxSpeed)
+	levelRunStats.fastestSpin = math.Max(levelRunStats.fastestSpin, levelMeasuredMaxSpin)
+	levelCompletedStats = levelRunStats
+	levelCompletedStatsValid = true
+	levelCompletionNewRecords = levelRecordFlags{}
+	// Preserve the personal bests exactly as they were before this clear. The
+	// results table uses this snapshot for the WAS column even when a new record
+	// immediately replaces the stored BEST value below.
+	levelPreviousBests = levelCurrentBests
+	if !levelRunRecordEligible {
+		return
+	}
+
+	timeMs := int(math.Round(levelCompletedStats.elapsedSeconds * 1000))
+	speed := int(math.Round(levelCompletedStats.fastestSpeed))
+	spin := int(math.Round(levelCompletedStats.fastestSpin))
+	levelCurrentBests.timeMs, levelCurrentBests.timeFound, levelCompletionNewRecords.time =
+		saveBestIfLower(currentLevelIndex, "timeMs", timeMs, levelCurrentBests.timeMs, levelCurrentBests.timeFound)
+	levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound, levelCompletionNewRecords.speed =
+		saveBestIfHigher(currentLevelIndex, "fastestSpeed", speed, levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound)
+	levelCurrentBests.fastestSpin, levelCurrentBests.spinFound, levelCompletionNewRecords.spin =
+		saveBestIfHigher(currentLevelIndex, "fastestSpin", spin, levelCurrentBests.fastestSpin, levelCurrentBests.spinFound)
+	levelCurrentBests.bestChain, levelCurrentBests.chainFound, levelCompletionNewRecords.chain =
+		saveBestIfHigher(currentLevelIndex, "bestChain", levelCompletedStats.bestChain, levelCurrentBests.bestChain, levelCurrentBests.chainFound)
+	levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound, levelCompletionNewRecords.ballsLost =
+		saveBestIfLower(currentLevelIndex, "ballsLost", levelCompletedStats.ballsLost, levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound)
+}
+
+func formatLevelTimeSeconds(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	return formatLevelTimeMs(int(math.Round(seconds * 1000)))
+}
+
+func formatLevelTimeMs(milliseconds int) string {
+	if milliseconds < 0 {
+		milliseconds = 0
+	}
+	minutes := milliseconds / 60000
+	seconds := (milliseconds / 1000) % 60
+	hundredths := (milliseconds % 1000) / 10
+	return fmt.Sprintf("%02d:%02d.%02d", minutes, seconds, hundredths)
+}
+
+func durationUnit(value int, singular string) string {
+	if value == 1 {
+		return singular
+	}
+	return singular + "s"
+}
+
+func formatFullGameDurationMs(milliseconds int) string {
+	if milliseconds < 0 {
+		milliseconds = 0
+	}
+	totalSeconds := int(math.Round(float64(milliseconds) / 1000.0))
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds / 60) % 60
+	seconds := totalSeconds % 60
+	if hours > 0 {
+		return fmt.Sprintf("%d %s %d %s and %d %s",
+			hours, durationUnit(hours, "hour"),
+			minutes, durationUnit(minutes, "minute"),
+			seconds, durationUnit(seconds, "second"))
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%d %s and %d %s",
+			minutes, durationUnit(minutes, "minute"),
+			seconds, durationUnit(seconds, "second"))
+	}
+	return fmt.Sprintf("%d %s", seconds, durationUnit(seconds, "second"))
+}
+
+func formatBestInt(value int, found bool) string {
+	if !found {
+		return "--"
+	}
+	return strconv.Itoa(value)
+}
+
+func formatBestTime(best levelBestStatsData) string {
+	if !best.timeFound {
+		return "--"
+	}
+	return formatLevelTimeMs(best.timeMs)
+}
+
 func saveCurrentLevel() {
 	writeStoredInt(savedLevelKey, currentLevelIndex)
 }
@@ -4662,6 +5006,18 @@ func startLevel(index int) {
 	// User toggles never carry into a new level.
 	magnetCheat = false
 	zapperCheat = false
+	resetLevelRunStats(index)
+
+	// Level 1 always begins a fresh whole-game attempt. Later levels preserve that
+	// attempt only when they are the exact next sequential level reached through
+	// normal completion.
+	if index == 0 {
+		beginFullGameRun()
+	} else if !fullGameRun.active || fullGameRun.levelCount != len(levels) || index != fullGameRun.nextLevel {
+		cancelFullGameRun()
+	} else if autoPaddleEnabled {
+		fullGameRun.recordEligible = false
+	}
 
 	// Reset all globals and level-only state before applying config.
 	resetGlobals()
@@ -4682,10 +5038,12 @@ func startLevel(index int) {
 	ball.stuckTimer = 0
 	ball.soundCooldown = 0
 	ball.r = ballRadius
-	// Use the real launch speed as the baseline. Later updates are made only
-	// from incoming speeds immediately before actual collisions.
+	// Use the real launch state as the baseline. Peaks then track the fastest
+	// instantaneous ball speed and absolute spin actually reached on this level.
 	levelMeasuredMaxSpeed = math.Hypot(ball.vx, ball.vy)
 	levelMeasuredMaxSpin = math.Abs(ball.omega)
+	levelRunStats.fastestSpeed = levelMeasuredMaxSpeed
+	levelRunStats.fastestSpin = levelMeasuredMaxSpin
 	resetFastOrbitState(&ball)
 	resetFastOrbitState(&secondBall)
 	resetBallRescueState(&ball, true)
@@ -4763,6 +5121,9 @@ func jumpToLevel(index int) {
 
 	gameOver = false
 	win = false
+	if index != 0 {
+		cancelFullGameRun()
+	}
 	startLevel(index)
 }
 
@@ -4790,6 +5151,9 @@ func retryCurrentLevel() {
 	leftPressed = false
 	rightPressed = false
 	paddle.vx = 0
+	if currentLevelIndex != 0 {
+		cancelFullGameRun()
+	}
 	startLevel(currentLevelIndex)
 }
 
@@ -5070,6 +5434,7 @@ type brickContact struct {
 	impact         float64
 	swept          bool
 	time           float64
+	cornerApplied  bool
 }
 
 func sweptPointAABB(
@@ -5128,6 +5493,238 @@ func penetrationForBrickNormal(b *Ball, br *brick, nx, ny float64) float64 {
 	}
 }
 
+func pointIntervalDistance(value, minimum, maximum float64) float64 {
+	if value < minimum {
+		return minimum - value
+	}
+	if value > maximum {
+		return value - maximum
+	}
+	return 0
+}
+
+// brickCornerGapPassable decides whether the two outward sides of one specific
+// brick corner are genuinely exposed to the ball. Two neighboring bricks whose
+// gap is narrower than the ball diameter have overlapping ball-centre exclusion
+// zones, so their facing corners should behave like one continuous surface.
+// Once the gap is wide enough for the current ball to pass, those corners become
+// real corners again. Destroyed bricks are ignored, so a newly opened gap takes
+// effect immediately.
+func brickCornerGapPassable(brickIndex int, cornerX, cornerY, sideX, sideY, radius float64) bool {
+	if brickIndex < 0 || brickIndex >= len(bricks) || radius <= 0 {
+		return true
+	}
+	br := &bricks[brickIndex]
+	clearance := math.Max(0, physicsConfig.collisionSlop)
+	requiredGap := 2*radius + 2*clearance
+	perpendicularReach := radius + clearance
+	const epsilon = 1e-6
+
+	// Only bricks whose grid cells overlap the small region around this corner can
+	// possibly close either outward gap. This replaces the previous full-brick scan
+	// on every qualifying corner contact while preserving the exact gap tests below.
+	// If the spatial grid is unavailable, retain the old full scan as a safe fallback.
+	minX, maxX := cornerX-perpendicularReach, cornerX+perpendicularReach
+	minY, maxY := cornerY-perpendicularReach, cornerY+perpendicularReach
+	if sideX > 0 {
+		maxX = cornerX + requiredGap
+	} else if sideX < 0 {
+		minX = cornerX - requiredGap
+	}
+	if sideY > 0 {
+		maxY = cornerY + requiredGap
+	} else if sideY < 0 {
+		minY = cornerY - requiredGap
+	}
+
+	checkBrick := func(i int) bool {
+		if i == brickIndex || i < 0 || i >= len(bricks) || !bricks[i].alive {
+			return false
+		}
+		other := &bricks[i]
+
+		if sideX > 0 && other.x >= br.x+br.w-epsilon {
+			gap := other.x - (br.x + br.w)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerY, other.y, other.y+other.h) <= perpendicularReach {
+				return true
+			}
+		} else if sideX < 0 && other.x+other.w <= br.x+epsilon {
+			gap := br.x - (other.x + other.w)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerY, other.y, other.y+other.h) <= perpendicularReach {
+				return true
+			}
+		}
+
+		if sideY > 0 && other.y >= br.y+br.h-epsilon {
+			gap := other.y - (br.y + br.h)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerX, other.x, other.x+other.w) <= perpendicularReach {
+				return true
+			}
+		} else if sideY < 0 && other.y+other.h <= br.y+epsilon {
+			gap := br.y - (other.y + other.h)
+			if gap < requiredGap &&
+				pointIntervalDistance(cornerX, other.x, other.x+other.w) <= perpendicularReach {
+				return true
+			}
+		}
+		return false
+	}
+
+	if gridRows <= 0 || gridCols <= 0 || gridCellWidth <= 0 || gridCellHeight <= 0 || brickGrid == nil {
+		for i := range bricks {
+			if checkBrick(i) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// A brick can overlap the search region even when its cell origin lies up to
+	// one brick width/height before the region, so include that extent when mapping
+	// world coordinates back to grid cells.
+	minCol := int(math.Ceil((minX - br.w - gridOffsetLeft - epsilon) / gridCellWidth))
+	maxCol := int(math.Floor((maxX - gridOffsetLeft + epsilon) / gridCellWidth))
+	minRow := int(math.Ceil((minY - br.h - gridOffsetTop - epsilon) / gridCellHeight))
+	maxRow := int(math.Floor((maxY - gridOffsetTop + epsilon) / gridCellHeight))
+
+	if minCol < 0 {
+		minCol = 0
+	}
+	if minRow < 0 {
+		minRow = 0
+	}
+	if maxCol >= gridCols {
+		maxCol = gridCols - 1
+	}
+	if maxRow >= gridRows {
+		maxRow = gridRows - 1
+	}
+	if minCol > maxCol || minRow > maxRow {
+		return true
+	}
+
+	for row := minRow; row <= maxRow; row++ {
+		for col := minCol; col <= maxCol; col++ {
+			for _, i := range brickGrid[gridKey(row, col)] {
+				if checkBrick(i) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// brickCornerResponse makes collision geometry follow the same rounded corners
+// that are drawn with roundRect(..., brickRadius). The rounded-rectangle corner
+// arc is expanded by the ball radius, so a visible curved hit produces a radial
+// normal rather than requiring the ball centre to reach the old mathematical
+// square corner. The final bool reports whether the broad-phase AABB overlap is
+// a real rounded-rectangle contact; false lets the ball pass through the visual
+// cut-away outside a rounded corner.
+func brickCornerResponse(b *Ball, brickIndex int, br *brick, axisNX, axisNY, axisPenetration float64) (float64, float64, float64, bool, bool) {
+	// Canvas roundRect effectively cannot have a corner radius larger than half
+	// the shorter side. Clamp physics the same way so level geometry stays sane.
+	roundRadius := clampFloat(brickRadius, 0, math.Min(br.w, br.h)/2)
+	innerLeft := br.x + roundRadius
+	innerRight := br.x + br.w - roundRadius
+	innerTop := br.y + roundRadius
+	innerBottom := br.y + br.h - roundRadius
+
+	sideX := 0.0
+	cornerCenterX := b.x
+	outerCornerX := b.x
+	switch {
+	case b.x < innerLeft:
+		sideX = -1
+		cornerCenterX = innerLeft
+		outerCornerX = br.x
+	case b.x > innerRight:
+		sideX = 1
+		cornerCenterX = innerRight
+		outerCornerX = br.x + br.w
+	}
+
+	sideY := 0.0
+	cornerCenterY := b.y
+	outerCornerY := b.y
+	switch {
+	case b.y < innerTop:
+		sideY = -1
+		cornerCenterY = innerTop
+		outerCornerY = br.y
+	case b.y > innerBottom:
+		sideY = 1
+		cornerCenterY = innerBottom
+		outerCornerY = br.y + br.h
+	}
+
+	// If only one axis lies beyond the inner rounded core, this is a normal flat
+	// top/bottom/side hit, not a curved-corner hit.
+	if sideX == 0 || sideY == 0 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	dx := b.x - cornerCenterX
+	dy := b.y - cornerCenterY
+	distanceSquared := dx*dx + dy*dy
+	combinedRadius := roundRadius + b.r
+
+	// The expanded AABB used by the broad phase includes the empty cut-away around
+	// a rounded corner. Reject that false overlap so physics matches the drawing.
+	if distanceSquared >= combinedRadius*combinedRadius {
+		return axisNX, axisNY, axisPenetration, false, false
+	}
+	if distanceSquared <= 1e-12 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	if !physicsConfig.cornerPhysicsEnabled {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+	amount := clampFloat(physicsConfig.cornerPhysicsAmount, 0, 1)
+	if amount <= 0 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	if !physicsConfig.cornerPhysicsAllBricks &&
+		!brickCornerGapPassable(brickIndex, outerCornerX, outerCornerY, sideX, sideY, b.r) {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+
+	distance := math.Sqrt(distanceSquared)
+	cornerNX := dx / distance
+	cornerNY := dy / distance
+	nx := lerpFloat(axisNX, cornerNX, amount)
+	ny := lerpFloat(axisNY, cornerNY, amount)
+	length := math.Hypot(nx, ny)
+	if length <= 1e-12 {
+		return axisNX, axisNY, axisPenetration, false, true
+	}
+	nx /= length
+	ny /= length
+
+	cornerPenetration := math.Max(0, combinedRadius-distance)
+	penetration := lerpFloat(axisPenetration, cornerPenetration, amount)
+	return nx, ny, penetration, true, true
+}
+
+func flushCornerPhysicsDebugLogs() {
+	if len(cornerPhysicsDebugPending) == 0 {
+		return
+	}
+	for _, event := range cornerPhysicsDebugPending {
+		log(fmt.Sprintf(
+			"%03d CORNER HIT row=%d col=%d amount=%.2f normal=(%.3f, %.3f) impact=%.1f",
+			event.count, event.row, event.col, event.amount, event.nx, event.ny, event.impact,
+		))
+	}
+	cornerPhysicsDebugPending = cornerPhysicsDebugPending[:0]
+}
+
 func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
 	contacts := make([]brickContact, 0, 4)
 	for _, i := range candidateBrickIndices(b) {
@@ -5167,26 +5764,32 @@ func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
 			penetration = penetrationForBrickNormal(b, br, axisNX, axisNY)
 		}
 
-		// The broad-phase geometry remains the existing axis-aligned brick, but
-		// the actual collision response follows the brick's tiny visual angle.
-		// Correct penetration by the normal's axis component so separation still
-		// fully clears the brick boundary.
-		nx, ny := rotateVector(axisNX, axisNY, br.tiltRadians)
-		axisComponent := math.Abs(nx*axisNX + ny*axisNY)
+		// Match the visible rounded brick corner without reintroducing seam bounces.
+		// cornerPhysicsAmount=0 is the classic axis behavior; 1 uses the full radial
+		// roundRect-corner normal. The tiny visual brick tilt is applied last.
+		responseNX, responseNY, penetration, cornerApplied, contactValid := brickCornerResponse(
+			b, i, br, axisNX, axisNY, penetration,
+		)
+		if !contactValid {
+			continue
+		}
+		nx, ny := rotateVector(responseNX, responseNY, br.tiltRadians)
+		axisComponent := math.Abs(nx*responseNX + ny*responseNY)
 		if axisComponent > 0.000001 {
 			penetration /= axisComponent
 		}
 
 		contacts = append(contacts, brickContact{
-			index:       i,
-			nx:          nx,
-			ny:          ny,
-			axisNX:      axisNX,
-			axisNY:      axisNY,
-			penetration: math.Max(0, penetration),
-			impact:      math.Max(0, -(b.vx*nx + b.vy*ny)),
-			swept:       swept,
-			time:        hitTime,
+			index:         i,
+			nx:            nx,
+			ny:            ny,
+			axisNX:        axisNX,
+			axisNY:        axisNY,
+			penetration:   math.Max(0, penetration),
+			impact:        math.Max(0, -(b.vx*nx + b.vy*ny)),
+			swept:         swept,
+			time:          hitTime,
+			cornerApplied: cornerApplied,
 		})
 	}
 	return contacts
@@ -5197,6 +5800,17 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 	if len(contacts) == 0 {
 		return
 	}
+
+	// A chain is the number of bricks destroyed as a consequence of one physical
+	// ball-to-brick contact event. This naturally includes immediate Nuke/Influencer
+	// secondary destruction, but not unrelated Zapper kills that happen later.
+	scoreBeforeHit := score
+	defer func() {
+		chain := score - scoreBeforeHit
+		if chain > levelRunStats.bestChain {
+			levelRunStats.bestChain = chain
+		}
+	}()
 
 	if passActive {
 		for _, contact := range contacts {
@@ -5258,6 +5872,20 @@ func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64
 		bestIndex = 0
 	}
 	best := contacts[bestIndex]
+
+	if enableCornerPhysicsDebug && best.cornerApplied {
+		cornerPhysicsDebugHitCount++
+		br := &bricks[best.index]
+		cornerPhysicsDebugPending = append(cornerPhysicsDebugPending, cornerPhysicsDebugEvent{
+			count:  cornerPhysicsDebugHitCount,
+			row:    br.row,
+			col:    br.col,
+			amount: clampFloat(physicsConfig.cornerPhysicsAmount, 0, 1),
+			nx:     best.nx,
+			ny:     best.ny,
+			impact: best.impact,
+		})
+	}
 
 	b.x += best.nx * (best.penetration + physicsConfig.collisionSlop)
 	b.y += best.ny * (best.penetration + physicsConfig.collisionSlop)
@@ -5453,6 +6081,8 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 
 		preventVerticalLock(b, preferredDirection)
 		clampBallToPhysicsSettings(b, physics)
+		recordMeasuredBallSpeed(b)
+		recordMeasuredBallSpin(b)
 		maybeShowHighSpin(spinBeforePaddle, b.omega)
 		if isPrimary {
 			recordLastPaddleSpinDebug(true, spinBeforePaddle, b.omega)
@@ -5500,6 +6130,7 @@ func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 
 func updateBall(b *Ball, dt float64, isPrimary bool) {
 	updateBallAdaptive(b, dt, isPrimary)
+	recordMeasuredBallSpeed(b)
 	recordMeasuredBallSpin(b)
 }
 
@@ -5513,12 +6144,14 @@ func loseLife() {
 	if lives < 0 {
 		lives = 0
 	}
+	levelRunStats.ballsLost++
 
 	playDie()
 
 	if lives == 0 {
 		gameOver = true
 		win = false
+		cancelFullGameRun()
 		playGameOver()
 	} else {
 		resetBalls()
@@ -5575,7 +6208,6 @@ func selectMobileControlMode(mode string) {
 	if mode == "tilt" {
 		phoneTiltAvailable = false
 		recalibratePhoneTilt()
-		requestPhoneTiltPermission()
 	}
 }
 
@@ -5711,7 +6343,7 @@ func setupMobileControlSelector() {
 	</button>
 	<button class="mobileControlChoice" data-mode="tilt">
 		Phone tilt
-		<small>Rotate the phone left or right. Selecting this also calibrates it.</small>
+		<small>Rotate the phone left or right. iPhone/iPad will ask for motion permission.</small>
 	</button>
 	<button class="mobileControlChoice" data-mode="follow">
 		Follow finger
@@ -5751,13 +6383,18 @@ func setupMobileControlSelector() {
 					args[0].Call("stopPropagation")
 				}
 				selectMobileControlMode(selectedMode)
+				if selectedMode == "tilt" {
+					// iOS requires the permission request to run directly from a
+					// completed user gesture. A click is more reliable than pointerdown.
+					requestPhoneTiltPermission()
+				}
 				hideMobileControlSelector()
 				return nil
 			}
 		}(mode))
 
 		mobileControlCallbacks = append(mobileControlCallbacks, callback)
-		button.Call("addEventListener", "pointerdown", callback)
+		button.Call("addEventListener", "click", callback)
 	}
 
 	savedMode := ""
@@ -5775,6 +6412,11 @@ func setupMobileControlSelector() {
 
 	if validMobileControlMode(savedMode) {
 		selectMobileControlMode(savedMode)
+		if savedMode == "tilt" {
+			// iOS permission cannot be requested during startup. Show the chooser
+			// again so a completed click can grant or refresh motion access.
+			showMobileControlSelector()
+		}
 	} else {
 		showMobileControlSelector()
 	}
@@ -5856,6 +6498,13 @@ func installPhoneTiltListener() {
 
 func requestPhoneTiltPermission() {
 	window := js.Global().Get("window")
+	secureContext := window.Get("isSecureContext")
+	if secureContext.Type() == js.TypeBoolean && !secureContext.Bool() {
+		phoneTiltPermissionAsked = false
+		showStatus("Tilt needs HTTPS", 3.0)
+		return
+	}
+
 	orientationEvent := window.Get("DeviceOrientationEvent")
 	if orientationEvent.IsUndefined() || orientationEvent.IsNull() {
 		orientationEvent = js.Global().Get("DeviceOrientationEvent")
@@ -5869,19 +6518,40 @@ func requestPhoneTiltPermission() {
 	if requestPermission.Type() != js.TypeFunction {
 		installPhoneTiltListener()
 		recalibratePhoneTilt()
+		showStatus("Tilt ready", 1.5)
 		return
 	}
 
-	if phoneTiltPermissionAsked && phoneTiltListenerSet {
+	if phoneTiltListenerSet {
 		recalibratePhoneTilt()
+		showStatus("Tilt recalibrated", 1.5)
+		return
+	}
+	if phoneTiltPermissionAsked {
 		return
 	}
 
 	phoneTiltPermissionAsked = true
-	promise := orientationEvent.Call("requestPermission")
+	promise := js.Undefined()
+	callSucceeded := false
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				phoneTiltPermissionAsked = false
+				log("Tilt permission request failed: " + fmt.Sprint(recovered))
+			}
+		}()
+		promise = orientationEvent.Call("requestPermission")
+		callSucceeded = true
+	}()
+	if !callSucceeded || promise.IsUndefined() || promise.IsNull() || promise.Type() != js.TypeObject {
+		phoneTiltPermissionAsked = false
+		showStatus("Tap again to allow tilt", 2.0)
+		return
+	}
 
 	granted := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if len(args) > 0 && args[0].String() == "granted" {
+		if len(args) > 0 && strings.EqualFold(args[0].String(), "granted") {
 			installPhoneTiltListener()
 			recalibratePhoneTilt()
 			showStatus("Tilt ready", 1.5)
@@ -5893,7 +6563,12 @@ func requestPhoneTiltPermission() {
 	})
 	rejected := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		phoneTiltPermissionAsked = false
-		showStatus("Tilt unavailable", 2.0)
+		reason := "request rejected"
+		if len(args) > 0 {
+			reason = fmt.Sprint(args[0])
+		}
+		log("Tilt permission rejected: " + reason)
+		showStatus("Tap again to allow tilt", 2.0)
 		return nil
 	})
 
@@ -5993,7 +6668,11 @@ func gamepadButtonPressed(button js.Value) bool {
 }
 
 func handleGamepadFirePress() {
-	if physicsEditorVisible || gameOver || levelAdvancePending {
+	if physicsEditorVisible || gameOver {
+		return
+	}
+	if levelAdvancePending {
+		advanceFromLevelComplete()
 		return
 	}
 
@@ -6046,7 +6725,9 @@ func trackFullscreenPromise(promise js.Value, action string) {
 			reason = fmt.Sprint(args[0])
 		}
 		log("Fullscreen " + action + " failed: " + reason)
-		showStatus("Fullscreen blocked by browser", 2.0)
+		if appleMobileBrowser() {
+			showIOSStandaloneHint()
+		}
 		return nil
 	})
 	keepGamepadFullscreenCallback(failureCallback)
@@ -6103,7 +6784,11 @@ func handleGamepadFullscreenPress() {
 
 	target := doc.Get("documentElement")
 	if !callFullscreenMethod(target, "requestFullscreen", "webkitRequestFullscreen", "request") {
-		showStatus("Fullscreen unavailable", 2.0)
+		if appleMobileBrowser() {
+			showIOSStandaloneHint()
+		} else {
+			showStatus("Fullscreen unavailable", 2.0)
+		}
 	}
 }
 
@@ -6469,6 +7154,7 @@ func collideDebrisWithBall(fragment *debrisFragment, b *Ball) {
 	clampDebrisSpeed(fragment)
 	fragment.omega -= tangentVelocity * 0.025 / math.Max(1, fragment.radius)
 	resetFastOrbitCandidate(b)
+	recordMeasuredBallSpeed(b)
 	recordMeasuredBallSpin(b)
 }
 
@@ -7009,6 +7695,9 @@ func refreshAutoPaddleControl() {
 
 func setAutoPaddleEnabled(enabled bool, announce bool) {
 	autoPaddleEnabled = enabled
+	if enabled {
+		markLevelRunAssisted()
+	}
 	resetAutoPaddleHitPlan()
 	if enabled && waitingForStart && !gameOver {
 		waitingForStart = false
@@ -7045,24 +7734,14 @@ func update(dt float64) {
 	}
 
 	if levelAdvancePending {
-		// Keep the final brick explosion alive during the level-complete hold.
+		// Stay on the results screen until the player explicitly continues.
+		// Debris may keep animating, but the frozen completion stats do not change.
 		updateBrickDebris(dt)
-		levelCompleteTimer -= dt
-		if levelCompleteTimer <= 0 {
-			levelCompleteTimer = 0
-			levelAdvancePending = false
-
-			nextLevel := currentLevelIndex + 1
-			if nextLevel >= len(levels) {
-				gameOver = true
-				win = true
-				playYouWin()
-			} else {
-				startLevel(nextLevel)
-			}
-		}
 		return
 	}
+
+	// Active-play time excludes READY, pause, and the level-complete screen.
+	levelRunStats.elapsedSeconds += dt
 
 	// Keyboard and two-thumb controls use acceleration rather than jumping
 	// immediately to one fixed speed. Short taps make small corrections;
@@ -7268,12 +7947,17 @@ func update(dt float64) {
 		// Only one ball was active.
 		loseLife()
 	}
-	// Hold the cleared level on screen for three seconds.
+	// Freeze run stats and hold the results screen until the player continues.
 	if !gameOver && !levelAdvancePending && remainingBreakableBricks == 0 {
+		recordLevelCompletionStats()
+		recordFullGameLevelCompletion()
 		lives++
 		unlockNextLevel()
 		levelAdvancePending = true
-		levelCompleteTimer = 3.0
+		levelCompleteTimer = 0
+		debugOverlayVisible = false
+		physicsOverlayVisible = false
+		statsOverlayVisible = false
 		leftPressed = false
 		rightPressed = false
 		touchControlActive = false
@@ -7285,6 +7969,21 @@ func update(dt float64) {
 		playLevelComplete()
 		showStatus("Level complete! +1 life", 3.0)
 	}
+}
+
+func advanceFromLevelComplete() {
+	if !levelAdvancePending {
+		return
+	}
+	levelAdvancePending = false
+	nextLevel := currentLevelIndex + 1
+	if nextLevel >= len(levels) {
+		gameOver = true
+		win = true
+		playYouWin()
+		return
+	}
+	startLevel(nextLevel)
 }
 
 // ---- Reset balls on life lost ----
@@ -7528,6 +8227,8 @@ func physicsFloatSettingValue(settings *physicsSettings, key string) float64 {
 		return settings.wallTopTiltDegrees
 	case "wallCornerFadeDistance":
 		return settings.wallCornerFadeDistance
+	case "cornerPhysicsAmount":
+		return settings.cornerPhysicsAmount
 	case "brickTiltMinDegrees":
 		return settings.brickTiltMinDegrees
 	case "brickTiltMaxDegrees":
@@ -7565,7 +8266,7 @@ func parsePhysicsFloatConfigKey(key string) (field string, ok bool) {
 		"minimumCollisionGrip", "minimumPaddleGrip", "collisionSlop",
 		"paddleSpinGraceSeconds", "mousePaddleSpinVelocityLimit", "overspeedHalfLife",
 		"wallNoiseCellSize", "wallSideTiltDegrees", "wallTopTiltDegrees",
-		"wallCornerFadeDistance", "brickTiltMinDegrees", "brickTiltMaxDegrees",
+		"wallCornerFadeDistance", "cornerPhysicsAmount", "brickTiltMinDegrees", "brickTiltMaxDegrees",
 		"orbitMinimumSpeed", "orbitMinimumHitSpeed", "orbitMinorSpeedRatio",
 		"orbitMinorSpeedFloor", "orbitDetectionWindow", "orbitMaximumMinorProgress",
 		"orbitHitCooldown", "orbitEscapeSpeed", "orbitEscapeDuration",
@@ -7580,7 +8281,7 @@ func parsePhysicsFloatConfigKey(key string) (field string, ok bool) {
 
 func validPhysicsFloatSetting(key string, value float64) bool {
 	switch key {
-	case "restitution":
+	case "restitution", "cornerPhysicsAmount":
 		return value >= 0 && value <= 1
 	case "maxSpeed", "maxSpin":
 		return value > 0
@@ -7604,6 +8305,14 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 	if key == "drawBrickTilt" {
 		return strconv.FormatBool(physicsConfig.drawBrickTilt),
 			strconv.FormatBool(defaults.drawBrickTilt), "bool", true
+	}
+	if key == "cornerPhysics" || key == "cornerPhysicsEnabled" {
+		return strconv.FormatBool(physicsConfig.cornerPhysicsEnabled),
+			strconv.FormatBool(defaults.cornerPhysicsEnabled), "bool", true
+	}
+	if key == "cornerPhysicsAllBricks" || key == "allBrickCorners" {
+		return strconv.FormatBool(physicsConfig.cornerPhysicsAllBricks),
+			strconv.FormatBool(defaults.cornerPhysicsAllBricks), "bool", true
 	}
 	switch key {
 	case "audioRoom":
@@ -7856,6 +8565,19 @@ func physicsOverlayLines() []string {
 	if debrisEnabled {
 		debrisLevelState = "ON"
 	}
+	mouseLockState := "UNAVAILABLE"
+	if pointerLockSupported() {
+		mouseLockState = "READY"
+		if mousePointerLocked {
+			mouseLockState = "LOCKED"
+		}
+	}
+	tiltState := "WAITING"
+	if phoneTiltListenerSet && phoneTiltAvailable {
+		tiltState = "ACTIVE"
+	} else if phoneTiltListenerSet {
+		tiltState = "READY"
+	}
 
 	lines := []string{
 		"BUILD " + buildID,
@@ -7874,6 +8596,8 @@ func physicsOverlayLines() []string {
 		"CATCH-UP LIMIT      " + strconv.Itoa(physicsMaxCatchUpSteps),
 		"DROPPED SIM TIME    " + fmt.Sprintf("%.4f s", physicsDroppedTimeTotal),
 		"STATUS " + status,
+		"MOUSE CAPTURE      " + mouseLockState + " (left lock / right release)",
+		"PHONE TILT         " + tiltState,
 		"DEBRIS MASTER      " + debrisMasterState + " (R, saved)",
 		"DEBRIS LEVEL       " + debrisLevelState,
 		"DEBRIS             " + strconv.Itoa(len(brickDebris)) + "/" + strconv.Itoa(debrisMaxActivePieces),
@@ -7971,6 +8695,54 @@ func debugOverlayReport() string {
 	return strings.Join(debugOverlayLines(), "\n")
 }
 
+func statsOverlayLines() []string {
+	run := levelRunStats
+	if levelCompletedStatsValid && levelAdvancePending {
+		run = levelCompletedStats
+	}
+	eligibility := "YES"
+	if !levelRunRecordEligible {
+		eligibility = "NO (ASSISTED)"
+	}
+	wasChain := "--"
+	if levelPreviousBests.chainFound {
+		wasChain = strconv.Itoa(levelPreviousBests.bestChain) + " bricks"
+	}
+	bestChain := "--"
+	if levelCurrentBests.chainFound {
+		bestChain = strconv.Itoa(levelCurrentBests.bestChain) + " bricks"
+	}
+	wasBallsLost := formatBestInt(levelPreviousBests.ballsLost, levelPreviousBests.ballsLostFound)
+	bestBallsLost := formatBestInt(levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound)
+	newTag := func(isNew bool) string {
+		if isNew {
+			return " NEW BEST!"
+		}
+		return ""
+	}
+	lines := []string{
+		"LEVEL RECORDS - LEVEL " + strconv.Itoa(currentLevelIndex+1),
+		"",
+		fmt.Sprintf("%-16s %-14s %-14s %-14s", "", "THIS RUN", "WAS", "BEST"),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "TIME", formatLevelTimeSeconds(run.elapsedSeconds), formatBestTime(levelPreviousBests), formatBestTime(levelCurrentBests), newTag(levelCompletionNewRecords.time)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "FASTEST BALL", fmt.Sprintf("%.0f", run.fastestSpeed), formatBestInt(levelPreviousBests.fastestSpeed, levelPreviousBests.speedFound), formatBestInt(levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound), newTag(levelCompletionNewRecords.speed)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "FASTEST SPIN", fmt.Sprintf("%.0f", run.fastestSpin), formatBestInt(levelPreviousBests.fastestSpin, levelPreviousBests.spinFound), formatBestInt(levelCurrentBests.fastestSpin, levelCurrentBests.spinFound), newTag(levelCompletionNewRecords.spin)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "BEST CHAIN", strconv.Itoa(run.bestChain)+" bricks", wasChain, bestChain, newTag(levelCompletionNewRecords.chain)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "BALLS LOST", strconv.Itoa(run.ballsLost), wasBallsLost, bestBallsLost, newTag(levelCompletionNewRecords.ballsLost)),
+		"",
+		"RECORD ELIGIBLE " + eligibility,
+	}
+	return lines
+}
+
+func statsOverlayReport() string {
+	return strings.Join(statsOverlayLines(), "\n")
+}
+
+func statsOverlayGeometry(lineCount int) (panelX, panelY, panelWidth, panelHeight float64, maxRows int) {
+	return debugOverlayGeometry(lineCount)
+}
+
 func formatLowestRenderFPS() string {
 	if fpsLowest <= 0 {
 		return "--"
@@ -7994,20 +8766,27 @@ func pageIsVisibleForFPS() bool {
 	return hidden.IsUndefined() || hidden.IsNull() || !hidden.Bool()
 }
 
-// P cycles physics diagnostics -> level/config diagnostics -> off. I remains an
-// alias for the same cycle so older muscle memory still works.
+// P cycles physics diagnostics -> level/config diagnostics -> level records -> off.
+// I remains an alias for the same cycle so older muscle memory still works.
 func cycleDiagnosticsOverlay() {
 	if physicsOverlayVisible {
 		physicsOverlayVisible = false
 		debugOverlayVisible = true
+		statsOverlayVisible = false
 		return
 	}
 	if debugOverlayVisible {
 		debugOverlayVisible = false
+		statsOverlayVisible = true
+		return
+	}
+	if statsOverlayVisible {
+		statsOverlayVisible = false
 		return
 	}
 	physicsOverlayVisible = true
 	debugOverlayVisible = false
+	statsOverlayVisible = false
 }
 
 func pointerCanvasPosition(e js.Value) (x, y float64, ok bool) {
@@ -8038,6 +8817,12 @@ func overlayReportAtPointer(e js.Value) (string, bool) {
 		panelX, panelY, panelWidth, panelHeight, _ := physicsOverlayGeometry(len(physicsOverlayLines()))
 		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
 			return physicsOverlayReport(), true
+		}
+	}
+	if statsOverlayVisible {
+		panelX, panelY, panelWidth, panelHeight, _ := statsOverlayGeometry(len(statsOverlayLines()))
+		if x >= panelX && x <= panelX+panelWidth && y >= panelY && y <= panelY+panelHeight {
+			return statsOverlayReport(), true
 		}
 	}
 	return "", false
@@ -8536,6 +9321,12 @@ func physicsEditorSpecValue(spec physicsSliderSpec) float64 {
 }
 
 func refreshPhysicsEditorControls() {
+	if !physicsEditorCornerPhysicsCheckbox.IsUndefined() && !physicsEditorCornerPhysicsCheckbox.IsNull() {
+		physicsEditorCornerPhysicsCheckbox.Set("checked", physicsConfig.cornerPhysicsEnabled)
+	}
+	if !physicsEditorCornerPhysicsAllBricksCheckbox.IsUndefined() && !physicsEditorCornerPhysicsAllBricksCheckbox.IsNull() {
+		physicsEditorCornerPhysicsAllBricksCheckbox.Set("checked", physicsConfig.cornerPhysicsAllBricks)
+	}
 	for _, spec := range physicsEditorSliderSpecs {
 		input, inputOK := physicsEditorInputs[spec.key]
 		label, labelOK := physicsEditorValueLabels[spec.key]
@@ -8581,10 +9372,12 @@ func applyPhysicsEditorValue(spec physicsSliderSpec, value float64) {
 }
 
 func physicsEditorLevelText() string {
-	lines := make([]string, 0, len(autoPaddleEditorSliderSpecs)+len(physicsEditorSliderSpecs)+len(debrisEditorSliderSpecs)+1)
+	lines := make([]string, 0, len(autoPaddleEditorSliderSpecs)+len(physicsEditorSliderSpecs)+len(debrisEditorSliderSpecs)+2)
 	for _, spec := range autoPaddleEditorSliderSpecs {
 		lines = append(lines, spec.key+"="+formatAutoPaddleSliderValue(spec, autoPaddleEditorValue(spec.key)))
 	}
+	lines = append(lines, "cornerPhysicsEnabled="+strconv.FormatBool(physicsConfig.cornerPhysicsEnabled))
+	lines = append(lines, "cornerPhysicsAllBricks="+strconv.FormatBool(physicsConfig.cornerPhysicsAllBricks))
 	for _, spec := range physicsEditorSliderSpecs {
 		value := physicsEditorSpecValue(spec)
 		lines = append(lines, spec.key+"="+formatPhysicsSliderValue(spec, value))
@@ -8601,6 +9394,8 @@ func physicsEditorConfigText() string {
 	for _, spec := range autoPaddleEditorSliderSpecs {
 		lines = append(lines, spec.configName+" = "+formatAutoPaddleSliderValue(spec, autoPaddleEditorValue(spec.key)))
 	}
+	lines = append(lines, "defaultPhysicsCornerPhysicsEnabled = "+strconv.FormatBool(physicsConfig.cornerPhysicsEnabled))
+	lines = append(lines, "defaultPhysicsCornerPhysicsAllBricks = "+strconv.FormatBool(physicsConfig.cornerPhysicsAllBricks))
 	for _, spec := range physicsEditorSliderSpecs {
 		value := physicsEditorSpecValue(spec)
 		lines = append(lines, spec.configName+" = "+formatPhysicsSliderValue(spec, value))
@@ -8818,6 +9613,18 @@ func ensurePhysicsEditorPanel() {
 	})
 	physicsEditorDebrisCheckbox = debrisLabel.Call("querySelector", "input")
 	modeRow.Call("appendChild", debrisLabel)
+
+	cornerLabel := createPhysicsEditorCheckbox("Corner physics", physicsConfig.cornerPhysicsEnabled, func(enabled bool) {
+		physicsConfig.cornerPhysicsEnabled = enabled
+	})
+	physicsEditorCornerPhysicsCheckbox = cornerLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", cornerLabel)
+
+	allCornersLabel := createPhysicsEditorCheckbox("All brick corners", physicsConfig.cornerPhysicsAllBricks, func(enabled bool) {
+		physicsConfig.cornerPhysicsAllBricks = enabled
+	})
+	physicsEditorCornerPhysicsAllBricksCheckbox = allCornersLabel.Call("querySelector", "input")
+	modeRow.Call("appendChild", allCornersLabel)
 	panel.Call("appendChild", modeRow)
 
 	appendPhysicsEditorGroup(panel, "AUTO PADDLE")
@@ -8881,6 +9688,7 @@ func ensurePhysicsEditorPanel() {
 			setStyle(group, "letterSpacing", "0.04em")
 			panel.Call("appendChild", group)
 			lastGroup = spec.group
+
 		}
 
 		row := doc.Call("createElement", "label")
@@ -8916,6 +9724,17 @@ func ensurePhysicsEditorPanel() {
 			if err != nil {
 				return nil
 			}
+
+			// Keep this new control deliberately direct. Apart from avoiding any
+			// stale generic-value lookup in the UI, this makes the displayed amount
+			// exactly the value that the collision code reads on the next physics step.
+			if specCopy.key == "cornerPhysicsAmount" {
+				value = clampFloat(value, specCopy.min, specCopy.max)
+				physicsConfig.cornerPhysicsAmount = value
+				valueLabel.Set("textContent", formatPhysicsSliderValue(specCopy, value))
+				return nil
+			}
+
 			applyPhysicsEditorValue(specCopy, value)
 			valueLabel.Set("textContent", formatPhysicsSliderValue(specCopy, physicsEditorSpecValue(specCopy)))
 			return nil
@@ -8989,6 +9808,7 @@ func openPhysicsEditor() {
 	if physicsEditorVisible {
 		return
 	}
+	markLevelRunAssisted()
 	ensurePhysicsEditorPanel()
 	physicsEditorPreviousPaused = paused
 	physicsEditorLiveSimulation = !paused
@@ -9006,6 +9826,7 @@ func openPhysicsEditor() {
 	resetPaddleSpinHistory()
 	debugOverlayVisible = false
 	physicsOverlayVisible = false
+	statsOverlayVisible = false
 	refreshPhysicsEditorControls()
 	physicsEditorPanel.Get("style").Set("display", "block")
 }
@@ -9096,8 +9917,14 @@ func drawPhysicsOverlay() {
 	}
 }
 
+func drawStatsOverlay() {
+	if statsOverlayVisible {
+		drawPhysicsOverlayLines(statsOverlayLines())
+	}
+}
+
 func drawFPSMiniOverlay() {
-	if !fpsMiniOverlayVisible || physicsOverlayVisible || debugOverlayVisible {
+	if !fpsMiniOverlayVisible || physicsOverlayVisible || debugOverlayVisible || statsOverlayVisible {
 		return
 	}
 
@@ -9187,14 +10014,12 @@ func draw(alpha float64) {
 	ctx.Call("fillText", hudScoreText, hudTextX, hudFirstLineY+2*hudLineStep)
 
 	currentSpeed := math.Hypot(ball.vx, ball.vy)
-	ctx.Call("fillText", "Speed: "+fmt.Sprintf("%.0f", currentSpeed)+
-		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpeed)+")", hudTextX, hudFirstLineY+3*hudLineStep)
+	ctx.Call("fillText", "Speed: "+fmt.Sprintf("%.0f", currentSpeed), hudTextX, hudFirstLineY+3*hudLineStep)
 
 	if math.Abs(ball.omega) > 100 {
 		ctx.Set("fillStyle", "#ff0000")
 	}
-	ctx.Call("fillText", "Spin:  "+fmt.Sprintf("%+.0f", ball.omega)+
-		" ("+fmt.Sprintf("%.0f", levelMeasuredMaxSpin)+")", hudTextX, hudFirstLineY+4*hudLineStep)
+	ctx.Call("fillText", "Spin:  "+fmt.Sprintf("%+.0f", ball.omega), hudTextX, hudFirstLineY+4*hudLineStep)
 	ctx.Set("fillStyle", palette[4])
 
 	for i, message := range statusMessages {
@@ -9215,10 +10040,90 @@ func draw(alpha float64) {
 
 	if levelAdvancePending && !gameOver {
 		drawCenteredOverlay()
+		run := levelRunStats
+		if levelCompletedStatsValid {
+			run = levelCompletedStats
+		}
+		centerX := canvasWidth / 2
+		centerY := canvasHeight / 2
+		assisted := !levelRunRecordEligible
+
+		// Center the complete title/table/prompt composition as one vertical block.
+		// The title keeps its original large 64px size; only the result table is smaller.
+		blockHeight := 418.0
+		if assisted {
+			blockHeight += 42.0
+		}
+		blockTop := centerY - blockHeight/2
+		titleY := blockTop + 58.0
+		headerY := titleY + 56.0
+		rowY := headerY + 38.0
+
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
 		ctx.Set("font", "64px GameFont, monospace")
-		ctx.Call("fillText", "LEVEL COMPLETE", canvasWidth/2, canvasHeight/2)
+		ctx.Call("fillText", "LEVEL COMPLETE", centerX, titleY)
+
+		// Results are a centered table, while every cell is left-aligned.
+		const (
+			tableWidth = 1080.0
+			labelWidth = 235.0
+			runWidth   = 195.0
+			wasWidth   = 195.0
+			bestWidth  = 195.0
+			rowStep    = 36.0
+		)
+		tableLeft := centerX - tableWidth/2
+		labelX := tableLeft
+		runX := tableLeft + labelWidth
+		wasX := runX + runWidth
+		bestX := wasX + wasWidth
+		newX := bestX + bestWidth
+
+		ctx.Set("textAlign", "left")
+		ctx.Set("font", "18px GameFont, monospace")
+		ctx.Call("fillText", "THIS RUN", runX, headerY)
+		ctx.Call("fillText", "WAS", wasX, headerY)
+		ctx.Call("fillText", "BEST", bestX, headerY)
+
+		ctx.Set("font", "24px GameFont, monospace")
+		drawResultRow := func(row int, label, current, was, best string, isNew bool) {
+			y := rowY + float64(row)*rowStep
+			ctx.Call("fillText", label, labelX, y)
+			ctx.Call("fillText", current, runX, y)
+			ctx.Call("fillText", was, wasX, y)
+			ctx.Call("fillText", best, bestX, y)
+			if isNew {
+				ctx.Call("fillText", "NEW BEST!", newX, y)
+			}
+		}
+
+		wasChain := "--"
+		if levelPreviousBests.chainFound {
+			wasChain = strconv.Itoa(levelPreviousBests.bestChain) + " bricks"
+		}
+		bestChain := "--"
+		if levelCurrentBests.chainFound {
+			bestChain = strconv.Itoa(levelCurrentBests.bestChain) + " bricks"
+		}
+		drawResultRow(0, "TIME", formatLevelTimeSeconds(run.elapsedSeconds), formatBestTime(levelPreviousBests), formatBestTime(levelCurrentBests), levelCompletionNewRecords.time)
+		drawResultRow(1, "FASTEST BALL", fmt.Sprintf("%.0f", run.fastestSpeed), formatBestInt(levelPreviousBests.fastestSpeed, levelPreviousBests.speedFound), formatBestInt(levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound), levelCompletionNewRecords.speed)
+		drawResultRow(2, "FASTEST SPIN", fmt.Sprintf("%.0f", run.fastestSpin), formatBestInt(levelPreviousBests.fastestSpin, levelPreviousBests.spinFound), formatBestInt(levelCurrentBests.fastestSpin, levelCurrentBests.spinFound), levelCompletionNewRecords.spin)
+		drawResultRow(3, "BEST CHAIN", strconv.Itoa(run.bestChain)+" bricks", wasChain, bestChain, levelCompletionNewRecords.chain)
+		drawResultRow(4, "BALLS LOST", strconv.Itoa(run.ballsLost), formatBestInt(levelPreviousBests.ballsLost, levelPreviousBests.ballsLostFound), formatBestInt(levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound), levelCompletionNewRecords.ballsLost)
+
+		lastRowY := rowY + 4*rowStep
+		nextY := lastRowY + 112.0
+		ctx.Set("textAlign", "center")
+		if assisted {
+			ctx.Set("font", "20px GameFont, monospace")
+			ctx.Call("fillText", "ASSISTED RUN - PERSONAL BESTS NOT UPDATED", centerX, nextY)
+			nextY += 42.0
+		}
+
+		// Keep the continue prompt large and centered, with about twice the title-to-stats gap below the table.
+		ctx.Set("font", "28px GameFont, monospace")
+		ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO CONTINUE", centerX, nextY)
 		ctx.Set("textAlign", "start")
 	}
 
@@ -9237,27 +10142,95 @@ func draw(alpha float64) {
 		drawCenteredOverlay()
 		ctx.Set("fillStyle", palette[4])
 		ctx.Set("textAlign", "center")
+		centerX := canvasWidth / 2
+		centerY := canvasHeight / 2
 
-		msg := "GAME OVER"
-		fontSize := "88px GameFont, monospace"
-		instruction := "Press Space, Enter, click, or touch to retry"
 		if win {
-			msg = "YOU WIN!"
-			fontSize = "112px GameFont, monospace"
-			instruction = "Press Space, Enter, click, or touch to start again"
+			if fullGameCompletion.valid && fullGameCompletion.levelCount == len(levels) {
+				assisted := !fullGameCompletion.recordEligible
+				blockHeight := 330.0
+				if assisted {
+					blockHeight += 40.0
+				}
+				blockTop := centerY - blockHeight/2
+				titleY := blockTop + 100.0
+				descriptionY := titleY + 58.0
+				fullHeaderY := descriptionY + 52.0
+				fullRowY := fullHeaderY + 36.0
+
+				ctx.Set("font", "112px GameFont, monospace")
+				ctx.Call("fillText", "YOU WIN!", centerX, titleY)
+				ctx.Set("font", "22px GameFont, monospace")
+				ctx.Call("fillText", "You beat the full game in one go.", centerX, descriptionY)
+
+				wasTime := "--"
+				if fullGameCompletion.previousBestFound {
+					wasTime = formatFullGameDurationMs(fullGameCompletion.previousBestTimeMs)
+				}
+				bestTime := "--"
+				if fullGameCompletion.bestFound {
+					bestTime = formatFullGameDurationMs(fullGameCompletion.bestTimeMs)
+				}
+
+				// Center the full table as a block; individual cells remain left-aligned.
+				const (
+					fullTableWidth = 1280.0
+					fullLabelWidth = 150.0
+					fullRunWidth   = 330.0
+					fullWasWidth   = 330.0
+					fullBestWidth  = 330.0
+				)
+				fullLeft := centerX - fullTableWidth/2
+				fullLabelX := fullLeft
+				fullRunX := fullLabelX + fullLabelWidth
+				fullWasX := fullRunX + fullRunWidth
+				fullBestX := fullWasX + fullWasWidth
+				fullNewX := fullBestX + fullBestWidth
+
+				ctx.Set("textAlign", "left")
+				ctx.Set("font", "16px GameFont, monospace")
+				ctx.Call("fillText", "THIS RUN", fullRunX, fullHeaderY)
+				ctx.Call("fillText", "WAS", fullWasX, fullHeaderY)
+				ctx.Call("fillText", "BEST", fullBestX, fullHeaderY)
+				ctx.Set("font", "20px GameFont, monospace")
+				ctx.Call("fillText", "TIME", fullLabelX, fullRowY)
+				ctx.Call("fillText", formatFullGameDurationMs(fullGameCompletion.timeMs), fullRunX, fullRowY)
+				ctx.Call("fillText", wasTime, fullWasX, fullRowY)
+				ctx.Call("fillText", bestTime, fullBestX, fullRowY)
+				if fullGameCompletion.recordEligible && fullGameCompletion.newRecord {
+					ctx.Call("fillText", "NEW RECORD!", fullNewX, fullRowY)
+				}
+
+				nextY := fullRowY + 40.0
+				ctx.Set("textAlign", "center")
+				if assisted {
+					ctx.Set("font", "18px GameFont, monospace")
+					ctx.Call("fillText", "ASSISTED RUN - FULL-GAME RECORD NOT UPDATED", centerX, nextY)
+					nextY += 40.0
+				}
+				ctx.Set("font", "28px GameFont, monospace")
+				ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO CONTINUE", centerX, nextY+22.0)
+			} else {
+				// Fallback win screen, also centered as one composition.
+				ctx.Set("font", "112px GameFont, monospace")
+				ctx.Call("fillText", "YOU WIN!", centerX, centerY-34.0)
+				ctx.Set("font", "28px GameFont, monospace")
+				ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO CONTINUE", centerX, centerY+72.0)
+			}
+		} else {
+			// Keep the ordinary game-over composition centered as well.
+			ctx.Set("font", "88px GameFont, monospace")
+			ctx.Call("fillText", "GAME OVER", centerX, centerY-32.0)
+			ctx.Set("font", "28px GameFont, monospace")
+			ctx.Call("fillText", "SPACE / ENTER / CLICK / TAP TO RETRY", centerX, centerY+70.0)
 		}
-
-		ctx.Set("font", fontSize)
-		ctx.Call("fillText", msg, canvasWidth/2, canvasHeight/2-10)
-
-		ctx.Set("font", "28px GameFont, monospace")
-		ctx.Call("fillText", instruction, canvasWidth/2, canvasHeight/2+70)
 
 		ctx.Set("textAlign", "start")
 	}
 
 	drawDebugOverlay()
 	drawPhysicsOverlay()
+	drawStatsOverlay()
 	drawFPSMiniOverlay()
 }
 
@@ -9362,6 +10335,10 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 		physicsWarningTimer = physicsWarningHoldSeconds
 	}
 	computeSeconds := (js.Global().Get("performance").Call("now").Float() - computeStart) / 1000.0
+
+	// Console I/O is intentionally outside the physics-compute timer. The hit
+	// detection itself is still measured; only browser DevTools logging is excluded.
+	flushCornerPhysicsDebugLogs()
 
 	physicsLastFrameSteps = steps
 	if steps > physicsPeakFrameSteps {
@@ -9513,6 +10490,291 @@ func verticalDragToHorizontalDelta(deltaY float64) float64 {
 	return deltaY * scaleY * 2.2
 }
 
+// ---- Desktop pointer lock and iOS standalone helpers ----
+func pointerLockElement() js.Value {
+	element := doc.Get("pointerLockElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	element = doc.Get("mozPointerLockElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	element = doc.Get("webkitPointerLockElement")
+	if !element.IsUndefined() && !element.IsNull() {
+		return element
+	}
+	return js.Null()
+}
+
+func pointerLockActive() bool {
+	element := pointerLockElement()
+	return !element.IsNull() && element.Equal(canvas)
+}
+
+func pointerLockMethod(target js.Value, names ...string) string {
+	if target.IsUndefined() || target.IsNull() {
+		return ""
+	}
+	for _, name := range names {
+		fn := target.Get(name)
+		if !fn.IsUndefined() && !fn.IsNull() && fn.Type() == js.TypeFunction {
+			return name
+		}
+	}
+	return ""
+}
+
+func pointerLockSupported() bool {
+	return pointerLockMethod(canvas, "requestPointerLock", "mozRequestPointerLock", "webkitRequestPointerLock") != ""
+}
+
+func requestMousePointerLock() bool {
+	method := pointerLockMethod(canvas, "requestPointerLock", "mozRequestPointerLock", "webkitRequestPointerLock")
+	if method == "" {
+		return false
+	}
+
+	succeeded := true
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				succeeded = false
+				log("Pointer lock request failed: " + fmt.Sprint(recovered))
+				showStatus("Mouse capture unavailable", 2.0)
+			}
+		}()
+		promise := canvas.Call(method)
+		if !promise.IsUndefined() && !promise.IsNull() && promise.Type() == js.TypeObject {
+			catchMethod := promise.Get("catch")
+			if catchMethod.Type() == js.TypeFunction {
+				failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+					reason := "request rejected"
+					if len(args) > 0 {
+						reason = fmt.Sprint(args[0])
+					}
+					log("Pointer lock rejected: " + reason)
+					showStatus("Mouse capture unavailable", 2.0)
+					return nil
+				})
+				browserUICallbacks = append(browserUICallbacks, failure)
+				promise.Call("catch", failure)
+			}
+		}
+	}()
+	return succeeded
+}
+
+func releaseMousePointerLock() bool {
+	method := pointerLockMethod(doc, "exitPointerLock", "mozExitPointerLock", "webkitExitPointerLock")
+	if method == "" {
+		return false
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log("Pointer lock release failed: " + fmt.Sprint(recovered))
+		}
+	}()
+	doc.Call(method)
+	return true
+}
+
+func movePaddleByLockedMouse(e js.Value) {
+	movement := e.Get("movementX")
+	if movement.Type() != js.TypeNumber {
+		movement = e.Get("mozMovementX")
+	}
+	if movement.Type() != js.TypeNumber {
+		movement = e.Get("webkitMovementX")
+	}
+	if movement.Type() != js.TypeNumber {
+		return
+	}
+
+	rect := canvas.Call("getBoundingClientRect")
+	displayWidth := rect.Get("width").Float()
+	if displayWidth <= 0 {
+		return
+	}
+
+	deltaX := movement.Float() * canvasWidth / displayWidth * defaultMousePointerLockSensitivity
+	maxX := math.Max(0, canvasWidth-paddle.w)
+	mousePaddleTargetX = clampFloat(mousePaddleTargetX+deltaX, 0, maxX)
+	mouseControlActive = true
+	leftPressed = false
+	rightPressed = false
+
+	if !paused && !gameOver && !waitingForStart && !levelAdvancePending {
+		paddle.x = mousePaddleTargetX
+	}
+}
+
+func setupPointerLock() {
+	pointerLockChange = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		locked := pointerLockActive()
+		if locked == mousePointerLocked {
+			return nil
+		}
+		mousePointerLocked = locked
+		if locked {
+			mousePaddleTargetX = paddle.x
+			mouseControlActive = true
+			leftPressed = false
+			rightPressed = false
+			showStatus("Mouse captured - right-click to release", 2.0)
+		} else {
+			mouseControlActive = false
+			paddle.vx = 0
+			resetPaddleSpinHistory()
+			showStatus("Mouse released", 1.5)
+		}
+		return nil
+	})
+	pointerLockError = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		mousePointerLocked = false
+		showStatus("Mouse capture unavailable", 2.0)
+		return nil
+	})
+	lockedMouseMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if !mousePointerLocked || paused || len(args) == 0 {
+			return nil
+		}
+		movePaddleByLockedMouse(args[0])
+		return nil
+	})
+
+	doc.Call("addEventListener", "pointerlockchange", pointerLockChange)
+	doc.Call("addEventListener", "mozpointerlockchange", pointerLockChange)
+	doc.Call("addEventListener", "webkitpointerlockchange", pointerLockChange)
+	doc.Call("addEventListener", "pointerlockerror", pointerLockError)
+	doc.Call("addEventListener", "mozpointerlockerror", pointerLockError)
+	doc.Call("addEventListener", "webkitpointerlockerror", pointerLockError)
+	doc.Call("addEventListener", "mousemove", lockedMouseMove)
+}
+
+func appleMobileBrowser() bool {
+	navigator := js.Global().Get("navigator")
+	if navigator.IsUndefined() || navigator.IsNull() {
+		return false
+	}
+	userAgent := strings.ToLower(navigator.Get("userAgent").String())
+	if strings.Contains(userAgent, "iphone") || strings.Contains(userAgent, "ipad") || strings.Contains(userAgent, "ipod") {
+		return true
+	}
+	platform := navigator.Get("platform").String()
+	maxTouchPoints := navigator.Get("maxTouchPoints")
+	return platform == "MacIntel" && maxTouchPoints.Type() == js.TypeNumber && maxTouchPoints.Int() > 1
+}
+
+func standaloneDisplayMode() bool {
+	navigator := js.Global().Get("navigator")
+	if !navigator.IsUndefined() && !navigator.IsNull() {
+		standalone := navigator.Get("standalone")
+		if standalone.Type() == js.TypeBoolean && standalone.Bool() {
+			return true
+		}
+	}
+	window := js.Global().Get("window")
+	matchMedia := window.Get("matchMedia")
+	if matchMedia.Type() == js.TypeFunction {
+		return window.Call("matchMedia", "(display-mode: standalone)").Get("matches").Bool()
+	}
+	return false
+}
+
+func ensureMeta(name, content string) {
+	head := doc.Get("head")
+	if head.IsUndefined() || head.IsNull() {
+		return
+	}
+	selector := `meta[name="` + name + `"]`
+	meta := head.Call("querySelector", selector)
+	if meta.IsUndefined() || meta.IsNull() {
+		meta = doc.Call("createElement", "meta")
+		meta.Set("name", name)
+		head.Call("appendChild", meta)
+	}
+	meta.Set("content", content)
+}
+
+func ensureStandaloneMetadata() {
+	appTitle := strings.TrimSpace(doc.Get("title").String())
+	if appTitle == "" {
+		appTitle = "Postgravity"
+	}
+	ensureMeta("apple-mobile-web-app-capable", "yes")
+	ensureMeta("apple-mobile-web-app-title", appTitle)
+	ensureMeta("apple-mobile-web-app-status-bar-style", "black-translucent")
+	ensureMeta("theme-color", "#000000")
+
+	head := doc.Get("head")
+	if head.IsUndefined() || head.IsNull() {
+		return
+	}
+	viewport := head.Call("querySelector", `meta[name="viewport"]`)
+	if viewport.IsUndefined() || viewport.IsNull() {
+		viewport = doc.Call("createElement", "meta")
+		viewport.Set("name", "viewport")
+		viewport.Set("content", "width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover")
+		head.Call("appendChild", viewport)
+	} else {
+		content := viewport.Get("content").String()
+		if !strings.Contains(content, "viewport-fit=cover") {
+			if strings.TrimSpace(content) != "" {
+				content += ","
+			}
+			viewport.Set("content", content+"viewport-fit=cover")
+		}
+	}
+
+	manifest := head.Call("querySelector", `link[rel="manifest"]`)
+	if manifest.IsUndefined() || manifest.IsNull() {
+		manifest = doc.Call("createElement", "link")
+		manifest.Set("rel", "manifest")
+		manifest.Set("href", "manifest.webmanifest")
+		head.Call("appendChild", manifest)
+	}
+}
+
+func showIOSStandaloneHint() {
+	if standaloneDisplayMode() {
+		showStatus("Already running from Home Screen", 2.0)
+		return
+	}
+
+	existing := doc.Call("getElementById", "iosStandaloneHint")
+	if !existing.IsUndefined() && !existing.IsNull() {
+		existing.Get("style").Set("display", "flex")
+		return
+	}
+
+	overlay := doc.Call("createElement", "div")
+	overlay.Set("id", "iosStandaloneHint")
+	overlay.Set("innerHTML", `<div style="box-sizing:border-box;width:min(560px,92vw);padding:22px;border:1px solid rgba(255,255,255,.25);border-radius:12px;background:#16213e;color:#fff;font:700 15px/1.45 GameFont,monospace;text-align:center;box-shadow:0 16px 50px rgba(0,0,0,.55)"><div style="font-size:22px;margin-bottom:10px">Full-screen on iPhone</div><div style="color:rgba(255,255,255,.78);margin-bottom:16px">In Safari, tap <b>Share</b>, choose <b>Add to Home Screen</b>, then launch the game from its icon.</div><button id="iosStandaloneHintClose" style="padding:10px 18px;border:1px solid rgba(255,255,255,.3);border-radius:8px;background:rgba(255,255,255,.12);color:#fff;font:700 15px GameFont,monospace">Close</button></div>`)
+	style := overlay.Get("style")
+	style.Set("position", "fixed")
+	style.Set("inset", "0")
+	style.Set("zIndex", "100001")
+	style.Set("display", "flex")
+	style.Set("alignItems", "center")
+	style.Set("justifyContent", "center")
+	style.Set("padding", "max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left))")
+	style.Set("background", "rgba(8,10,24,.94)")
+	doc.Get("body").Call("appendChild", overlay)
+
+	closeButton := doc.Call("getElementById", "iosStandaloneHintClose")
+	closeCallback := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) > 0 {
+			args[0].Call("preventDefault")
+			args[0].Call("stopPropagation")
+		}
+		overlay.Get("style").Set("display", "none")
+		return nil
+	})
+	browserUICallbacks = append(browserUICallbacks, closeCallback)
+	closeButton.Call("addEventListener", "click", closeCallback)
+}
+
 // ---- Input ----
 func pointerPaddleX(e js.Value) (float64, bool) {
 	rect := canvas.Call("getBoundingClientRect")
@@ -9576,6 +10838,8 @@ func bindMobileButton(id string, handler func()) {
 }
 
 func setupInput() {
+	setupPointerLock()
+
 	keyDown = js.FuncOf(func(this js.Value, args []js.Value) (ret interface{}) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -9638,7 +10902,7 @@ func setupInput() {
 			return nil
 		}
 
-		// P cycles physics diagnostics -> level/config diagnostics -> off.
+		// P cycles physics diagnostics -> level/config diagnostics -> level records -> off.
 		// I is retained as an alias. F independently toggles the compact FPS readout;
 		// Shift+F resets its visible-page LOWEST measurement without hiding it.
 		if (key == "p" || key == "P" || key == "i" || key == "I") && !e.Get("repeat").Bool() {
@@ -9720,6 +10984,9 @@ func setupInput() {
 		}
 
 		if levelAdvancePending {
+			if (key == " " || key == "Enter") && !e.Get("repeat").Bool() {
+				advanceFromLevelComplete()
+			}
 			return nil
 		}
 
@@ -9728,6 +10995,7 @@ func setupInput() {
 		// because this is an explicit player action.
 		if (key == "t" || key == "T") && !e.Get("repeat").Bool() {
 			if !paused {
+				markLevelRunAssisted()
 				teleportBallToSafeArea(&ball, true)
 			}
 			return nil
@@ -9741,6 +11009,7 @@ func setupInput() {
 
 		// Toggle magnetism relative to the level default.
 		if (key == "m" || key == "M") && !e.Get("repeat").Bool() {
+			markLevelRunAssisted()
 			magnetCheat = !magnetCheat
 			if magnetIsActive() {
 				showStatus("Magnets on", 2.0)
@@ -9752,6 +11021,7 @@ func setupInput() {
 
 		// Toggle Zapper relative to the level default.
 		if (key == "z" || key == "Z") && !e.Get("repeat").Bool() {
+			markLevelRunAssisted()
 			zapperCheat = !zapperCheat
 			zapperTargetIndex = -1
 			zapperHitTimer = 0
@@ -9764,6 +11034,7 @@ func setupInput() {
 		}
 
 		if key == "2" && !e.Get("repeat").Bool() {
+			markLevelRunAssisted()
 			if !secondBallActive {
 				secondBallActive = true
 				secondBall = ball
@@ -9854,6 +11125,22 @@ func setupInput() {
 			return nil
 		}
 
+		pointerType := e.Get("pointerType").String()
+		if pointerType == "mouse" {
+			button := e.Get("button")
+			if button.Type() == js.TypeNumber && button.Int() == 2 {
+				leftPressed = false
+				rightPressed = false
+				if pointerLockActive() {
+					releaseMousePointerLock()
+				} else {
+					setMousePaddleTarget(e)
+					requestMousePointerLock()
+				}
+				return nil
+			}
+		}
+
 		// Clicking or tapping the visible debug panel copies its complete text.
 		// Consume the event so it does not also launch, unpause, or move the paddle.
 		if report, inside := overlayReportAtPointer(e); inside {
@@ -9867,10 +11154,22 @@ func setupInput() {
 
 		unlockAudioFromGesture()
 
-		pointerType := e.Get("pointerType").String()
+		if pointerType == "mouse" {
+			button := e.Get("button")
+			if button.Type() == js.TypeNumber && button.Int() != 0 {
+				return nil
+			}
+			leftPressed = false
+			rightPressed = false
+		}
 
 		if gameOver && win {
 			jumpToLevel(0)
+			return nil
+		}
+
+		if levelAdvancePending {
+			advanceFromLevelComplete()
 			return nil
 		}
 
@@ -9936,25 +11235,32 @@ func setupInput() {
 					touchControlActive = mobileLeftHeld || mobileRightHeld
 					canvas.Call("setPointerCapture", e.Get("pointerId"))
 				case "tilt":
-					requestPhoneTiltPermission()
+					if phoneTiltListenerSet {
+						recalibratePhoneTilt()
+					}
 				}
 			}
 			return nil
 		}
 
-		if pointerType == "mouse" {
-			leftPressed = false
-			rightPressed = false
-			setMousePaddleTarget(e)
-
-			if gameOver && !win {
-				retryCurrentLevel()
-			}
+		if pointerType == "mouse" && gameOver && !win {
+			retryCurrentLevel()
 		}
 
 		return nil
 	})
 	canvas.Call("addEventListener", "pointerdown", pointerDown)
+
+	// Suppress the browser menu and use right-click as the deliberate Pointer Lock
+	// toggle gesture. Escape remains the browser-provided emergency release.
+	contextMenu := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		if len(args) > 0 {
+			args[0].Call("preventDefault")
+		}
+		return nil
+	})
+	browserUICallbacks = append(browserUICallbacks, contextMenu)
+	canvas.Call("addEventListener", "contextmenu", contextMenu)
 
 	pointerMove = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		if paused || len(args) == 0 {
@@ -9996,9 +11302,11 @@ func setupInput() {
 
 		if pointerType == "mouse" {
 			e.Call("preventDefault")
-			leftPressed = false
-			rightPressed = false
-			setMousePaddleTarget(e)
+			if !mousePointerLocked {
+				leftPressed = false
+				rightPressed = false
+				setMousePaddleTarget(e)
+			}
 		}
 
 		return nil
@@ -10009,6 +11317,11 @@ func setupInput() {
 		if len(args) > 0 {
 			e := args[0]
 			pointerID := e.Get("pointerId").Int()
+			pointerType := e.Get("pointerType").String()
+			if (pointerType == "touch" || pointerType == "pen") &&
+				mobileControlsEnabled && mobileControlMode == "tilt" {
+				requestPhoneTiltPermission()
+			}
 
 			if mobileControlMode == "two-thumb" {
 				if pointerID == mobileLeftPointerID {
@@ -10065,10 +11378,22 @@ func setupInput() {
 	canvas.Call("addEventListener", "pointercancel", pointerCancel)
 
 	mouseLeave = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		mouseControlActive = false
+		if !mousePointerLocked {
+			mouseControlActive = false
+		}
 		return nil
 	})
 	canvas.Call("addEventListener", "mouseleave", mouseLeave)
+
+	fullscreenToggle = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		handleGamepadFullscreenPress()
+		return nil
+	})
+	js.Global().Set("breakoutToggleFullscreen", fullscreenToggle)
+
+	bindMobileButton("fullscreenButton", func() {
+		handleGamepadFullscreenPress()
+	})
 
 	bindMobileButton("pauseButton", func() {
 		if physicsEditorVisible || gameOver {
@@ -10105,6 +11430,7 @@ func setupInput() {
 	})
 
 	bindMobileButton("magnetsButton", func() {
+		markLevelRunAssisted()
 		magnetCheat = !magnetCheat
 		if magnetIsActive() {
 			showStatus("Magnets on", 2.0)
@@ -10114,6 +11440,7 @@ func setupInput() {
 	})
 
 	bindMobileButton("zapperButton", func() {
+		markLevelRunAssisted()
 		zapperCheat = !zapperCheat
 		zapperTargetIndex = -1
 		zapperHitTimer = 0
@@ -10133,7 +11460,10 @@ func main() {
 		}
 	}()
 
+	js.Global().Set("breakoutBuildID", buildID)
+	log("BUILD " + buildID)
 	log("main: starting")
+	ensureStandaloneMetadata()
 	canvas = doc.Call("getElementById", "gameCanvas")
 	if canvas.IsNull() {
 		log("canvas not found!")
