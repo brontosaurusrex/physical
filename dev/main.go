@@ -506,31 +506,35 @@ type cornerPhysicsDebugEvent struct {
 
 // levelRunStats is reset when a level starts and frozen when it is cleared.
 // Only clear, player-readable records live here: completion time, fastest ball
-// speed reached on this level, fastest absolute spin, and the largest brick
-// chain caused by one physical ball-to-brick hit.
+// speed reached on this level, fastest absolute spin, the largest brick chain
+// caused by one physical ball-to-brick hit, and the fewest balls lost.
 type levelRunStatsData struct {
 	elapsedSeconds float64
 	fastestSpeed   float64
 	fastestSpin    float64
 	bestChain      int
+	ballsLost      int
 }
 
 type levelBestStatsData struct {
-	timeMs       int
-	timeFound    bool
-	fastestSpeed int
-	speedFound   bool
-	fastestSpin  int
-	spinFound    bool
-	bestChain    int
-	chainFound   bool
+	timeMs         int
+	timeFound      bool
+	fastestSpeed   int
+	speedFound     bool
+	fastestSpin    int
+	spinFound      bool
+	bestChain      int
+	chainFound     bool
+	ballsLost      int
+	ballsLostFound bool
 }
 
 type levelRecordFlags struct {
-	time  bool
-	speed bool
-	spin  bool
-	chain bool
+	time      bool
+	speed     bool
+	spin      bool
+	chain     bool
+	ballsLost bool
 }
 
 // fullGameRunState tracks a continuous level-1-through-final-level attempt.
@@ -4728,6 +4732,7 @@ func loadLevelBestStats(levelIndex int) levelBestStatsData {
 	best.fastestSpeed, best.speedFound = readStoredInt(levelBestStorageKey(levelIndex, "fastestSpeed"))
 	best.fastestSpin, best.spinFound = readStoredInt(levelBestStorageKey(levelIndex, "fastestSpin"))
 	best.bestChain, best.chainFound = readStoredInt(levelBestStorageKey(levelIndex, "bestChain"))
+	best.ballsLost, best.ballsLostFound = readStoredInt(levelBestStorageKey(levelIndex, "ballsLost"))
 	return best
 }
 
@@ -4793,6 +4798,8 @@ func recordLevelCompletionStats() {
 		saveBestIfHigher(currentLevelIndex, "fastestSpin", spin, levelCurrentBests.fastestSpin, levelCurrentBests.spinFound)
 	levelCurrentBests.bestChain, levelCurrentBests.chainFound, levelCompletionNewRecords.chain =
 		saveBestIfHigher(currentLevelIndex, "bestChain", levelCompletedStats.bestChain, levelCurrentBests.bestChain, levelCurrentBests.chainFound)
+	levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound, levelCompletionNewRecords.ballsLost =
+		saveBestIfLower(currentLevelIndex, "ballsLost", levelCompletedStats.ballsLost, levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound)
 }
 
 func formatLevelTimeSeconds(seconds float64) string {
@@ -6137,6 +6144,7 @@ func loseLife() {
 	if lives < 0 {
 		lives = 0
 	}
+	levelRunStats.ballsLost++
 
 	playDie()
 
@@ -8704,6 +8712,8 @@ func statsOverlayLines() []string {
 	if levelCurrentBests.chainFound {
 		bestChain = strconv.Itoa(levelCurrentBests.bestChain) + " bricks"
 	}
+	wasBallsLost := formatBestInt(levelPreviousBests.ballsLost, levelPreviousBests.ballsLostFound)
+	bestBallsLost := formatBestInt(levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound)
 	newTag := func(isNew bool) string {
 		if isNew {
 			return " NEW BEST!"
@@ -8718,6 +8728,7 @@ func statsOverlayLines() []string {
 		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "FASTEST BALL", fmt.Sprintf("%.0f", run.fastestSpeed), formatBestInt(levelPreviousBests.fastestSpeed, levelPreviousBests.speedFound), formatBestInt(levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound), newTag(levelCompletionNewRecords.speed)),
 		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "FASTEST SPIN", fmt.Sprintf("%.0f", run.fastestSpin), formatBestInt(levelPreviousBests.fastestSpin, levelPreviousBests.spinFound), formatBestInt(levelCurrentBests.fastestSpin, levelCurrentBests.spinFound), newTag(levelCompletionNewRecords.spin)),
 		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "BEST CHAIN", strconv.Itoa(run.bestChain)+" bricks", wasChain, bestChain, newTag(levelCompletionNewRecords.chain)),
+		fmt.Sprintf("%-16s %-14s %-14s %-14s%s", "BALLS LOST", strconv.Itoa(run.ballsLost), wasBallsLost, bestBallsLost, newTag(levelCompletionNewRecords.ballsLost)),
 		"",
 		"RECORD ELIGIBLE " + eligibility,
 	}
@@ -10039,7 +10050,7 @@ func draw(alpha float64) {
 
 		// Center the complete title/table/prompt composition as one vertical block.
 		// The title keeps its original large 64px size; only the result table is smaller.
-		blockHeight := 382.0
+		blockHeight := 418.0
 		if assisted {
 			blockHeight += 42.0
 		}
@@ -10099,8 +10110,9 @@ func draw(alpha float64) {
 		drawResultRow(1, "FASTEST BALL", fmt.Sprintf("%.0f", run.fastestSpeed), formatBestInt(levelPreviousBests.fastestSpeed, levelPreviousBests.speedFound), formatBestInt(levelCurrentBests.fastestSpeed, levelCurrentBests.speedFound), levelCompletionNewRecords.speed)
 		drawResultRow(2, "FASTEST SPIN", fmt.Sprintf("%.0f", run.fastestSpin), formatBestInt(levelPreviousBests.fastestSpin, levelPreviousBests.spinFound), formatBestInt(levelCurrentBests.fastestSpin, levelCurrentBests.spinFound), levelCompletionNewRecords.spin)
 		drawResultRow(3, "BEST CHAIN", strconv.Itoa(run.bestChain)+" bricks", wasChain, bestChain, levelCompletionNewRecords.chain)
+		drawResultRow(4, "BALLS LOST", strconv.Itoa(run.ballsLost), formatBestInt(levelPreviousBests.ballsLost, levelPreviousBests.ballsLostFound), formatBestInt(levelCurrentBests.ballsLost, levelCurrentBests.ballsLostFound), levelCompletionNewRecords.ballsLost)
 
-		lastRowY := rowY + 3*rowStep
+		lastRowY := rowY + 4*rowStep
 		nextY := lastRowY + 112.0
 		ctx.Set("textAlign", "center")
 		if assisted {
