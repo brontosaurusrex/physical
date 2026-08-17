@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Breakout Palette Builder v2</title>
+<style>
+:root{
+  --ui-bg:#0f141a;--ui-panel:#171e26;--ui-panel2:#202934;--ui-line:#334150;
+  --ui-text:#edf3f8;--ui-muted:#9eafbf;--ui-accent:#7dc4ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ui-bg);color:var(--ui-text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1280px;margin:auto;padding:20px}
+h1{font-size:1.65rem;margin:0 0 4px} h2{font-size:1rem;margin:0 0 12px}
+.sub{color:var(--ui-muted);margin-bottom:18px}
+.grid{display:grid;grid-template-columns:minmax(420px,1fr) minmax(420px,1fr);gap:16px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--ui-panel);border:1px solid var(--ui-line);border-radius:14px;padding:16px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+input[type=text],textarea,select{
+  width:100%;background:var(--ui-panel2);color:var(--ui-text);border:1px solid var(--ui-line);
+  border-radius:9px;padding:9px 10px;font:inherit
+}
+textarea{min-height:118px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+button{
+  background:var(--ui-panel2);color:var(--ui-text);border:1px solid var(--ui-line);
+  border-radius:9px;padding:9px 11px;cursor:pointer
+}
+button:hover{border-color:var(--ui-accent)}
+button.primary{border-color:#4c88b9}
+.small{font-size:.88rem;color:var(--ui-muted)}
+hr{border:0;border-top:1px solid var(--ui-line);margin:16px 0}
+.swatches{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}
+.swatch{
+  width:100px;border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;
+  background:var(--ui-panel2);cursor:grab;user-select:none
+}
+.swatch.dragging{opacity:.4}
+.swatch.selected{outline:2px solid var(--ui-accent);outline-offset:2px}
+.swatchColor{height:54px}
+.swatchLabel{padding:6px;text-align:center;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}
+.mapping{display:grid;grid-template-columns:150px 1fr;gap:8px 10px;align-items:center}
+.previewBox{border:1px solid var(--ui-line);border-radius:12px;overflow:hidden}
+svg{display:block;width:100%;height:auto}
+.clickable{cursor:pointer}
+.clickable:hover{filter:brightness(1.12)}
+.roleActive{stroke:#fff!important;stroke-width:5!important;stroke-dasharray:7 5}
+.status{margin-top:10px;padding:9px 10px;border-radius:9px;background:var(--ui-panel2);color:var(--ui-muted)}
+.warn{color:#ffd58d}.good{color:#9fe1af}
+.variantGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:600px){.variantGrid{grid-template-columns:1fr}}
+.variant{background:var(--ui-panel2);border:1px solid var(--ui-line);border-radius:9px;padding:9px}
+.variant pre{white-space:pre-wrap;margin:0;font-size:11px}
+.badge{display:inline-block;padding:3px 7px;border:1px solid var(--ui-line);border-radius:999px;margin:2px 4px 2px 0;color:var(--ui-muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Breakout Palette Builder v2</h1>
+  <div class="sub">ColorKit URLs, raw hex lists, sorting, drag/drop, preview assignment, contrast boosting, presets and config export.</div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Palette input</h2>
+      <textarea id="paletteInput" spellcheck="false" placeholder="Paste a ColorKit URL or a list of colors"></textarea>
+      <div class="small">
+        Examples:
+        <span class="badge">colorkit.co/palette/...</span>
+        <span class="badge">colorkit.co/color-palette-generator/...</span>
+        <span class="badge">b04a3b, c76838, 8e392e...</span>
+      </div>
+      <div class="row">
+        <button class="primary" id="loadBtn">Load</button>
+        <button id="darkBtn">Dark → light</button>
+        <button id="lightBtn">Light → dark</button>
+        <button id="shuffleBtn">Randomize order</button>
+      </div>
+      <div id="swatches" class="swatches"></div>
+      <div class="small" style="margin-top:9px">Drag swatches to reorder. Click a preview object, then click a swatch to assign that color.</div>
+
+      <hr>
+      <h2>Assignments</h2>
+      <div class="row">
+        <button id="defaultBtn">Map from order</button>
+        <button id="contrastBtn">Auto contrast</button>
+        <button id="boostContrastBtn">Boost contrast</button>
+        <button id="randomMapBtn">Random mapping</button>
+      </div>
+      <div id="mapping" class="mapping"></div>
+
+      <hr>
+      <h2>Preset</h2>
+      <div class="row">
+        <button id="exportPresetBtn">Export preset</button>
+        <button id="importPresetBtn">Import preset</button>
+      </div>
+      <textarea id="presetBox" spellcheck="false" placeholder="Preset JSON appears here, or paste one here to import."></textarea>
+    </section>
+
+    <section class="panel">
+      <h2>Game preview</h2>
+      <div class="previewBox">
+        <svg id="preview" viewBox="0 0 800 520" xmlns="http://www.w3.org/2000/svg">
+          <rect id="bg" class="clickable" data-role="background" x="0" y="0" width="800" height="520"/>
+
+          <text id="levelText" class="clickable" data-role="text" x="34" y="47" font-size="25" font-family="Arial,sans-serif" font-weight="700">LEVEL 12</text>
+          <text id="scoreText" class="clickable" data-role="text" x="603" y="47" font-size="22" font-family="Arial,sans-serif" font-weight="700">SCORE 4280</text>
+
+          <g class="clickable" data-role="brick">
+            <rect id="brickA" x="55" y="100" width="150" height="46" rx="8"/>
+            <rect id="brickB" x="220" y="100" width="150" height="46" rx="8"/>
+            <text id="brickLabel" x="145" y="174" font-size="18" font-family="Arial,sans-serif">NORMAL</text>
+          </g>
+
+          <g class="clickable" data-role="unbreakable">
+            <rect id="unbreakable" x="400" y="100" width="150" height="46" rx="8"/>
+            <path id="ubLine1" d="M414 113h50M414 125h82M414 137h33" fill="none" stroke-width="4" opacity=".35"/>
+            <text id="ubLabel" x="407" y="174" font-size="18" font-family="Arial,sans-serif">UNBREAKABLE</text>
+          </g>
+
+          <g class="clickable" data-role="magic">
+            <rect id="magic" x="590" y="100" width="150" height="46" rx="8"/>
+            <path id="spark1" d="M606 87v18M597 96h18M725 93v14M718 100h14" fill="none" stroke-width="3"/>
+            <text id="magicLabel" x="635" y="174" font-size="18" font-family="Arial,sans-serif">MAGIC</text>
+          </g>
+
+          <g class="clickable" data-role="ball">
+            <circle id="ball" cx="285" cy="285" r="18"/>
+            <path id="spin" d="M272 286c7-12 19-13 28-3" fill="none" stroke-width="4" stroke-linecap="round"/>
+          </g>
+
+          <g class="clickable" data-role="secondBall">
+            <circle id="ball2" cx="365" cy="325" r="18"/>
+            <path id="spin2" d="M352 326c7-12 19-13 28-3" fill="none" stroke-width="4" stroke-linecap="round"/>
+          </g>
+
+          <g class="clickable" data-role="paddle">
+            <rect id="paddle" x="275" y="438" width="250" height="24" rx="12"/>
+          </g>
+
+          <text id="helpText" x="34" y="500" font-size="16" font-family="Arial,sans-serif">click an object → click a swatch</text>
+        </svg>
+      </div>
+      <div id="selectedRole" class="status">Selected role: none</div>
+      <div id="contrastStatus" class="status"></div>
+
+      <hr>
+      <h2>Generated config</h2>
+      <textarea id="output" readonly spellcheck="false"></textarea>
+      <div class="row">
+        <button class="primary" id="copyBtn">Copy config</button>
+        <button id="variantsBtn">Make 4 variants</button>
+      </div>
+      <div id="variants" class="variantGrid"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  const STORAGE_KEY = "breakoutPaletteBuilderV2";
+  const roles = [
+    ["background","Background"],["text","Text"],["paddle","Paddle"],["brick","Brick"],
+    ["unbreakable","Unbreakable"],["magic","Magic"],["ball","Ball"],["secondBall","Second Ball"]
+  ];
+
+  let palette = [];
+  let mapping = {};
+  let selectedRole = null;
+  let dragIndex = null;
+
+  const $ = id => document.getElementById(id);
+  const input = $("paletteInput"), swatches = $("swatches"), mappingEl = $("mapping"),
+        output = $("output"), presetBox = $("presetBox"), variants = $("variants");
+
+  function normHex(s){
+    const m = String(s).trim().match(/^#?([0-9a-f]{6})$/i);
+    return m ? "#" + m[1].toUpperCase() : null;
+  }
+
+  function parseColors(text){
+    // Works with arbitrary URLs/paths plus comma/space/newline/semicolon/hyphen lists.
+    // Require six hex digits bounded by non-hex characters to avoid accidental partial matches.
+    const found = [];
+    const re = /(?:^|[^0-9a-f])#?([0-9a-f]{6})(?![0-9a-f])/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) found.push("#" + m[1].toUpperCase());
+
+    // Preserve order and remove duplicates.
+    return [...new Set(found)];
+  }
+
+  function rgb(hex){
+    const h=hex.slice(1);
+    return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255];
+  }
+  function lin(c){return c<=.04045?c/12.92:Math.pow((c+.055)/1.055,2.4)}
+  function lum(hex){
+    const [r,g,b]=rgb(hex).map(lin);
+    return .2126*r+.7152*g+.0722*b;
+  }
+  function contrast(a,b){
+    const x=lum(a),y=lum(b),hi=Math.max(x,y),lo=Math.min(x,y);
+    return (hi+.05)/(lo+.05);
+  }
+
+  function hexToRgb255(hex){
+    const h=hex.slice(1);
+    return [
+      parseInt(h.slice(0,2),16),
+      parseInt(h.slice(2,4),16),
+      parseInt(h.slice(4,6),16)
+    ];
+  }
+
+  function rgb255ToHex([r,g,b]){
+    const h=n=>Math.max(0,Math.min(255,Math.round(n))).toString(16).padStart(2,"0");
+    return ("#"+h(r)+h(g)+h(b)).toUpperCase();
+  }
+
+  // Mix an sRGB color toward white or black. Binary search is used below
+  // to find the smallest visible change that reaches the requested contrast.
+  function mixRgb(hex,target,t){
+    const a=hexToRgb255(hex);
+    const b=target==="#FFFFFF" ? [255,255,255] : [0,0,0];
+    return rgb255ToHex(a.map((v,i)=>v+(b[i]-v)*t));
+  }
+
+  function boostAgainstBackground(color,bg,targetRatio=3.05){
+    if(contrast(color,bg) >= targetRatio) return color;
+
+    const white="#FFFFFF", black="#000000";
+    const whiteCan=contrast(white,bg) >= targetRatio;
+    const blackCan=contrast(black,bg) >= targetRatio;
+
+    if(!whiteCan && !blackCan) return contrast(white,bg) > contrast(black,bg) ? white : black;
+
+    // Prefer the direction that changes the source color less.
+    const directions=[];
+    if(whiteCan) directions.push(white);
+    if(blackCan) directions.push(black);
+
+    let best=null;
+    for(const target of directions){
+      let lo=0,hi=1;
+      for(let i=0;i<22;i++){
+        const mid=(lo+hi)/2;
+        const candidate=mixRgb(color,target,mid);
+        if(contrast(candidate,bg) >= targetRatio) hi=mid;
+        else lo=mid;
+      }
+      const candidate=mixRgb(color,target,hi);
+      const change=hi;
+      if(!best || change<best.change) best={color:candidate,change};
+    }
+    return best.color;
+  }
+  function oklabL(hex){
+    const [r,g,b]=rgb(hex).map(lin);
+    const l=.4122214708*r+.5363325363*g+.0514459929*b;
+    const m=.2119034982*r+.6806995451*g+.1073969566*b;
+    const s=.0883024619*r+.2817188376*g+.6299787005*b;
+    const l_=Math.cbrt(l),m_=Math.cbrt(m),s_=Math.cbrt(s);
+    return .2104542553*l_+.793617785*m_-.0040720468*s_;
+  }
+
+  function shuffle(a){
+    const b=[...a];
+    for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]]}
+    return b;
+  }
+
+  function colorAt(i){ return palette[Math.max(0,Math.min(palette.length-1,i))] || "#FFFFFF"; }
+
+  function mapFromOrder(){
+    const n=palette.length;
+    if(!n)return;
+    mapping = {
+      background: colorAt(0),
+      unbreakable: colorAt(Math.min(1,n-1)),
+      brick: colorAt(Math.min(2,n-1)),
+      magic: colorAt(Math.max(0,n-2)),
+      text: colorAt(n-1),
+      paddle: colorAt(n-1),
+      ball: colorAt(n-1),
+      secondBall: colorAt(n-1)
+    };
+    update();
+  }
+
+  function autoContrast(){
+    if(!palette.length)return;
+    const sorted=[...palette].sort((a,b)=>oklabL(a)-oklabL(b));
+    const darkest=sorted[0], lightest=sorted[sorted.length-1];
+    const bgCandidates=[darkest,lightest];
+    let bestBg=darkest, bestMin=-1;
+
+    for(const bg of bgCandidates){
+      const contrasts=sorted.filter(c=>c!==bg).map(c=>contrast(c,bg));
+      const score=contrasts.length?Math.max(...contrasts):1;
+      if(score>bestMin){bestMin=score;bestBg=bg}
+    }
+
+    const byAgainstBg=[...sorted].sort((a,b)=>contrast(b,bestBg)-contrast(a,bestBg));
+    const hi=byAgainstBg[0] || bestBg;
+    const mid=byAgainstBg[Math.min(1,byAgainstBg.length-1)] || hi;
+    const mid2=byAgainstBg[Math.min(2,byAgainstBg.length-1)] || mid;
+
+    mapping={
+      background:bestBg,
+      text:hi,paddle:hi,ball:hi,secondBall:hi,
+      brick:mid2,unbreakable:mid,magic:hi
+    };
+    update();
+  }
+
+
+  function boostContrast(){
+    if(!palette.length)return;
+
+    // First choose the current background. If it is in the middle of the
+    // luminance range, moving it to the darkest/lightest palette endpoint
+    // usually requires less alteration to all of the foreground roles.
+    const sorted=[...palette].sort((a,b)=>oklabL(a)-oklabL(b));
+    const bgChoices=[mapping.background,sorted[0],sorted[sorted.length-1]].filter(Boolean);
+
+    let best=null;
+    for(const bg of [...new Set(bgChoices)]){
+      const candidate={...mapping,background:bg};
+      let totalChange=0;
+      let changed=0;
+
+      for(const [key] of roles){
+        if(key==="background")continue;
+        const before=candidate[key] || palette[0];
+        const after=boostAgainstBackground(before,bg,3.05);
+        candidate[key]=after;
+        if(after!==before){
+          changed++;
+          const [r1,g1,b1]=hexToRgb255(before);
+          const [r2,g2,b2]=hexToRgb255(after);
+          totalChange += Math.hypot(r2-r1,g2-g1,b2-b1);
+        }
+      }
+
+      const minRatio=Math.min(...roles
+        .filter(([k])=>k!=="background")
+        .map(([k])=>contrast(candidate[k],bg)));
+
+      const score=(minRatio>=3 ? 100000 : 0) - totalChange - changed*5;
+      if(!best || score>best.score) best={candidate,score};
+    }
+
+    mapping=best.candidate;
+
+    // Derived colors become ordinary palette entries, so dropdowns,
+    // dragging, presets and later manual edits continue to work.
+    for(const [key] of roles){
+      const c=mapping[key];
+      if(c && !palette.includes(c)) palette.push(c);
+    }
+
+    palette.sort((a,b)=>oklabL(a)-oklabL(b));
+    update();
+  }
+
+  function randomMapping(){
+    if(!palette.length)return;
+    const r=()=>palette[Math.floor(Math.random()*palette.length)];
+    for(const [k] of roles) mapping[k]=r();
+    update();
+  }
+
+  function validMapping(){
+    for(const [k] of roles){
+      if(!palette.includes(mapping[k])) mapping[k]=palette[0] || "#FFFFFF";
+    }
+  }
+
+  function renderSwatches(){
+    swatches.innerHTML="";
+    palette.forEach((c,i)=>{
+      const el=document.createElement("div");
+      el.className="swatch";
+      el.draggable=true;
+      el.dataset.index=i;
+      el.innerHTML=`<div class="swatchColor" style="background:${c}"></div><div class="swatchLabel">${i+1}: ${c}</div>`;
+      el.addEventListener("click",()=>{
+        if(selectedRole){
+          mapping[selectedRole]=c;
+          selectedRole=null;
+          update();
+        }
+      });
+      el.addEventListener("dragstart",e=>{dragIndex=i;el.classList.add("dragging");e.dataTransfer.effectAllowed="move"});
+      el.addEventListener("dragend",()=>{dragIndex=null;el.classList.remove("dragging")});
+      el.addEventListener("dragover",e=>e.preventDefault());
+      el.addEventListener("drop",e=>{
+        e.preventDefault();
+        const to=Number(el.dataset.index);
+        if(dragIndex===null||dragIndex===to)return;
+        const [moved]=palette.splice(dragIndex,1);
+        palette.splice(to,0,moved);
+        update();
+      });
+      swatches.appendChild(el);
+    });
+  }
+
+  function renderMapping(){
+    mappingEl.innerHTML="";
+    for(const [key,label] of roles){
+      const lab=document.createElement("div"); lab.textContent=label;
+      const sel=document.createElement("select");
+      palette.forEach(c=>{
+        const o=document.createElement("option");o.value=c;o.textContent=c;sel.appendChild(o);
+      });
+      sel.value=mapping[key] || palette[0] || "#FFFFFF";
+      sel.addEventListener("change",()=>{mapping[key]=sel.value;update()});
+      mappingEl.append(lab,sel);
+    }
+  }
+
+  function setFill(id,c){$(id).setAttribute("fill",c)}
+  function setStroke(id,c){$(id).setAttribute("stroke",c)}
+
+  function renderPreview(){
+    const m=mapping;
+    setFill("bg",m.background);
+    ["levelText","scoreText","brickLabel","ubLabel","magicLabel","helpText"].forEach(id=>setFill(id,m.text));
+
+    ["brickA","brickB"].forEach(id=>{setFill(id,m.brick);setStroke(id,m.brick)});
+    setFill("unbreakable",m.unbreakable);setStroke("unbreakable",m.unbreakable);setStroke("ubLine1",m.text);
+    setFill("magic",m.magic);setStroke("magic",m.magic);setStroke("spark1",m.magic);
+    setFill("ball",m.ball);setStroke("spin",m.ball);
+    setFill("ball2",m.secondBall);setStroke("spin2",m.secondBall);
+    setFill("paddle",m.paddle);
+
+    document.querySelectorAll("[data-role]").forEach(el=>el.classList.remove("roleActive"));
+    if(selectedRole){
+      document.querySelectorAll(`[data-role="${selectedRole}"]`).forEach(el=>{
+        const shape=el.tagName==="g" ? el.querySelector("rect,circle") : el;
+        if(shape) shape.classList.add("roleActive");
+      });
+    }
+    $("selectedRole").textContent = selectedRole ? `Selected role: ${roles.find(r=>r[0]===selectedRole)?.[1] || selectedRole} — now click a swatch` : "Selected role: none";
+  }
+
+  function config(m=mapping){
+    return [
+      `backgroundColor=${m.background}`,
+      `textColor=${m.text}`,
+      `paddleColor=${m.paddle}`,
+      `brickColor=${m.brick}`,
+      `brickStrokeColor=${m.brick}`,
+      `unbreakableColor=${m.unbreakable}`,
+      `unbreakableStrokeColor=${m.unbreakable}`,
+      `magicColor=${m.magic}`,
+      `magicStrokeColor=${m.magic}`,
+      `ballColor=${m.ball}`,
+      `spinColor=${m.ball}`,
+      `secondBallColor=${m.secondBall}`,
+      `secondBallSpinColor=${m.secondBall}`
+    ].join("\n");
+  }
+
+  function renderContrast(){
+    const bg=mapping.background;
+    const tests=[
+      ["text",mapping.text],["paddle",mapping.paddle],["ball",mapping.ball],
+      ["second ball",mapping.secondBall],["brick",mapping.brick],
+      ["unbreakable",mapping.unbreakable],["magic",mapping.magic]
+    ];
+    const lines=tests.map(([name,c])=>{
+      const r=contrast(c,bg), cls=r>=3?"good":"warn";
+      return `<span class="${cls}">${r>=3?"✓":"⚠"} ${name}: ${r.toFixed(2)}:1</span>`;
+    });
+    $("contrastStatus").innerHTML="Contrast vs background — "+lines.join(" &nbsp; ");
+  }
+
+  function save(){
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({input:input.value,palette,mapping}));
+  }
+  function update(){
+    validMapping();
+    renderSwatches();renderMapping();renderPreview();renderContrast();
+    output.value=config();
+    save();
+  }
+
+  function loadInput(){
+    const p=parseColors(input.value);
+    if(!p.length){alert("No 6-digit hex colors found.");return}
+    palette=p;
+    palette.sort((a,b)=>oklabL(a)-oklabL(b));
+    mapFromOrder();
+  }
+
+  function makeVariants(){
+    variants.innerHTML="";
+    for(let i=0;i<4;i++){
+      const m={};for(const [k] of roles)m[k]=palette[Math.floor(Math.random()*palette.length)];
+      const d=document.createElement("div");d.className="variant";
+      const b=document.createElement("button");b.textContent=`Use variant ${i+1}`;
+      const p=document.createElement("pre");p.textContent=config(m);
+      b.addEventListener("click",()=>{mapping=m;update()});
+      d.append(b,p);variants.appendChild(d);
+    }
+  }
+
+  document.querySelectorAll("[data-role]").forEach(el=>{
+    el.addEventListener("click",e=>{
+      e.stopPropagation();
+      selectedRole=el.dataset.role;
+      renderPreview();
+    });
+  });
+
+  $("loadBtn").onclick=loadInput;
+  $("darkBtn").onclick=()=>{palette.sort((a,b)=>oklabL(a)-oklabL(b));update()};
+  $("lightBtn").onclick=()=>{palette.sort((a,b)=>oklabL(b)-oklabL(a));update()};
+  $("shuffleBtn").onclick=()=>{palette=shuffle(palette);update()};
+  $("defaultBtn").onclick=mapFromOrder;
+  $("contrastBtn").onclick=autoContrast;
+  $("boostContrastBtn").onclick=boostContrast;
+  $("randomMapBtn").onclick=randomMapping;
+  $("variantsBtn").onclick=makeVariants;
+
+  $("copyBtn").onclick=async()=>{
+    try{
+      await navigator.clipboard.writeText(output.value);
+      const b=$("copyBtn"),old=b.textContent;b.textContent="Copied!";
+      setTimeout(()=>b.textContent=old,900);
+    }catch{output.select();document.execCommand("copy")}
+  };
+
+  $("exportPresetBtn").onclick=()=>{
+    presetBox.value=JSON.stringify({palette,mapping},null,2);
+  };
+  $("importPresetBtn").onclick=()=>{
+    try{
+      const p=JSON.parse(presetBox.value);
+      if(!Array.isArray(p.palette)||!p.palette.length)throw new Error();
+      const clean=p.palette.map(normHex).filter(Boolean);
+      if(!clean.length)throw new Error();
+      palette=[...new Set(clean)];
+      mapping=p.mapping||{};
+      update();
+    }catch{alert("Invalid preset JSON.")}
+  };
+
+  input.addEventListener("keydown",e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key==="Enter")loadInput();
+  });
+
+  try{
+    const s=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");
+    if(s?.palette?.length){
+      input.value=s.input||"";
+      palette=s.palette.map(normHex).filter(Boolean);
+      mapping=s.mapping||{};
+      update();
+    }else throw 0;
+  }catch{
+    input.value="https://colorkit.co/color-palette-generator/b04a3b-c76838-8e392e-e6d1b7-4a2921/";
+    palette=parseColors(input.value).sort((a,b)=>oklabL(a)-oklabL(b));
+    mapFromOrder();
+  }
+})();
+</script>
+</body>
+</html>
