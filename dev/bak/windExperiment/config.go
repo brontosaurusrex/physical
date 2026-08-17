@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260810-cornerphysics-08-metrics"
+	buildID = "20260816-wind-slipstream-11"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -102,6 +102,34 @@ const (
 	defaultAudioRoom         = "none"
 	defaultAudioRoomDry      = -1.0
 	defaultMobileControlMode = "vertical"
+
+	// Geometry-aware wind. This is level physics, not a power-up. 0 degrees points
+	// right; -90 points up; +90 points down. The current direction and air speed
+	// wander smoothly between random targets. Set variation to 180 for full-circle
+	// random direction. Level files may override every setting below.
+	defaultWindEnabled                   = false
+	defaultWindDirectionDegrees          = 0.0
+	defaultWindDirectionVariationDegrees = 180.0
+	defaultWindSpeedMin                  = 70.0
+	defaultWindSpeedMax                  = 260.0
+	defaultWindChangeSecondsMin          = 5.0
+	defaultWindChangeSecondsMax          = 14.0
+	defaultWindResponseSeconds           = 2.2
+	defaultWindBallCoupling              = 0.25
+	defaultWindMaxAcceleration           = 220.0
+	defaultWindWakeStrength              = 0.75
+	// Fast coherent shear bands peel off leeward edges around the slower rotor wake.
+	// Strength 0 disables them; length/width are measured in canvas pixels.
+	defaultWindSlipstreamStrength      = 0.65
+	defaultWindSlipstreamLength        = 320.0
+	defaultWindSlipstreamWidth         = 55.0
+	defaultWindLiftStrength            = 0.70
+	defaultWindTurbulence              = 0.40
+	defaultWindRecalcInterval          = 0.35
+	defaultWindFieldBlendSeconds       = 0.55
+	defaultWindGridColumns             = 60
+	defaultWindGridRows                = 30
+	defaultWindMaxLocalSpeedMultiplier = 1.80
 
 	// Dynamic brick debris. Fragments use bounded lightweight rigid-body physics
 	// at the normal fixed-step rate. The active-piece cap prevents mass-destruction

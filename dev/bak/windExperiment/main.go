@@ -339,6 +339,30 @@ var (
 	currentAudioRoom    = defaultAudioRoom
 	currentAudioRoomDry = defaultAudioRoomDry
 
+	// Geometry-aware wind is level behavior, not a power-up. Level files may
+	// override these defaults; W can temporarily cycle OFF -> ON -> PATHS -> OFF.
+	windConfiguredEnabled       = defaultWindEnabled
+	windDirectionDegrees        = defaultWindDirectionDegrees
+	windDirectionVariation      = defaultWindDirectionVariationDegrees
+	windSpeedMin                = defaultWindSpeedMin
+	windSpeedMax                = defaultWindSpeedMax
+	windChangeSecondsMin        = defaultWindChangeSecondsMin
+	windChangeSecondsMax        = defaultWindChangeSecondsMax
+	windResponseSeconds         = defaultWindResponseSeconds
+	windBallCoupling            = defaultWindBallCoupling
+	windMaxAcceleration         = defaultWindMaxAcceleration
+	windWakeStrength            = defaultWindWakeStrength
+	windSlipstreamStrength      = defaultWindSlipstreamStrength
+	windSlipstreamLength        = defaultWindSlipstreamLength
+	windSlipstreamWidth         = defaultWindSlipstreamWidth
+	windLiftStrength            = defaultWindLiftStrength
+	windTurbulence              = defaultWindTurbulence
+	windRecalcInterval          = defaultWindRecalcInterval
+	windFieldBlendSeconds       = defaultWindFieldBlendSeconds
+	windGridColumns             = defaultWindGridColumns
+	windGridRows                = defaultWindGridRows
+	windMaxLocalSpeedMultiplier = defaultWindMaxLocalSpeedMultiplier
+
 	// Persistent master gate for dynamic debris. The per-level debrisEnabled value
 	// still controls each level, but the master switch may disable debris globally.
 	debrisMasterEnabled = true
@@ -464,6 +488,15 @@ const (
 	POWER_ZAPPER
 	POWER_BREAK_UNBREAKABLE
 	POWER_BIG_PADDLE
+)
+
+// W cycles the geometry-aware wind system through these runtime modes.
+// The configured per-level/default state chooses whether a level starts at OFF or ON;
+// PATHS changes only visualization, not physics.
+const (
+	windModeOff = iota
+	windModeOn
+	windModePaths
 )
 
 // ---- Ball struct ----
@@ -790,6 +823,33 @@ var (
 	autoPaddleNeedsNewHitOffset = true
 	autoPaddleRNG               = rand.New(rand.NewSource(0x60a17f3d))
 
+	// Wind runtime. The current and target fields are blended at sample time, so
+	// geometry changes reorganize smoothly without touching all cells at 240 Hz.
+	windMode              int
+	windFieldFrom         []windCell
+	windFieldTo           []windCell
+	windFieldBlend        float64
+	windFieldDirty        bool
+	windFieldCellWidth    float64
+	windFieldCellHeight   float64
+	windCurrentDirection  float64
+	windTargetDirection   float64
+	windCurrentSpeed      float64
+	windTargetSpeed       float64
+	windTargetChangeTimer float64
+	windRecalcTimer       float64
+	windSimulationTime    float64
+	windRNG               = rand.New(rand.NewSource(0x71ad4f2b))
+	windRebuildCount      int
+	windLastRebuildMS     float64
+	windAverageRebuildMS  float64
+	windPerfOffLoad       float64
+	windPerfOffHz         float64
+	windPerfOffFound      bool
+	windPerfOnLoad        float64
+	windPerfOnHz          float64
+	windPerfOnFound       bool
+
 	physicsAccumulator       float64
 	physicsStepRateCurrent   float64
 	physicsRealtimePercent   float64
@@ -888,6 +948,13 @@ type brick struct {
 	alive       bool
 	unbreakable bool
 	magic       bool
+}
+
+// windCell stores the local air velocity for one coarse flow-field sample.
+// Bricks are rasterized as solid cells when the target field is rebuilt.
+type windCell struct {
+	vx, vy  float64
+	blocked bool
 }
 
 // debrisFragment is a lightweight rigid shard. Rendering uses an irregular,
@@ -2201,6 +2268,7 @@ func destroyBrick(br *brick, impactSpeed float64) bool {
 		remainingBreakableBricks = 0
 	}
 	bricksDirty = true
+	windFieldDirty = true
 	maybePlayLastBrickSound()
 	return true
 }
@@ -2219,6 +2287,7 @@ func destroyAnyBrick(br *brick, impactSpeed float64) bool {
 		}
 	}
 	bricksDirty = true
+	windFieldDirty = true
 	maybePlayLastBrickSound()
 	return true
 }
@@ -3372,6 +3441,27 @@ func resetGlobals() {
 	enableBigPaddle = defaultEnableBigPaddle
 	currentAudioRoom = defaultAudioRoom
 	currentAudioRoomDry = defaultAudioRoomDry
+	windConfiguredEnabled = defaultWindEnabled
+	windDirectionDegrees = defaultWindDirectionDegrees
+	windDirectionVariation = defaultWindDirectionVariationDegrees
+	windSpeedMin = defaultWindSpeedMin
+	windSpeedMax = defaultWindSpeedMax
+	windChangeSecondsMin = defaultWindChangeSecondsMin
+	windChangeSecondsMax = defaultWindChangeSecondsMax
+	windResponseSeconds = defaultWindResponseSeconds
+	windBallCoupling = defaultWindBallCoupling
+	windMaxAcceleration = defaultWindMaxAcceleration
+	windWakeStrength = defaultWindWakeStrength
+	windSlipstreamStrength = defaultWindSlipstreamStrength
+	windSlipstreamLength = defaultWindSlipstreamLength
+	windSlipstreamWidth = defaultWindSlipstreamWidth
+	windLiftStrength = defaultWindLiftStrength
+	windTurbulence = defaultWindTurbulence
+	windRecalcInterval = defaultWindRecalcInterval
+	windFieldBlendSeconds = defaultWindFieldBlendSeconds
+	windGridColumns = defaultWindGridColumns
+	windGridRows = defaultWindGridRows
+	windMaxLocalSpeedMultiplier = defaultWindMaxLocalSpeedMultiplier
 	debrisEnabled = defaultDebrisEnabled
 	debrisShapeMode = defaultDebrisShapeMode
 	debrisPiecesMin = defaultDebrisPiecesMin
@@ -3490,6 +3580,126 @@ func applyConfig(config map[string]string) {
 				currentAudioRoomDry = f
 			} else {
 				log("audioRoomDry must be between 0 and 1")
+			}
+		case "wind", "windEnabled":
+			if b, err := strconv.ParseBool(val); err == nil {
+				windConfiguredEnabled = b
+			} else {
+				log(key + " must be true or false")
+			}
+		case "windDirection", "windDirectionDegrees":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				windDirectionDegrees = f
+			} else {
+				log(key + " must be a number")
+			}
+		case "windDirectionVariation", "windDirectionVariationDegrees":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 180 {
+				windDirectionVariation = f
+			} else {
+				log(key + " must be from 0 to 180 degrees")
+			}
+		case "windSpeedMin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				windSpeedMin = f
+			} else {
+				log("windSpeedMin must be zero or greater")
+			}
+		case "windSpeedMax":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				windSpeedMax = f
+			} else {
+				log("windSpeedMax must be zero or greater")
+			}
+		case "windChangeSecondsMin":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				windChangeSecondsMin = f
+			} else {
+				log("windChangeSecondsMin must be greater than zero")
+			}
+		case "windChangeSecondsMax":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				windChangeSecondsMax = f
+			} else {
+				log("windChangeSecondsMax must be greater than zero")
+			}
+		case "windResponseSeconds":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				windResponseSeconds = f
+			} else {
+				log("windResponseSeconds must be greater than zero")
+			}
+		case "windBallCoupling":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				windBallCoupling = f
+			} else {
+				log("windBallCoupling must be zero or greater")
+			}
+		case "windMaxAcceleration":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 {
+				windMaxAcceleration = f
+			} else {
+				log("windMaxAcceleration must be zero or greater")
+			}
+		case "windWakeStrength":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 2 {
+				windWakeStrength = f
+			} else {
+				log("windWakeStrength must be from 0 to 2")
+			}
+		case "windSlipstreamStrength":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 2 {
+				windSlipstreamStrength = f
+			} else {
+				log("windSlipstreamStrength must be from 0 to 2")
+			}
+		case "windSlipstreamLength":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 2000 {
+				windSlipstreamLength = f
+			} else {
+				log("windSlipstreamLength must be from 0 to 2000 pixels")
+			}
+		case "windSlipstreamWidth":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 500 {
+				windSlipstreamWidth = f
+			} else {
+				log("windSlipstreamWidth must be from 0 to 500 pixels")
+			}
+		case "windLiftStrength":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 2 {
+				windLiftStrength = f
+			} else {
+				log("windLiftStrength must be from 0 to 2")
+			}
+		case "windTurbulence":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 2 {
+				windTurbulence = f
+			} else {
+				log("windTurbulence must be from 0 to 2")
+			}
+		case "windRecalcInterval":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0.05 && f <= 5 {
+				windRecalcInterval = f
+			} else {
+				log("windRecalcInterval must be from 0.05 to 5 seconds")
+			}
+		case "windFieldBlendSeconds":
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 5 {
+				windFieldBlendSeconds = f
+			} else {
+				log("windFieldBlendSeconds must be from 0 to 5 seconds")
+			}
+		case "windGridColumns":
+			if i, err := strconv.Atoi(val); err == nil && i >= 12 && i <= 120 {
+				windGridColumns = i
+			} else {
+				log("windGridColumns must be from 12 to 120")
+			}
+		case "windGridRows":
+			if i, err := strconv.Atoi(val); err == nil && i >= 8 && i <= 80 {
+				windGridRows = i
+			} else {
+				log("windGridRows must be from 8 to 80")
 			}
 		case "backgroundColor":
 			palette[0] = val
@@ -3999,6 +4209,532 @@ func applyConfig(config map[string]string) {
 	}
 	normalizeDebrisSettings()
 	normalizeBallRescueSettings()
+	normalizeWindSettings()
+}
+
+// ---- Geometry-aware wind ----
+
+func normalizeWindSettings() {
+	if windSpeedMin > windSpeedMax {
+		windSpeedMin, windSpeedMax = windSpeedMax, windSpeedMin
+	}
+	if windChangeSecondsMin > windChangeSecondsMax {
+		windChangeSecondsMin, windChangeSecondsMax = windChangeSecondsMax, windChangeSecondsMin
+	}
+	windDirectionVariation = clampFloat(windDirectionVariation, 0, 180)
+	windSpeedMin = math.Max(0, windSpeedMin)
+	windSpeedMax = math.Max(windSpeedMin, windSpeedMax)
+	windChangeSecondsMin = math.Max(0.05, windChangeSecondsMin)
+	windChangeSecondsMax = math.Max(windChangeSecondsMin, windChangeSecondsMax)
+	windResponseSeconds = math.Max(0.05, windResponseSeconds)
+	windBallCoupling = math.Max(0, windBallCoupling)
+	windMaxAcceleration = math.Max(0, windMaxAcceleration)
+	windWakeStrength = clampFloat(windWakeStrength, 0, 2)
+	windSlipstreamStrength = clampFloat(windSlipstreamStrength, 0, 2)
+	windSlipstreamLength = clampFloat(windSlipstreamLength, 0, 2000)
+	windSlipstreamWidth = clampFloat(windSlipstreamWidth, 0, 500)
+	windLiftStrength = clampFloat(windLiftStrength, 0, 2)
+	windTurbulence = clampFloat(windTurbulence, 0, 2)
+	windRecalcInterval = clampFloat(windRecalcInterval, 0.05, 5)
+	windFieldBlendSeconds = clampFloat(windFieldBlendSeconds, 0, 5)
+	windGridColumns = max(12, min(120, windGridColumns))
+	windGridRows = max(8, min(80, windGridRows))
+	windMaxLocalSpeedMultiplier = math.Max(1, windMaxLocalSpeedMultiplier)
+}
+
+func normalizeWindAngle(degrees float64) float64 {
+	degrees = math.Mod(degrees, 360)
+	if degrees <= -180 {
+		degrees += 360
+	}
+	if degrees > 180 {
+		degrees -= 360
+	}
+	return degrees
+}
+
+func shortestWindAngleDelta(from, to float64) float64 {
+	return normalizeWindAngle(to - from)
+}
+
+func windRandomBetween(minimum, maximum float64) float64 {
+	if maximum <= minimum {
+		return minimum
+	}
+	return minimum + windRNG.Float64()*(maximum-minimum)
+}
+
+func chooseNextWindTarget(initial bool) {
+	windTargetDirection = normalizeWindAngle(
+		windDirectionDegrees + windRandomBetween(-windDirectionVariation, windDirectionVariation),
+	)
+	windTargetSpeed = windRandomBetween(windSpeedMin, windSpeedMax)
+	windTargetChangeTimer = windRandomBetween(windChangeSecondsMin, windChangeSecondsMax)
+	if initial {
+		windCurrentDirection = windTargetDirection
+		windCurrentSpeed = windTargetSpeed
+	}
+}
+
+func resetWindPerformanceComparison() {
+	windPerfOffLoad = 0
+	windPerfOffHz = 0
+	windPerfOffFound = false
+	windPerfOnLoad = 0
+	windPerfOnHz = 0
+	windPerfOnFound = false
+}
+
+func initializeWindForLevel(levelIndex int) {
+	normalizeWindSettings()
+	windRNG.Seed(int64(levelIndex+1)*0x71ad4f2b + 29)
+	windMode = windModeOff
+	if windConfiguredEnabled {
+		windMode = windModeOn
+	}
+	windSimulationTime = 0
+	windTargetChangeTimer = 0
+	windRecalcTimer = 0
+	windFieldBlend = 1
+	windFieldDirty = true
+	windFieldFrom = nil
+	windFieldTo = nil
+	windRebuildCount = 0
+	windLastRebuildMS = 0
+	windAverageRebuildMS = 0
+	resetWindPerformanceComparison()
+	chooseNextWindTarget(true)
+	if windMode != windModeOff {
+		rebuildWindField()
+	}
+}
+
+func windPhysicsActive() bool {
+	return windMode != windModeOff && windBallCoupling > 0 && windMaxAcceleration > 0
+}
+
+func materializeWindFieldBlend() {
+	if len(windFieldFrom) == 0 || len(windFieldFrom) != len(windFieldTo) {
+		return
+	}
+	t := clampFloat(windFieldBlend, 0, 1)
+	if t >= 1 {
+		copy(windFieldFrom, windFieldTo)
+		return
+	}
+	for i := range windFieldFrom {
+		windFieldFrom[i].vx += (windFieldTo[i].vx - windFieldFrom[i].vx) * t
+		windFieldFrom[i].vy += (windFieldTo[i].vy - windFieldFrom[i].vy) * t
+		windFieldFrom[i].blocked = windFieldTo[i].blocked
+	}
+}
+
+func buildWindFieldTarget() []windCell {
+	cols := max(1, windGridColumns)
+	rows := max(1, windGridRows)
+	cells := make([]windCell, cols*rows)
+	windFieldCellWidth = canvasWidth / float64(cols)
+	windFieldCellHeight = canvasHeight / float64(rows)
+
+	directionRadians := windCurrentDirection * math.Pi / 180
+	ux := math.Cos(directionRadians)
+	uy := math.Sin(directionRadians)
+	px := -uy
+	py := ux
+	baseSpeed := math.Max(0, windCurrentSpeed)
+	baseVx := ux * baseSpeed
+	baseVy := uy * baseSpeed
+	cellScale := math.Max(windFieldCellWidth, windFieldCellHeight)
+
+	for row := 0; row < rows; row++ {
+		y := (float64(row) + 0.5) * windFieldCellHeight
+		for col := 0; col < cols; col++ {
+			x := (float64(col) + 0.5) * windFieldCellWidth
+			index := row*cols + col
+			blocked := false
+			for i := range bricks {
+				br := &bricks[i]
+				if br.alive && x >= br.x && x <= br.x+br.w && y >= br.y && y <= br.y+br.h {
+					blocked = true
+					break
+				}
+			}
+			if blocked {
+				cells[index].blocked = true
+				continue
+			}
+
+			vx := baseVx
+			vy := baseVy
+			compression := 0.0
+			wakeAmount := 0.0
+			slipstreamAmount := 0.0
+
+			for i := range bricks {
+				br := &bricks[i]
+				if !br.alive {
+					continue
+				}
+				centerX := br.x + br.w/2
+				centerY := br.y + br.h/2
+				rx := x - centerX
+				ry := y - centerY
+
+				// Near a solid surface, cancel the component trying to enter the brick
+				// and add a side deflection. This makes the coarse field wrap around
+				// arbitrary level silhouettes rather than passing through them.
+				nearestX := clampFloat(x, br.x, br.x+br.w)
+				nearestY := clampFloat(y, br.y, br.y+br.h)
+				dx := x - nearestX
+				dy := y - nearestY
+				distance := math.Hypot(dx, dy)
+				influence := cellScale*2.2 + math.Max(br.w, br.h)*0.35
+				if distance > 0 && distance < influence {
+					nx := dx / distance
+					ny := dy / distance
+					proximity := 1 - distance/influence
+					proximity *= proximity
+					inward := vx*nx + vy*ny
+					if inward < 0 {
+						vx += nx * (-inward) * proximity * 1.25
+						vy += ny * (-inward) * proximity * 1.25
+					}
+					side := 1.0
+					if ux*ry-uy*rx < 0 {
+						side = -1
+					}
+					tangentX := -ny * side
+					tangentY := nx * side
+					vx += tangentX * baseSpeed * proximity * 0.32
+					vy += tangentY * baseSpeed * proximity * 0.32
+					compression += proximity * 0.18
+
+					// Terrain-style uplift: a mostly horizontal stream meeting a windward
+					// face gets a modest screen-up component before it crests the shape.
+					projectedAlong := rx*ux + ry*uy
+					halfAlong := math.Abs(ux)*br.w/2 + math.Abs(uy)*br.h/2
+					if projectedAlong < -halfAlong && math.Abs(ux) > 0.25 {
+						vy -= baseSpeed * windLiftStrength * proximity * math.Abs(ux) * 0.22
+					}
+				}
+
+				// Downwind wake: slow the air behind each brick mass and layer in a
+				// deterministic alternating cross-flow to make rotor-like turbulence.
+				along := rx*ux + ry*uy
+				cross := rx*px + ry*py
+				halfAlong := math.Abs(ux)*br.w/2 + math.Abs(uy)*br.h/2
+				halfCross := math.Abs(px)*br.w/2 + math.Abs(py)*br.h/2
+				downwind := along - halfAlong
+				wakeLength := math.Max(140, math.Max(br.w, br.h)*3.0+cellScale*2.0)
+				if downwind > 0 && downwind < wakeLength {
+					lateralWidth := halfCross + cellScale*1.4 + downwind*0.20
+					if lateralWidth > 0 && math.Abs(cross) < lateralWidth {
+						longitudinal := 1 - downwind/wakeLength
+						lateral := 1 - math.Abs(cross)/lateralWidth
+						wake := longitudinal * lateral * lateral
+						if wake > wakeAmount {
+							wakeAmount = wake
+						}
+						phase := float64((br.row+1)*31+(br.col+1)*17)*0.43 + downwind*0.035 + windSimulationTime*0.9
+						rotor := math.Sin(phase) * baseSpeed * windTurbulence * wake * 0.32
+						vx += px * rotor
+						vy += py * rotor
+					}
+				}
+
+				// Slipstream/shear layer: the wake core remains slow and rotational, while
+				// two narrow coherent bands peel off the leeward edges and retain/boost
+				// downwind speed. Broken silhouettes therefore move these fast ribbons too.
+				if windSlipstreamStrength > 0 && windSlipstreamLength > 0 && windSlipstreamWidth > 0 &&
+					downwind > 0 && downwind < windSlipstreamLength {
+					absCross := math.Abs(cross)
+					bandCenter := halfCross + cellScale*0.60 + downwind*0.08
+					bandHalfWidth := math.Max(cellScale*0.35, windSlipstreamWidth*0.5)
+					distanceFromBand := math.Abs(absCross - bandCenter)
+					if distanceFromBand < bandHalfWidth {
+						longitudinal := 1 - downwind/windSlipstreamLength
+						lateral := 1 - distanceFromBand/bandHalfWidth
+						slip := longitudinal * lateral * lateral
+						if slip > slipstreamAmount {
+							slipstreamAmount = slip
+						}
+					}
+				}
+			}
+
+			if compression > 0 {
+				scale := 1 + math.Min(0.55, compression)
+				vx *= scale
+				vy *= scale
+			}
+			if wakeAmount > 0 {
+				// The coherent slipstream lives at the wake boundary, so it locally protects
+				// the fast band from the central wake slowdown.
+				effectiveWake := wakeAmount * (1 - clampFloat(slipstreamAmount*0.85, 0, 0.85))
+				scale := 1 - clampFloat(windWakeStrength*effectiveWake*0.72, 0, 0.88)
+				vx *= scale
+				vy *= scale
+			}
+			if slipstreamAmount > 0 {
+				boost := baseSpeed * windSlipstreamStrength * slipstreamAmount
+				vx += ux * boost
+				vy += uy * boost
+			}
+
+			// A faint coherent ripple keeps open air from being perfectly laminar.
+			// It is deterministic for a given level and simulation time.
+			ripple := math.Sin(x*0.011+y*0.017+windSimulationTime*0.55) * baseSpeed * windTurbulence * 0.035
+			vx += px * ripple
+			vy += py * ripple
+
+			maximumLocalSpeed := baseSpeed * windMaxLocalSpeedMultiplier
+			if maximumLocalSpeed > 0 {
+				localSpeed := math.Hypot(vx, vy)
+				if localSpeed > maximumLocalSpeed {
+					scale := maximumLocalSpeed / localSpeed
+					vx *= scale
+					vy *= scale
+				}
+			}
+			cells[index] = windCell{vx: vx, vy: vy}
+		}
+	}
+	return cells
+}
+
+func rebuildWindField() {
+	if windGridColumns <= 0 || windGridRows <= 0 {
+		return
+	}
+	performance := js.Global().Get("performance")
+	startMS := 0.0
+	if !performance.IsUndefined() && !performance.IsNull() {
+		startMS = performance.Call("now").Float()
+	}
+
+	if len(windFieldFrom) == len(windFieldTo) && len(windFieldFrom) > 0 {
+		materializeWindFieldBlend()
+	} else {
+		windFieldFrom = nil
+	}
+	target := buildWindFieldTarget()
+	if len(windFieldFrom) != len(target) || windFieldBlendSeconds <= 0 {
+		windFieldFrom = append([]windCell(nil), target...)
+		windFieldBlend = 1
+	} else {
+		windFieldBlend = 0
+	}
+	windFieldTo = target
+	windFieldDirty = false
+	windRebuildCount++
+
+	if startMS > 0 {
+		elapsed := performance.Call("now").Float() - startMS
+		windLastRebuildMS = math.Max(0, elapsed)
+		if windRebuildCount == 1 {
+			windAverageRebuildMS = windLastRebuildMS
+		} else {
+			windAverageRebuildMS = windAverageRebuildMS*0.90 + windLastRebuildMS*0.10
+		}
+	}
+}
+
+func updateWindSystem(dt float64) {
+	if windMode == windModeOff || dt <= 0 {
+		return
+	}
+	windSimulationTime += dt
+	windTargetChangeTimer -= dt
+	if windTargetChangeTimer <= 0 {
+		chooseNextWindTarget(false)
+	}
+
+	response := math.Max(0.05, windResponseSeconds)
+	blend := 1 - math.Exp(-dt/response)
+	windCurrentDirection = normalizeWindAngle(
+		windCurrentDirection + shortestWindAngleDelta(windCurrentDirection, windTargetDirection)*blend,
+	)
+	windCurrentSpeed += (windTargetSpeed - windCurrentSpeed) * blend
+
+	if windFieldBlendSeconds <= 0 {
+		windFieldBlend = 1
+	} else {
+		windFieldBlend = clampFloat(windFieldBlend+dt/windFieldBlendSeconds, 0, 1)
+	}
+
+	windRecalcTimer -= dt
+	if windRecalcTimer <= 0 {
+		rebuildWindField()
+		windRecalcTimer = windRecalcInterval
+	}
+}
+
+func windCellVelocity(index int) (float64, float64) {
+	if index < 0 || index >= len(windFieldTo) {
+		return 0, 0
+	}
+	if len(windFieldFrom) != len(windFieldTo) {
+		return windFieldTo[index].vx, windFieldTo[index].vy
+	}
+	t := clampFloat(windFieldBlend, 0, 1)
+	return windFieldFrom[index].vx + (windFieldTo[index].vx-windFieldFrom[index].vx)*t,
+		windFieldFrom[index].vy + (windFieldTo[index].vy-windFieldFrom[index].vy)*t
+}
+
+func sampleWindField(x, y float64) (float64, float64) {
+	if windMode == windModeOff || len(windFieldTo) == 0 || windGridColumns <= 0 || windGridRows <= 0 ||
+		windFieldCellWidth <= 0 || windFieldCellHeight <= 0 {
+		return 0, 0
+	}
+
+	gx := x/windFieldCellWidth - 0.5
+	gy := y/windFieldCellHeight - 0.5
+	x0 := int(math.Floor(gx))
+	y0 := int(math.Floor(gy))
+	fx := gx - float64(x0)
+	fy := gy - float64(y0)
+	if x0 < 0 {
+		x0, fx = 0, 0
+	}
+	if y0 < 0 {
+		y0, fy = 0, 0
+	}
+	if x0 >= windGridColumns-1 {
+		x0, fx = windGridColumns-1, 0
+	}
+	if y0 >= windGridRows-1 {
+		y0, fy = windGridRows-1, 0
+	}
+	x1 := min(windGridColumns-1, x0+1)
+	y1 := min(windGridRows-1, y0+1)
+
+	v00x, v00y := windCellVelocity(y0*windGridColumns + x0)
+	v10x, v10y := windCellVelocity(y0*windGridColumns + x1)
+	v01x, v01y := windCellVelocity(y1*windGridColumns + x0)
+	v11x, v11y := windCellVelocity(y1*windGridColumns + x1)
+	topX := v00x + (v10x-v00x)*fx
+	topY := v00y + (v10y-v00y)*fx
+	bottomX := v01x + (v11x-v01x)*fx
+	bottomY := v01y + (v11y-v01y)*fx
+	return topX + (bottomX-topX)*fy, topY + (bottomY-topY)*fy
+}
+
+func windBallAcceleration(b *Ball) (wx, wy, ax, ay float64) {
+	if b == nil || !windPhysicsActive() {
+		return 0, 0, 0, 0
+	}
+	wx, wy = sampleWindField(b.x, b.y)
+	ax = (wx - b.vx) * windBallCoupling
+	ay = (wy - b.vy) * windBallCoupling
+	acceleration := math.Hypot(ax, ay)
+	if windMaxAcceleration > 0 && acceleration > windMaxAcceleration {
+		scale := windMaxAcceleration / acceleration
+		ax *= scale
+		ay *= scale
+	}
+	return wx, wy, ax, ay
+}
+
+func applyWindToBall(b *Ball, dt float64) {
+	if b == nil || !windPhysicsActive() || dt <= 0 {
+		return
+	}
+	_, _, ax, ay := windBallAcceleration(b)
+	b.vx += ax * dt
+	b.vy += ay * dt
+}
+
+func windBallEffectText() string {
+	if !windPhysicsActive() {
+		return "--"
+	}
+	wx, wy, ax, ay := windBallAcceleration(&ball)
+	airSpeed := math.Hypot(wx, wy)
+	acceleration := math.Hypot(ax, ay)
+	perTick := acceleration * physicsStepSeconds
+	return fmt.Sprintf("%.0f px/s air / %.0f px/s^2 / %.2f px/s tick", airSpeed, acceleration, perTick)
+}
+
+func windModeName() string {
+	switch windMode {
+	case windModeOn:
+		return "ON"
+	case windModePaths:
+		return "PATHS"
+	default:
+		return "OFF"
+	}
+}
+
+func cycleWindMode() {
+	oldPhysicsEnabled := windMode != windModeOff
+	switch windMode {
+	case windModeOff:
+		windMode = windModeOn
+		windFieldDirty = true
+		windRecalcTimer = 0
+		if windTargetChangeTimer <= 0 {
+			chooseNextWindTarget(true)
+		}
+		rebuildWindField()
+		windRecalcTimer = windRecalcInterval
+		showStatus("Wind on", 1.5)
+	case windModeOn:
+		windMode = windModePaths
+		showStatus("Wind paths", 1.5)
+	default:
+		windMode = windModeOff
+		showStatus("Wind off", 1.5)
+	}
+	newPhysicsEnabled := windMode != windModeOff
+	if oldPhysicsEnabled != newPhysicsEnabled && newPhysicsEnabled != windConfiguredEnabled {
+		markLevelRunAssisted()
+	} else if oldPhysicsEnabled != newPhysicsEnabled && oldPhysicsEnabled == windConfiguredEnabled {
+		// Leaving the configured physics state also invalidates the current record run.
+		markLevelRunAssisted()
+	}
+}
+
+func recordWindPerformanceSample() {
+	if gameOver || paused || waitingForStart || levelAdvancePending {
+		return
+	}
+	const smoothing = 0.25
+	if windMode == windModeOff {
+		if !windPerfOffFound {
+			windPerfOffLoad = physicsComputeLoad
+			windPerfOffHz = physicsStepRateCurrent
+			windPerfOffFound = true
+		} else {
+			windPerfOffLoad += (physicsComputeLoad - windPerfOffLoad) * smoothing
+			windPerfOffHz += (physicsStepRateCurrent - windPerfOffHz) * smoothing
+		}
+	} else {
+		if !windPerfOnFound {
+			windPerfOnLoad = physicsComputeLoad
+			windPerfOnHz = physicsStepRateCurrent
+			windPerfOnFound = true
+		} else {
+			windPerfOnLoad += (physicsComputeLoad - windPerfOnLoad) * smoothing
+			windPerfOnHz += (physicsStepRateCurrent - windPerfOnHz) * smoothing
+		}
+	}
+}
+
+func formatWindPerf(load float64, hz float64, found bool) string {
+	if !found {
+		return "--"
+	}
+	return fmt.Sprintf("%.1f%% / %.1f Hz", load, hz)
+}
+
+func windPerformanceDeltaText() string {
+	if !windPerfOffFound || !windPerfOnFound {
+		return "-- (cycle W to sample ON and OFF)"
+	}
+	loadDelta := windPerfOnLoad - windPerfOffLoad
+	hzLoss := windPerfOffHz - windPerfOnHz
+	return fmt.Sprintf("%+.1f pp compute / %+.1f Hz loss", loadDelta, hzLoss)
 }
 
 // ---- Physics ----
@@ -5094,6 +5830,7 @@ func startLevel(index int) {
 	blackHoleRNG.Seed(int64(index+1)*0x63b10c7 + 11)
 	resetAutoPaddleHitPlan()
 	buildBricksFromLevel(levels[index], index)
+	initializeWindForLevel(index)
 	currentLevelIndex = index
 	if autoPaddleEnabled {
 		waitingForStart = false
@@ -5955,6 +6692,7 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	}
 
 	b.vy += currentGravity * dt
+	applyWindToBall(b, dt)
 	applyBrickMagnetism(b, dt)
 
 	if blackHoleActive {
@@ -7908,6 +8646,10 @@ func update(dt float64) {
 		refreshCurrentGravity()
 	}
 
+	// Wind changes only during active simulation time, so pause/READY/results freeze
+	// both gust evolution and geometry-field transitions just like power-up timers.
+	updateWindSystem(dt)
+
 	updateZapper(dt)
 
 	for i := len(statusMessages) - 1; i >= 0; i-- {
@@ -8315,6 +9057,46 @@ func configState(key string) (effective, defaultValue, kind string, ok bool) {
 			strconv.FormatBool(defaults.cornerPhysicsAllBricks), "bool", true
 	}
 	switch key {
+	case "wind", "windEnabled":
+		return strconv.FormatBool(windConfiguredEnabled), strconv.FormatBool(defaultWindEnabled), "bool", true
+	case "windDirection", "windDirectionDegrees":
+		return formatConfigFloat(windDirectionDegrees), formatConfigFloat(defaultWindDirectionDegrees), "float", true
+	case "windDirectionVariation", "windDirectionVariationDegrees":
+		return formatConfigFloat(windDirectionVariation), formatConfigFloat(defaultWindDirectionVariationDegrees), "float", true
+	case "windSpeedMin":
+		return formatConfigFloat(windSpeedMin), formatConfigFloat(defaultWindSpeedMin), "float", true
+	case "windSpeedMax":
+		return formatConfigFloat(windSpeedMax), formatConfigFloat(defaultWindSpeedMax), "float", true
+	case "windChangeSecondsMin":
+		return formatConfigFloat(windChangeSecondsMin), formatConfigFloat(defaultWindChangeSecondsMin), "float", true
+	case "windChangeSecondsMax":
+		return formatConfigFloat(windChangeSecondsMax), formatConfigFloat(defaultWindChangeSecondsMax), "float", true
+	case "windResponseSeconds":
+		return formatConfigFloat(windResponseSeconds), formatConfigFloat(defaultWindResponseSeconds), "float", true
+	case "windBallCoupling":
+		return formatConfigFloat(windBallCoupling), formatConfigFloat(defaultWindBallCoupling), "float", true
+	case "windMaxAcceleration":
+		return formatConfigFloat(windMaxAcceleration), formatConfigFloat(defaultWindMaxAcceleration), "float", true
+	case "windWakeStrength":
+		return formatConfigFloat(windWakeStrength), formatConfigFloat(defaultWindWakeStrength), "float", true
+	case "windSlipstreamStrength":
+		return formatConfigFloat(windSlipstreamStrength), formatConfigFloat(defaultWindSlipstreamStrength), "float", true
+	case "windSlipstreamLength":
+		return formatConfigFloat(windSlipstreamLength), formatConfigFloat(defaultWindSlipstreamLength), "float", true
+	case "windSlipstreamWidth":
+		return formatConfigFloat(windSlipstreamWidth), formatConfigFloat(defaultWindSlipstreamWidth), "float", true
+	case "windLiftStrength":
+		return formatConfigFloat(windLiftStrength), formatConfigFloat(defaultWindLiftStrength), "float", true
+	case "windTurbulence":
+		return formatConfigFloat(windTurbulence), formatConfigFloat(defaultWindTurbulence), "float", true
+	case "windRecalcInterval":
+		return formatConfigFloat(windRecalcInterval), formatConfigFloat(defaultWindRecalcInterval), "float", true
+	case "windFieldBlendSeconds":
+		return formatConfigFloat(windFieldBlendSeconds), formatConfigFloat(defaultWindFieldBlendSeconds), "float", true
+	case "windGridColumns":
+		return strconv.Itoa(windGridColumns), strconv.Itoa(defaultWindGridColumns), "int", true
+	case "windGridRows":
+		return strconv.Itoa(windGridRows), strconv.Itoa(defaultWindGridRows), "int", true
 	case "audioRoom":
 		return currentAudioRoom, "none", "string", true
 	case "audioRoomDry":
@@ -8588,6 +9370,17 @@ func physicsOverlayLines() []string {
 		"PHYSICS ACTUAL     " + fmt.Sprintf("%.1f Hz", physicsStepRateCurrent),
 		"SIMULATION REALTIME " + fmt.Sprintf("%.1f%%", physicsRealtimePercent),
 		"PHYSICS COMPUTE LOAD " + fmt.Sprintf("%.1f%%", physicsComputeLoad),
+		"WIND MODE           " + windModeName() + " (W)",
+		"WIND CONFIG         " + map[bool]string{true: "ON", false: "OFF"}[windConfiguredEnabled],
+		"WIND AIR            " + fmt.Sprintf("%.0f px/s @ %+.1f deg", windCurrentSpeed, windCurrentDirection),
+		"WIND TARGET         " + fmt.Sprintf("%.0f px/s @ %+.1f deg / %.1fs", windTargetSpeed, windTargetDirection, math.Max(0, windTargetChangeTimer)),
+		"WIND BALL EFFECT    " + windBallEffectText(),
+		"WIND SLIPSTREAM     " + fmt.Sprintf("%.2f strength / %.0f px length / %.0f px width", windSlipstreamStrength, windSlipstreamLength, windSlipstreamWidth),
+		"WIND GRID           " + fmt.Sprintf("%dx%d / %.2fs rebuild", windGridColumns, windGridRows, windRecalcInterval),
+		"WIND REBUILD        " + fmt.Sprintf("%.3f ms last / %.3f ms avg / %d", windLastRebuildMS, windAverageRebuildMS, windRebuildCount),
+		"WIND PERF OFF       " + formatWindPerf(windPerfOffLoad, windPerfOffHz, windPerfOffFound),
+		"WIND PERF ON        " + formatWindPerf(windPerfOnLoad, windPerfOnHz, windPerfOnFound),
+		"WIND PERF DELTA     " + windPerformanceDeltaText(),
 		"RENDER FPS          " + fmt.Sprintf("%.1f", fpsCurrent),
 		"RENDER FPS LOWEST   " + formatLowestRenderFPS(),
 		"RENDER INTERP       ON / alpha " + fmt.Sprintf("%.3f", renderInterpolationAlpha),
@@ -9923,6 +10716,48 @@ func drawStatsOverlay() {
 	}
 }
 
+func drawWindPaths() {
+	if windMode != windModePaths || len(windFieldTo) == 0 {
+		return
+	}
+	const seedColumns = 8
+	const seedRows = 5
+	const pathSteps = 11
+
+	ctx.Call("save")
+	ctx.Set("strokeStyle", "rgba(145, 205, 255, 0.42)")
+	ctx.Set("lineWidth", 1.6)
+	ctx.Set("lineCap", "round")
+	for seedRow := 0; seedRow < seedRows; seedRow++ {
+		for seedCol := 0; seedCol < seedColumns; seedCol++ {
+			x := (float64(seedCol) + 0.5) * canvasWidth / seedColumns
+			y := (float64(seedRow) + 0.5) * canvasHeight / seedRows
+			ctx.Call("beginPath")
+			ctx.Call("moveTo", x, y)
+			drawn := 0
+			for step := 0; step < pathSteps; step++ {
+				vx, vy := sampleWindField(x, y)
+				speed := math.Hypot(vx, vy)
+				if speed < 5 {
+					break
+				}
+				stepLength := clampFloat(speed*0.09, 7, 34)
+				x += vx / speed * stepLength
+				y += vy / speed * stepLength
+				if x < 0 || x > canvasWidth || y < 0 || y > canvasHeight {
+					break
+				}
+				ctx.Call("lineTo", x, y)
+				drawn++
+			}
+			if drawn > 0 {
+				ctx.Call("stroke")
+			}
+		}
+	}
+	ctx.Call("restore")
+}
+
 func drawFPSMiniOverlay() {
 	if !fpsMiniOverlayVisible || physicsOverlayVisible || debugOverlayVisible || statsOverlayVisible {
 		return
@@ -9966,6 +10801,9 @@ func draw(alpha float64) {
 	if bricksDirty {
 		rebuildBrickCanvas()
 	}
+	// Wind paths sit behind the solid brick layer, so the visualization naturally
+	// disappears through obstacles instead of painting over them.
+	drawWindPaths()
 	ctx.Call("drawImage", brickCanvas, 0, 0)
 	drawBrickDebris(alpha, true)
 	drawZapperBolts()
@@ -10352,6 +11190,7 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 			physicsStepRateCurrent = float64(physicsSampleSteps) / physicsSampleElapsed
 			physicsRealtimePercent = float64(physicsSampleSteps) * physicsStepSeconds / physicsSampleElapsed * 100
 			physicsComputeLoad = physicsSampleComputeTime / physicsSampleElapsed * 100
+			recordWindPerformanceSample()
 			if physicsSampleDroppedTime > 0 || physicsComputeLoad >= 90 {
 				physicsWarningTimer = physicsWarningHoldSeconds
 			}
@@ -10922,6 +11761,13 @@ func setupInput() {
 		// before game-state checks so it works on READY, pause, win, and game-over.
 		if (key == "r" || key == "R") && !e.Get("repeat").Bool() {
 			toggleDebrisMaster()
+			return nil
+		}
+
+		// Geometry-aware wind: OFF -> ON -> flow paths -> OFF. Changing whether
+		// wind physics is active makes a record run assisted; PATHS alone is visual.
+		if (key == "w" || key == "W") && !e.Get("repeat").Bool() {
+			cycleWindMode()
 			return nil
 		}
 
