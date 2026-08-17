@@ -12,6 +12,20 @@ spinColor=#F68AA2
 secondBallColor=#F68AA2
 secondBallSpinColor=#F68AA2
 
+backgroundColor=#222940
+textColor=#53518C
+paddleColor=#53518C
+brickColor=#F25C5C
+brickStrokeColor=#F25C5C
+unbreakableColor=#53518C
+unbreakableStrokeColor=#53518C
+magicColor=#F29C50
+magicStrokeColor=#F29C50
+ballColor=#53518C
+spinColor=#53518C
+secondBallColor=#53518C
+secondBallSpinColor=#53518C
+
 brickWidth=80
 brickHeight=80
 ballX=150.0

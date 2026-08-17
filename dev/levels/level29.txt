@@ -23,6 +23,19 @@ spinColor=#F7D1D8
 secondBallColor=#F7D1D8
 secondBallSpinColor=#F7D1D8
 
+backgroundColor=#1D0E2C
+textColor=#5E87F5
+paddleColor=#5E87F5
+brickColor=#3D4B91
+brickStrokeColor=#3D4B91
+unbreakableColor=#2D2C5E
+unbreakableStrokeColor=#2D2C5E
+magicColor=#4E69C3
+magicStrokeColor=#4E69C3
+ballColor=#5E87F5
+spinColor=#5E87F5
+secondBallColor=#5E87F5
+secondBallSpinColor=#5E87F5
 
 audioRoom=smallhall
 audioRoomDry=0.75
