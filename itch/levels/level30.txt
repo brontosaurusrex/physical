@@ -11,21 +11,6 @@ paddleBoost=1150
 paddleWidth=170
 title="4K"
 
-# green grey neat but not for this level
-backgroundColor=#000f08
-paddleColor=#f4fff8
-brickColor=#1c3738
-brickStrokeColor=#1c3738
-ballColor=#f4fff8
-spinColor=#f4fff8
-secondBallColor=#f4fff8
-secondBallSpinColor=#f4fff8
-textColor=#8baaad
-unbreakableColor=#4d4847
-unbreakableStrokeColor=#4d4847
-magicColor=#f4fff8
-magicStrokeColor=#f4fff8
-
 # moon 
 backgroundColor=#071521
 paddleColor=#FAF0E6
@@ -40,6 +25,22 @@ spinColor=#FAF0E6
 secondBallColor=#FAF0E6
 textColor=#FAF0E6
 secondBallSpinColor=#FAF0E6
+
+# new
+
+backgroundColor=#212328
+textColor=#C23838
+paddleColor=#C23838
+brickColor=#5C646C
+brickStrokeColor=#5C646C
+unbreakableColor=#672F34
+unbreakableStrokeColor=#672F34
+magicColor=#C23838
+magicStrokeColor=#C23838
+ballColor=#C23838
+spinColor=#C23838
+secondBallColor=#C23838
+secondBallSpinColor=#C23838
 
 audioRoom=space
 audioRoomDry=0.75

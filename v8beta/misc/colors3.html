@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Breakout Palette Builder v3</title>
+<style>
+:root{
+  --ui-bg:#0f141a;--ui-panel:#171e26;--ui-panel2:#202934;--ui-line:#334150;
+  --ui-text:#edf3f8;--ui-muted:#9eafbf;--ui-accent:#7dc4ff;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ui-bg);color:var(--ui-text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1280px;margin:auto;padding:20px}
+h1{font-size:1.65rem;margin:0 0 4px} h2{font-size:1rem;margin:0 0 12px}
+.sub{color:var(--ui-muted);margin-bottom:18px}
+.grid{display:grid;grid-template-columns:minmax(420px,1fr) minmax(420px,1fr);gap:16px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--ui-panel);border:1px solid var(--ui-line);border-radius:14px;padding:16px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+input[type=text],textarea,select{
+  width:100%;background:var(--ui-panel2);color:var(--ui-text);border:1px solid var(--ui-line);
+  border-radius:9px;padding:9px 10px;font:inherit
+}
+textarea{min-height:118px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+button{
+  background:var(--ui-panel2);color:var(--ui-text);border:1px solid var(--ui-line);
+  border-radius:9px;padding:9px 11px;cursor:pointer
+}
+button:hover{border-color:var(--ui-accent)}
+button.primary{border-color:#4c88b9}
+.small{font-size:.88rem;color:var(--ui-muted)}
+hr{border:0;border-top:1px solid var(--ui-line);margin:16px 0}
+.swatches{display:flex;flex-wrap:wrap;gap:9px;margin-top:12px}
+.swatch{
+  width:100px;border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;
+  background:var(--ui-panel2);cursor:grab;user-select:none
+}
+.swatch.dragging{opacity:.4}
+.swatch.selected{outline:2px solid var(--ui-accent);outline-offset:2px}
+.swatchColor{height:54px}
+.swatchLabel{padding:6px;text-align:center;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}
+.mapping{display:grid;grid-template-columns:150px 1fr;gap:8px 10px;align-items:center}
+.previewBox{border:1px solid var(--ui-line);border-radius:12px;overflow:hidden}
+svg{display:block;width:100%;height:auto}
+.clickable{cursor:pointer}
+.clickable:hover{filter:brightness(1.12)}
+.roleActive{stroke:#fff!important;stroke-width:5!important;stroke-dasharray:7 5}
+.status{margin-top:10px;padding:9px 10px;border-radius:9px;background:var(--ui-panel2);color:var(--ui-muted)}
+.warn{color:#ffd58d}.good{color:#9fe1af}
+.variantGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:600px){.variantGrid{grid-template-columns:1fr}}
+.variant{background:var(--ui-panel2);border:1px solid var(--ui-line);border-radius:9px;padding:9px}
+.variant pre{white-space:pre-wrap;margin:0;font-size:11px}
+.badge{display:inline-block;padding:3px 7px;border:1px solid var(--ui-line);border-radius:999px;margin:2px 4px 2px 0;color:var(--ui-muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Breakout Palette Builder v3</h1>
+  <div class="sub">597 built-in palettes plus ColorKit URLs, raw hex lists, sorting, drag/drop, preview assignment, contrast boosting, presets and config export.</div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Palette input</h2>
+      <textarea id="paletteInput" spellcheck="false" placeholder="Paste a ColorKit URL or a list of colors"></textarea>
+      <div class="small">
+        Examples:
+        <span class="badge">colorkit.co/palette/...</span>
+        <span class="badge">colorkit.co/color-palette-generator/...</span>
+        <span class="badge">b04a3b, c76838, 8e392e...</span>
+      </div>
+      <div class="row">
+        <button class="primary" id="randomBuiltinBtn">Random built-in</button>
+        <button id="prevBuiltinBtn">← Built-in</button>
+        <button id="nextBuiltinBtn">Built-in →</button>
+        <input id="builtinNumber" type="number" min="1" max="597" value="1"
+          style="width:92px" title="Built-in palette number">
+        <span id="builtinStatus" class="small">597 built-in palettes</span>
+      </div>
+      <div class="row">
+        <button class="primary" id="loadBtn">Load</button>
+        <button id="darkBtn">Dark → light</button>
+        <button id="lightBtn">Light → dark</button>
+        <button id="shuffleBtn">Randomize order</button>
+      </div>
+      <div id="swatches" class="swatches"></div>
+      <div class="small" style="margin-top:9px">Drag swatches to reorder. Click a preview object, then click a swatch to assign that color.</div>
+
+      <hr>
+      <h2>Assignments</h2>
+      <div class="row">
+        <button id="defaultBtn">Map from order</button>
+        <button id="contrastBtn">Auto contrast</button>
+        <button id="boostContrastBtn">Boost contrast</button>
+        <button id="randomMapBtn">Random mapping</button>
+      </div>
+      <div id="mapping" class="mapping"></div>
+
+      <hr>
+      <h2>Preset</h2>
+      <div class="row">
+        <button id="exportPresetBtn">Export preset</button>
+        <button id="importPresetBtn">Import preset</button>
+      </div>
+      <textarea id="presetBox" spellcheck="false" placeholder="Preset JSON appears here, or paste one here to import."></textarea>
+    </section>
+
+    <section class="panel">
+      <h2>Game preview</h2>
+      <div class="previewBox">
+        <svg id="preview" viewBox="0 0 800 520" xmlns="http://www.w3.org/2000/svg">
+          <rect id="bg" class="clickable" data-role="background" x="0" y="0" width="800" height="520"/>
+
+          <text id="levelText" class="clickable" data-role="text" x="34" y="47" font-size="25" font-family="Arial,sans-serif" font-weight="700">LEVEL 12</text>
+          <text id="scoreText" class="clickable" data-role="text" x="603" y="47" font-size="22" font-family="Arial,sans-serif" font-weight="700">SCORE 4280</text>
+
+          <g class="clickable" data-role="brick">
+            <rect id="brickA" x="55" y="100" width="150" height="46" rx="8"/>
+            <rect id="brickB" x="220" y="100" width="150" height="46" rx="8"/>
+            <text id="brickLabel" x="145" y="174" font-size="18" font-family="Arial,sans-serif">NORMAL</text>
+          </g>
+
+          <g class="clickable" data-role="unbreakable">
+            <rect id="unbreakable" x="400" y="100" width="150" height="46" rx="8"/>
+            <path id="ubLine1" d="M414 113h50M414 125h82M414 137h33" fill="none" stroke-width="4" opacity=".35"/>
+            <text id="ubLabel" x="407" y="174" font-size="18" font-family="Arial,sans-serif">UNBREAKABLE</text>
+          </g>
+
+          <g class="clickable" data-role="magic">
+            <rect id="magic" x="590" y="100" width="150" height="46" rx="8"/>
+            <path id="spark1" d="M606 87v18M597 96h18M725 93v14M718 100h14" fill="none" stroke-width="3"/>
+            <text id="magicLabel" x="635" y="174" font-size="18" font-family="Arial,sans-serif">MAGIC</text>
+          </g>
+
+          <g class="clickable" data-role="ball">
+            <circle id="ball" cx="285" cy="285" r="18"/>
+            <path id="spin" d="M272 286c7-12 19-13 28-3" fill="none" stroke-width="4" stroke-linecap="round"/>
+          </g>
+
+          <g class="clickable" data-role="secondBall">
+            <circle id="ball2" cx="365" cy="325" r="18"/>
+            <path id="spin2" d="M352 326c7-12 19-13 28-3" fill="none" stroke-width="4" stroke-linecap="round"/>
+          </g>
+
+          <g class="clickable" data-role="paddle">
+            <rect id="paddle" x="275" y="438" width="250" height="24" rx="12"/>
+          </g>
+
+          <text id="helpText" x="34" y="500" font-size="16" font-family="Arial,sans-serif">click an object → click a swatch</text>
+        </svg>
+      </div>
+      <div id="selectedRole" class="status">Selected role: none</div>
+      <div id="contrastStatus" class="status"></div>
+
+      <hr>
+      <h2>Generated config</h2>
+      <textarea id="output" readonly spellcheck="false"></textarea>
+      <div class="row">
+        <button class="primary" id="copyBtn">Copy config</button>
+        <button id="variantsBtn">Make 4 variants</button>
+      </div>
+      <div id="variants" class="variantGrid"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  const STORAGE_KEY = "breakoutPaletteBuilderV3";
+  const BUILTIN_PALETTES = [["#C7522A","#E5C185","#FBF2C4","#74A892","#008585"],["#003F5C","#58508D","#BC5090","#FF6361","#FFA600"],["#D1DBE4","#A3B7CA","#7593AF","#476F95","#194A7A"],["#809BCE","#95B8D1","#B8E0D4","#D6EADF","#EAC4D5"],["#660E60","#893F71","#AC6F82","#CFA093","#F3D0A4"],["#F0EAD2","#DDE5B4","#ADC178","#A98467","#6C584C"],["#EDF2FA","#D7E3FC","#CCDBFD","#C1D3FE","#ABC4FF"],["#CAC7FF","#D7CDFE","#E4D3FC","#F1DAFB","#FEE0F9"],["#FFE5EC","#FFC2D1","#FFB3C6","#FF8FAB","#FB6F92"],["#C095E4","#FCEDF2","#FFD1D4","#FFB7C5","#FFA0C5"],["#D74A49","#183E4B","#1B4552","#8BA0A4","#EAEAEA"],["#CDB4DB","#FFC8DD","#FAAAC7","#BEE2FF","#A2D2FF"],["#E12729","#F37324","#F8CC1B","#72B043","#007F4E"],["#E4BABE","#FCF1EF","#E8D8C9","#CED3D7","#5E606C"],["#F50538","#B6042A","#79021C","#3D010E","#000000"],["#AB5852","#EADAA0","#D69E49","#838469","#476066"],["#FF595E","#FFCA3A","#8AC926","#1982C4","#6A4C93"],["#D9A7B0","#A7CBD9","#68A0A6","#F2E0D5","#A66F6F"],["#D9042B","#730220","#03658C","#F29F05","#F27B50"],["#2C6E49","#4C956C","#FEFEE3","#FFC9B9","#D68C45"],["#879E82","#F1DDBF","#7D6B57","#968972","#C9B898"],["#E88BB3","#B17AA2","#7B6992","#445881","#0D4771"],["#D1D1D3","#E1DBD6","#E2E2E4","#F9F6F2","#FEFEFE"],["#FB6095","#FB878E","#FBAF87","#FBD680","#FBFD79"],["#AF92B5","#8B7991","#6F597A","#624B6E","#503D5C"],["#9AC5D3","#141E26","#CBD8DF","#159AB7","#1E5067"],["#5E87F5","#4E69C3","#3D4B91","#2D2C5E","#1D0E2C"],["#F29F05","#F28705","#BF5B04","#8C4820","#592C1C"],["#1E4A28","#51A16A","#E6C994","#CC7A3D","#C45335"],["#D7D0CD","#9D755C","#7E5D50","#4A3931","#94807A"],["#104B51","#3B484D","#674448","#924144","#BD3D3F"],["#3C5C9B","#AAFFB8","#EF3E9C","#250C75","#4A23D3"],["#FAAA9D","#D8796E","#EA8F98","#F7BCB9","#B36270"],["#7084E7","#9385E3","#B786E0","#DA88DC","#FE89D8"],["#E1E4E8","#939CA3","#646F77","#B5BDC4","#AEB4AC"],["#52414C","#596157","#5B8C5A","#CFD186","#E3655B"],["#FFCFF4","#FFDBF1","#FFE7EE","#FFF3EB","#FFFFE8"],["#FFBEB8","#F4CECA","#E8DEDB","#DDEEED","#D1FEFE"],["#F1B9E7","#E9C4ED","#E2CEF3","#DAD9F9","#D2E4FF"],["#F68AA2","#CF6D93","#A85183","#813474","#5A1765"],["#8F53FE","#7A71F8","#658EF2","#50ACEB","#3BCAE5"],["#FFE5FF","#F2DFFF","#E6DAFF","#D9D4FF","#CDCEFF"],["#5783B0","#6977A7","#7A6A9D","#8C5E94","#9D528A"],["#871C1C","#E3969C","#FFFFED","#F0D8D8","#F59494"],["#274001","#F29F05","#F25C05","#A62F03","#400D01"],["#A4F4A1","#7FC194","#5A8E87","#355A7A","#10276E"],["#45496A","#7D8BAE","#E5857B","#F1B2B2","#E8CCC7"],["#80558C","#AF7AB3","#CBA0AE","#D8B9A0","#E4D192"],["#D1DBE4","#A3B7CA","#7593AF","#476F95","#000000"],["#42AB49","#80C783","#BDDEB3","#DCF5D6","#FAFAFA"],["#1B7865","#3EB59D","#8BD0C2","#C5E8E1","#FAF7EF"],["#44C0ED","#72CED3","#9FDDBA","#CDEBA0","#FAF986"],["#E1CFB6","#C79B68","#47596F","#671827","#3D2832"],["#79ADCC","#FFC09F","#FFEE93","#FCF5C7","#ADF7B6"],["#04555C","#AFFAF2","#048E9C","#4BCDCF","#19A4BB"],["#FFFFDB","#FEF0DD","#FEE1DE","#FDD2E0","#FCC3E2"],["#675054","#0C080A","#C7A5AA","#A49AAF","#A9ADBC"],["#FFB1EB","#E9ABED","#D3A5EF","#BE9EF1","#A898F3"],["#05878A","#074E67","#5A175D","#67074A","#DD9933"],["#C9CBA3","#FFE1A8","#E26D5C","#723D46","#472D30"],["#BD2323","#000000","#E6C235","#FFFFFF","#0A295E"],["#3C7D9B","#698E9D","#969F9F","#C3AFA2","#F0C0A4"],["#98F2A9","#A0F7BF","#57E5D7","#C0FCAE","#15C694"],["#D97079","#0D0707","#402124","#733B40","#A6565D"],["#C34FB3","#934BA5","#624898","#32448A","#02407D"],["#FFB4C6","#FFC7C8","#FFD9C9","#FFECCB","#FFFECD"],["#363636","#DF5441","#F0A967","#E8E8E8","#787878"],["#C0E8F9","#C0F9F9","#C0EEF9","#C0E2F9","#C0D7F9"],["#225931","#E0B45E","#D59546","#C8752D","#BA550D"],["#92EDF9","#A8DDFA","#BECCFC","#D3BCFD","#E9ACFF"],["#FFFFE5","#FFF2E4","#FFE6E4","#FFD9E3","#FFCDE2"],["#76E05E","#71CD7D","#6CBB9D","#66A8BC","#6196DC"],["#FF5B9F","#FF8494","#FFAC8A","#FFD57F","#FFFD74"],["#AB46D2","#FF6FB5","#92D9F7","#55D8C1","#FCF69C"],["#5E5A61","#161516","#DB8286","#97A0AF","#A4B4BC"],["#76519B","#7B79B5","#7BA0CF","#9BC4D5","#BCE8D8"],["#9DA5AF","#245675","#A02130","#EAE2DE","#735A50"],["#151C4A","#F29A35","#FFB000","#FFD880","#0069B0"],["#0070AD","#004E79","#8398A7","#FFE2C8","#FFB066"],["#12224E","#596597","#A0A7B8","#F3F3F4","#587F76"],["#082438","#3B2144","#6E1E51","#A11A5D","#D4176A"],["#FF7C9F","#FFB3C7","#000000","#FFFFFF","#B8B8B8"],["#774966","#94505F","#E8908F","#FFAF8C","#FFCEA3"],["#9E7AFF","#B39BE4","#C9BCCA","#DEDDAF","#F3FE94"],["#FFE0C1","#76E1F2","#D0C0F9","#D3A1ED","#F1FC9C"],["#5CFDDE","#AEFEEE","#F9537B","#FBA4B9","#FFE4EB"],["#B58977","#E5C185","#FBF2C4","#74A892","#008585"],["#3623FF","#6829E5","#992FCC","#CB36B2","#FD3C98"],["#E6E84C","#E0BB4D","#DB8E4E","#D5624F","#CF3550"],["#E12729","#F37324","#F8CC1B","#72B043","#0C8FC7"],["#FFEC5D","#FC42B5","#11DFFA","#FF930F","#A5EB64"],["#B09E99","#FEE9E1","#FAD4C0","#64B6AC","#C0FDFB"],["#C0E2C7","#EEDEAB","#CACECD","#DBFFF9","#FFC2BD"],["#ABACFF","#C0C1F0","#D5D5E2","#E9EAD3","#FEFEC5"],["#CC0000","#07163D","#354363","#01739E","#F2F3F5"],["#000000","#0C1821","#1B2A41","#324A5F","#CCC9DC"],["#26192B","#51588C","#C46FB2","#BAC7FB","#E1C2EB"],["#FF9D00","#DE5357","#0087B0","#28185D","#03174D"],["#8CE7EA","#2D0070","#8A68F9","#A7A4FF","#B5F3F2"],["#EABA93","#D39DA4","#BC80B4","#A562C5","#8E45D5"],["#FFFFFF","#FFC0D3","#000000","#8C8C8C","#ACE7FF"],["#33A8CC","#4DAEA1","#67B376","#81B94B","#9BBF20"],["#000000","#071D88","#C3CDFF","#6B7891","#FFFFFF"],["#395E77","#CC7A3D","#F0A500","#924144","#BD3D3F"],["#FF6600","#000000","#FFFFFF","#A8A9AD","#6D7278"],["#016E0E","#96BF91","#F9FAF9","#8F948F","#070807"],["#DC7558","#D68564","#E19C78","#E6AB8D","#EAB89F"],["#CBCFB8","#B6BBA3","#E4EACF","#A6B19D","#828B6A"],["#F18CC9","#E5BAD7","#AEF5D4","#E7F7EE","#FCFEFD"],["#E2E8EC","#C6D2DD","#AABBCD","#8DA5BD","#636160"],["#0A0803","#AFC2CC","#5E89AB","#FFFFFF","#BD2C49"],["#FFDAFF","#F0D4FF","#E0CEFF","#D1C8FF","#C2C2FF"],["#F25C78","#53518C","#222940","#F29C50","#F25C5C"],["#5D1451","#2F416D","#B3541E","#E3C4A8","#E4E3E3"],["#07222E","#172442","#B81515","#7D9AA3","#F7F0D8"],["#C7BD9B","#CEC6A8","#E3DECD","#F1EFE6","#F8F7F3"],["#92A4FC","#ABB8E7","#C5CAD0","#E0DBB5","#FCEA92"],["#409888","#5B7B81","#805579","#A43D6A","#C1235E"],["#2F414F","#2894A3","#FAFAFA","#C7DAD4","#FF914D"],["#FCEDA1","#302D1F","#635D3F","#968D60","#C9BD80"],["#121B3B","#C05BB6","#1A65BC","#0FB2EB","#F0D6EC"],["#E9FC19","#C4E21A","#A0C81C","#7BAD1D","#56931F"],["#AB2626","#C2391D","#C25618","#C97B26","#BD923D"],["#F7CD32","#F1A040","#EB744E","#E4475C","#DE1B69"],["#E863A5","#1C0C14","#4F2238","#82375C","#B54D81"],["#FEA587","#3C7373","#A2CBC5","#FF825C","#DCA225"],["#E5E4F0","#D5D3E5","#F0AFCD","#EA7DA2","#E53944"],["#F7DCD7","#F3ABB6","#008080","#004958","#203152"],["#F7D1D8","#D991B3","#AF73BF","#6A2C73","#120426"],["#9AC3E0","#0E1114","#313E47","#546A7A","#7797AD"],["#302927","#643A47","#FCD700","#ECDFE4","#FEE9C0"],["#2AD49B","#50E786","#75FA70","#B1FD5E","#EDFF4B"],["#FFFFFF","#E0E0E0","#969696","#000000","#D10F0F"],["#FEAD10","#FD841F","#E14D2A","#CD104D","#9C2C77"],["#FB3D73","#DE378E","#C131AA","#A42AC5","#8724E1"],["#FFBC00","#FFDE80","#FFFFFF","#80CD86","#1FB65F"],["#ED89D9","#E06DA3","#E5C185","#FBF2C4","#75AFA4"],["#FFEF9D","#EDCC53","#FFFFFF","#CB9EE3","#853FDB"],["#F9E9AE","#2D2A1F","#605A43","#938A67","#C6B98A"],["#C7AC4E","#DBC560","#273075","#344F9E","#BBD2F1"],["#91E7BE","#ACD8C3","#C7C9C8","#E3BACE","#FEABD3"],["#212328","#C23838","#647080","#5C646C","#672F34"],["#19181A","#303C6C","#78244C","#7743F2","#BC4639"],["#FFA446","#FA8761","#F5697C","#F04C97","#EB2EB2"],["#7C3EF9","#843CC4","#8D3B8F","#953959","#9E3724"],["#738262","#A8B897","#FF99AF","#FFC7D3","#FFF9FC"],["#FF0000","#000000","#FFFFFF","#EDC775","#D3D3D3"],["#FF671D","#49A3B3","#326694","#A8C6DA","#B7DDE2"],["#404257","#474E68","#6B728E","#71D6F4","#FFFFFF"],["#F9B184","#2D2018","#604433","#93684E","#C68D69"],["#553BC6","#4A33A6","#3F2B86","#342266","#291A46"],["#FFFAA0","#D4FED0","#A0FFFA","#D8D2FD","#FAA0FF"],["#E59CDA","#B2A8C8","#80B4B7","#4DC0A5","#1ACC94"],["#617081","#C5C9D2","#312A23","#9FAFC5","#ABBCC9"],["#A7F9E5","#1E2D29","#406058","#639387","#85C6B6"],["#FCF8E8","#94B49F","#DF7861","#BD829E","#76549A"],["#ABF3DA","#A9D3D9","#A7B3D8","#A492D7","#A272D6"],["#68A2CC","#85B3A3","#A2C57A","#C0D651","#DDE729"],["#FFC9FE","#E2F4FF","#FFFFFF","#F7AFC9","#FFFEFF"],["#000000","#FFFFFF","#FFEDBD","#FFDC82","#B83030"],["#FFCA3D","#282828","#2C5E5D","#449190","#DB1F02"],["#2A2A2A","#333333","#B5B5B5","#FFFFFF","#EA8532"],["#004159","#0078A5","#FFAA00","#EE9900","#222222"],["#AAAEF7","#1E1E2B","#41425E","#646691","#878AC4"],["#060661","#081D78","#8787CF","#630606","#4A0909"],["#CFB6FF","#C3C0F9","#B6CAF4","#AAD4EE","#9EDEE8"],["#CC0000","#333333","#F9F9F9","#3C7FB5","#17538C"],["#D6E6FF","#FFFFEA","#FFDCBE","#F7DEB3","#EBD8F7"],["#FFDBFF","#FCE4FF","#FAEDFF","#F7F6FF","#F4FFFF"],["#77BD79","#A6EDB1","#FFBFC1","#FF9A9A","#F58282"],["#9D57F1","#957EF3","#90A7F6","#90D0FA","#94FAFD"],["#DA95A9","#DCACAA","#DFC4AB","#E1DBAD","#E4F2AE"],["#FFFFFF","#BDC2CD","#7E879E","#3F4C6E","#00113E"],["#63E3E8","#7CCCE8","#96B5E8","#AF9EE8","#C987E8"],["#222E47","#7B705E","#151313","#1A4174","#59646B"],["#FDC93D","#033D4F","#456466","#C91025","#AEC6D5"],["#F5B214","#EC6D1F","#C8054B","#1092EE","#0AAD48"],["#362E54","#5A5183","#868EBB","#7A7143","#AC9E74"],["#A5B5AC","#D4E8DC","#1A1C1B","#484F4B","#77827C"],["#F5EBD7","#FBA979","#FF5E8C","#7385DE","#BBD700"],["#36C570","#E54456","#4456E5","#571BC6","#F2E530"],["#C7B8FF","#C9CAFF","#CCDBFF","#CEEDFF","#D1FEFF"],["#755B50","#FFFFFF","#000000","#CCC5BD","#4CADB0"],["#C120E5","#150319","#400B4C","#6B127F","#9619B2"],["#D4444C","#DB803B","#E1BC29","#9FB87F","#5CB4D4"],["#FF595E","#FFCA3A","#7AA633","#4C9ED1","#8C5CDE"],["#0298E4","#5B3EFD","#FF5EB9","#FF9894","#FFC654"],["#360099","#26006B","#D6BFFF","#AD80FF","#FFA000"],["#D4AD54","#FFFFFF","#000000","#07587A","#054966"],["#FFD6D8","#DEFFE4","#B4FFC8","#E4F4FF","#ECC1FF"],["#D1DBE4","#A3B7CA","#7593AF","#476F95","#FFFFFF"],["#B7453A","#D14247","#EF8B7A","#F4B097","#FCBDC8"],["#DD1CAD","#11020D","#440935","#770F5D","#AA1685"],["#9ED9E1","#B0ABD1","#C27EC0","#D450B0","#E623A0"],["#000000","#1D495C","#366132","#868687","#91A4C4"],["#ADB07E","#A89D7A","#A28B75","#9D7871","#97666C"],["#F690C6","#7E3CA4","#FC268F","#17C5E6","#9477DD"],["#C3C2F9","#73BCCE","#A9FCDB","#F49C97","#F2E646"],["#4E9E94","#F7CB45","#F096E3","#8A94F8","#2E66D2"],["#F402F1","#DA26EA","#C148E4","#A86ADD","#8F8CD7"],["#FCB5B9","#302223","#634749","#966C6E","#C99094"],["#C60919","#D33643","#DF626E","#EC8F98","#F8BBC2"],["#B4A7D6","#DAD3EB","#B5E6CD","#D6EDE4","#F6F4FA"],["#E0F7FA","#B1EAF2","#80DEEA","#4CCFE1","#25C5DA"],["#F3F3F4","#F7F6F8","#F8FAF8","#F7F8F6","#F5F6F4"],["#F7DEB7","#DCC9C0","#C2B5CA","#A7A0D3","#8C8CDD"],["#154021","#3D341E","#BF8030","#D3A552","#E6CA73"],["#FFBFD0","#BFF3FF","#FFB880","#0085A3","#005D72"],["#EF6BAF","#DF74BA","#CF7DC6","#BF86D1","#B090DD"],["#FFC9D8","#FFD6E2","#FFE3E6","#FFF1F3","#FFFEFE"],["#9A9FFF","#94B4F5","#8EC9EC","#87DEE2","#81F3D8"],["#85FF00","#5DB300","#E1FFBF","#C2FF80","#700099"],["#A7FFC4","#BBFFB7","#D0FFA9","#E4FF9C","#F8FF8F"],["#FF4B00","#16D6D6","#010A0A","#1E033F","#FFD11C"],["#425B2C","#597A3B","#334C69","#3B597A","#7A3B59"],["#C7522A","#EBAF17","#FAF4D9","#74A892","#008585"],["#58B98B","#536CA0","#4D1FB5","#9E5274","#EF8532"],["#80CFFF","#9FE7F0","#BFFFDE","#D3FAEF","#E6F5FF"],["#B35500","#D9884A","#FFBC80","#FFCDA0","#FFDEBF"],["#077741","#00336F","#431E5C","#7A3139","#757707"],["#FFFFFF","#DEDEDE","#95B7C4","#36566A","#242323"],["#7089A9","#88C4A5","#AADB9F","#FFFCFB","#4E6077"],["#E58467","#87C3DE","#AEBCBC","#D6B49B","#FDAC79"],["#F3C8D4","#C8E7F2","#C0E2AD","#D0B0E0","#FFCE7A"],["#FB7688","#FFE9E5","#3C2828","#FFDBCC","#AF3823"],["#FFFFFF","#F3FFFF","#E6FFFF","#E69B9B","#E63636"],["#FFBFC6","#FCAE8D","#F7455D","#BF334A","#ED95AB"],["#45A2B7","#72ABA5","#9EB492","#CBBD80","#F7C66E"],["#49DDCA","#061110","#16443E","#27776D","#38AA9B"],["#FFFBD8","#FEECDB","#FEDDDE","#FDCEE2","#FCC0E5"],["#D7E9E6","#9CBB89","#638262","#416F5D","#D5B1C8"],["#022175","#70DCF9","#00FFFF","#2C197F","#FF0000"],["#D40D12","#972326","#3B3E61","#4568A0","#D3D0CF"],["#B2553A","#D3C5B0","#553E2D","#558B79","#04394C"],["#C4005E","#E3006D","#9F004D","#FFBFDE","#FF80BD"],["#B4552D","#6C765B","#2B2D2F","#FFE3C1","#EFB994"],["#FB2159","#FF5500","#47FF00","#3871ED","#660099"],["#CCBCAD","#EBF2F3","#E74C3C","#9CC9B6","#6C93A3"],["#06113C","#FF8C32","#F8A56D","#DDDDDD","#EEEEEE"],["#FFD600","#FF7A00","#FF0069","#D300C5","#7638FA"],["#FF9AFF","#433B43","#FF9E76","#FFCE67","#AF38EB"],["#8C1880","#00384A","#087071","#DE5357","#3D2433"],["#2C6E49","#1579AB","#FEFEE3","#FFC9B9","#D68C45"],["#B70000","#DB571B","#FFBF60","#FFF9F0","#00F0D5"],["#000000","#666666","#ADADAD","#DBDBDB","#F0F0F0"],["#000000","#FFFFFF","#9F004D","#FFBFDE","#FF80BD"],["#306143","#B9DD16","#FFFFFF","#9E6F41","#000000"],["#FF2AE1","#F5FE31","#B3FE3E","#ED4E04","#95FEF8"],["#E5446D","#E5C824","#39D1FF","#DD9E7A","#303030"],["#D74A49","#183E4B","#1B4552","#C3D8DB","#F1DDBF"],["#F2D91A","#FF8C00","#ED3C82","#9FD22E","#30039C"],["#FFF7BF","#F2E2CC","#E5CED8","#D8B9E5","#CBA5F1"],["#000000","#FFFFFF","#446170","#B0B0B0","#000000"],["#F3D1FF","#E4D4FC","#D6D6F9","#C7D9F5","#B9DCF2"],["#BFD1FF","#BFE4FF","#BFD7FF","#BFCBFF","#C0BFFF"],["#E476A7","#81F4EB","#F7EDC5","#95C491","#7A9B85"],["#294B6B","#F3F3F3","#F17B25","#9BA3AE","#7F8395"],["#B8D8FD","#C0C0FD","#FFB3D6","#FFE2C6","#FFF5C6"],["#FAF9B5","#A4F4A1","#7FC194","#355A7A","#10276E"],["#638CB8","#68A3BC","#77B9BD","#8CCEBD","#B0E0C5"],["#84B3EB","#B2D4F0","#FFE398","#A97B57","#38663F"],["#732C02","#A64F03","#F29F05","#F2DA63","#D53308"],["#F5F3E6","#AEB5C9","#6378B1","#374E6F","#292525"],["#24BDBD","#F04E37","#FDB913","#9A3393","#F7ACBC"],["#399EDE","#C9C9C9","#6B6B6B","#FFFFFF","#000000"],["#353B4B","#FCBC13","#D8D5D4","#FCCD4E","#92949C"],["#0F0F0F","#637065","#BECCBD","#DADCE0","#F0EBDD"],["#FFEF9D","#EDCC53","#853FDB","#CB9EE3","#FFFFFF"],["#500070","#6D0099","#4C006B","#EDBFFF","#DA80FF"],["#FFFFFF","#67725F","#DBD1C3","#C7BFA2","#9E917E"],["#E2EEFF","#FFDEF2","#FEFEE1","#E8F4EA","#F2E2FF"],["#64567A","#9C90AF","#D8CFE6","#9F92B2","#695980"],["#000000","#1D5285","#6C9FCF","#FFE680","#FFCD4E"],["#E8E6E6","#C89A9D","#99A097","#495948","#291A10"],["#F06B8E","#F495AE","#F0E76B","#F4EE95","#95D4F4"],["#F4E7D9","#FF6B30","#236053","#36302C","#FFFFFF"],["#5BC783","#D6EAB2","#FFFFFF","#5D9592","#86A1CE"],["#06020A","#220C3D","#3E1570","#5A1FA3","#7629D6"],["#747C6C","#E4BCBF","#4B3B33","#CC7C94","#9C8C84"],["#FFFFFF","#E3E0DB","#D1C3AF","#4B6151","#2E2E2E"],["#000000","#FFFFFF","#C0C0C0","#8B0000","#ADD8E6"],["#000000","#FFFFFF","#FFFED7","#16302B","#AEDD92"],["#FFD0BF","#332A26","#66534C","#997D73","#F2C5DD"],["#98F47F","#DB7FF4","#C47FF4","#DB7FF4","#F27FF4"],["#2D3333","#5A5F63","#829093","#E39147","#FFFFFF"],["#523ED6","#A199E5","#E81098","#91F73D","#21BC9D"],["#E986F4","#CA88EE","#AC8AE8","#8D8CE1","#6E8EDB"],["#FAEBE6","#FEBDB3","#E8C493","#CC8547","#FFD500"],["#F71629","#F48DA5","#AA0E0B","#EF99B9","#E24F31"],["#18978F","#54BAB9","#E9DAC1","#F7ECDE","#FFFFFF"],["#FFD107","#ABD843","#119179","#CE680E","#CE2F21"],["#2D08A5","#3B0AD8","#03010C","#11033F","#1F0672"],["#F03E73","#D34496","#B64AB8","#9951DB","#7C57FE"],["#412AD8","#354FCF","#2974C6","#1D99BD","#11BEB3"],["#F4F0EE","#A68B7F","#D1CDCA","#666B5E","#CBBBA0"],["#292626","#44404A","#EDEDED","#BB0000","#FFFAE3"],["#617D57","#524739","#FBF2C4","#D2B492","#28221C"],["#FFB8D4","#FFCCE0","#FFF2BD","#FFF5CC","#CCF4FF"],["#EDBFFC","#F2C5F4","#F6CCEB","#FBD2E3","#FFD8DB"],["#ECBDFF","#FFD1E6","#BEEAFB","#9FFFD1","#FFFCCE"],["#F4FAE5","#A1B091","#CAE9F2","#F0EFE9","#FFFFFF"],["#009E8F","#006F64","#BFFFF9","#80FFF3","#FA0014"],["#473625","#D69144","#9E6334","#B1A691","#AD9A95"],["#335C67","#FFF3B0","#E09F3E","#9E2A2B","#540B0E"],["#79AFE5","#FDEECA","#FBDDC4","#F9CCBD","#F7BBB7"],["#1E1813","#514033","#846853","#B79173","#EAB993"],["#F45469","#1A1C57","#D80468","#28EFA2","#991268"],["#8629C6","#9F5CA9","#B88E8B","#D0C16E","#E9F450"],["#19272A","#222A30","#2B2C36","#342F3D","#3D3243"],["#E2E6E4","#EDBBC8","#F5BEA3","#D98E7D","#66786A"],["#75DFF4","#A7F2F0","#E4ADF4","#F7B7D0","#E8FF84"],["#A6637C","#0396A6","#04BFBF","#F25D27","#BF452A"],["#C17024","#B26C43","#A36762","#946381","#855EA0"],["#3B4D35","#243442","#BC9135","#753434","#3D1C1C"],["#ECF280","#8CF296","#ACE3EF","#F986DB","#FFD6A8"],["#C7FFE4","#D1FED7","#DBFEC9","#E5FDBC","#EFFCAF"],["#3D0099","#84BEF4","#D2EF97","#A8EA7C","#382CDD"],["#FFD36E","#FFF56D","#99FFCD","#9FB4FF","#CD99FF"],["#F4D06F","#FFF5F0","#92DCE5","#D01545","#04251B"],["#7CAAD6","#CCD1FF","#CCE2FF","#A7A0F7","#86D9DE"],["#09334B","#2278A9","#98CAEB","#535C69","#F2F3F5"],["#E29C39","#DC7D4D","#D65F60","#CF4074","#C92187"],["#75553F","#F5D4BB","#F9072B","#FFC9CD","#D32637"],["#086E7D","#F5F4E2","#2B474A","#E8B92D","#2B474A"],["#F9FFF3","#000000","#ABCEA7","#5E3F00","#F5ABAB"],["#264653","#2A9D8F","#E9C46A","#F4A261","#E76F53"],["#FABC3C","#FFB238","#F19143","#FF773D","#F55536"],["#FFCD8F","#FF98A9","#49B3D4","#D42755","#150B3D"],["#EDD85B","#F1BF78","#F6A796","#FA8EB3","#FF75D1"],["#F20530","#BF0426","#D0E5F2","#1D261C","#F29A2E"],["#F97794","#623AA2","#12CBC4","#00D2D3","#5F27CD"],["#B4FF9F","#F9FFA4","#D1F6FF","#FFD59E","#FFA1A1"],["#DBEC79","#F6B7D6","#8669D7","#4EA4A1","#FCC52C"],["#FF0000","#CE0106","#A0030B","#710411","#420516"],["#D09DFF","#BDAEFE","#AABFFE","#98CFFD","#85E0FC"],["#9049E0","#6E5FD1","#4B74C2","#298AB3","#069FA5"],["#DAA5D1","#FAE4EA","#8E79CA","#B17E8B","#B473B4"],["#D92155","#2E3324","#5D6647","#8B996B","#BACC8E"],["#868686","#E8EAEC","#81B8B2","#82A294","#507F69"],["#BCEDD8","#00999F","#81D2E4","#FFEF30","#065758"],["#68E8CE","#7BC8C4","#8FA7B9","#A287AF","#B566A4"],["#7D3B09","#153D42","#000000","#ADADA8","#FFFFFF"],["#4FFAD9","#0F2E28","#1F6154","#2F9480","#3FC7AD"],["#706550","#CCB19F","#B2AAA4","#241F13","#B3B57F"],["#CE4400","#85C136","#4F22E5","#081166","#FCD40C"],["#FFFFFF","#FF0000","#690000","#210000","#000000"],["#520B93","#E84BC0","#EF6699","#F78172","#FF9C4B"],["#6471D6","#6493D6","#647CD6","#6466D6","#7964D6"],["#ECE8E2","#E89DAD","#B165B0","#36312C","#7F7D9D"],["#D62A8E","#F8FE0D","#02338C","#099000","#6C19A9"],["#C0B5FF","#D0C7F3","#DFDAE7","#EFECDB","#FEFECE"],["#B4FFFF","#B4FDE6","#B4FBCE","#B4F9B5","#B4F79C"],["#FF3F73","#FF5E89","#D9FF5E","#5EFFD4","#835EFF"],["#CCE9FF","#D9EDF9","#E5F2F2","#F2F6EC","#FEFBE5"],["#BD9FDB","#8E669C","#F56810","#362F26","#14110F"],["#090F1F","#202636","#363C4C","#4E5363","#5E667A"],["#ED577A","#F9BBBD","#F2606D","#B21C05","#E56E93"],["#1A0F8B","#C6F40C","#EFA9FC","#E268A5","#0C27BF"],["#14190F","#3D4C2D","#667F4B","#8FB269","#B8E587"],["#445189","#697CAA","#989DB7","#8C96B1","#6E5F9A"],["#13D69B","#40ACAA","#6C82B9","#9959C8","#C52FD7"],["#C7522A","#FFFCEE","#47512F","#74844D","#FFFBFF"],["#D27555","#E5C185","#FBF2C4","#74A892","#008585"],["#6B6361","#D6B8B0","#28282B","#B1B6B0","#A7AAB4"],["#BBEFEF","#2C5185","#DC4747","#FEA99C","#FFD162"],["#1A2F30","#366163","#529296","#6EC4C9","#8AF6FC"],["#F9BA54","#DAC8B2","#7B7A76","#EABD87","#EC4C28"],["#0D0061","#C300FF","#FFAE00","#FF4E4E","#71FF46"],["#87472B","#FADEB0","#FFF9FA","#FFC4CD","#FFB7C5"],["#910A0A","#000000","#4D2A0B","#FFFFFF","#FFC800"],["#DB073D","#C52FB5","#9829C0","#6C22CC","#401CD8"],["#AA0505","#6C9A55","#EEC531","#3C99C1","#013D72"],["#D10733","#D6D8C0","#B0BCD3","#8AA0E5","#6484F7"],["#F0CD4E","#F1E0A0","#F2F2F2","#706F6F","#2B2A2A"],["#ED6A31","#B9FFE7","#E1C0F7","#BAFFB8","#FFAF9B"],["#C5FF00","#8AB300","#F1FFBF","#E2FF80","#450099"],["#AB2020","#D6CCB7","#286E28","#43592A","#544423"],["#423599","#38367B","#2B2E5E","#252A43","#21242A"],["#788BA5","#AAB9CA","#CCD5E0","#E5EAF0","#F8FAFC"],["#FF4D4D","#FF1A1A","#E60000","#CC0000","#B30000"],["#FF0000","#FFFF00","#00FF00","#00FFFF","#FF00FF"],["#BB4FE2","#B77BE4","#B3A6E7","#AED2E9","#AAFDEC"],["#D8985F","#0C0805","#3F2C1C","#725032","#A57449"],["#ECB5CC","#EEA39C","#F1916C","#F37F3C","#FF7839"],["#B8D5FC","#BAEBF4","#5980CE","#A49FE0","#F9C2CE"],["#3C5291","#F9DB8C","#D7D7D7","#871B87","#477D34"],["#B8E0D4","#D6EADF","#8D9CCF","#A183AD","#C13A4C"],["#7F1637","#047878","#FFB633","#F57337","#C12121"],["#FFF3C1","#F6F6CC","#EDF9D7","#E4FCE2","#DAFFED"],["#D1C3FF","#D4D2FF","#D6E1FF","#D9F0FF","#DCFEFF"],["#BB2749","#F9AE63","#FFDB00","#A1DBAB","#4EA7CD"],["#E3173E","#303D76","#7886A9","#FFE5B0","#FFD580"],["#B91C14","#F2CECD","#D8706C","#E38C8C","#D45454"],["#648D9C","#9FDADB","#EDF4F7","#E8CCBB","#D4738B"],["#C05059","#EECCB0","#802946","#1D4E79","#D496B1"],["#BD1523","#201410","#38090E","#FAA97A","#740C44"],["#D4AC63","#CD2435","#E56335","#2B4D7D","#F4F5F7"],["#F08721","#252323","#C9C9C9","#848484","#8C8C8C"],["#648C1C","#9DBF3A","#D7E8B9","#FFFFFF","#FF7F00"],["#FFF2E6","#FFE8D3","#FFDEBF","#DFB58F","#BF8D60"],["#C7CD73","#2B9372","#3A5644","#AD8E8E","#2A3746"],["#D9D2C3","#807C73","#BFB9AC","#807573","#807973"],["#FFE69F","#FFBF00","#A4DEF4","#1D6295","#45597E"],["#F4A57A","#281B14","#5B3E2D","#8E6047","#C18360"],["#C9E4FF","#D1CEF2","#D9B7E6","#E2A1D9","#EA8BCD"],["#E7EFDD","#FFD879","#CED3CA","#EAE7D9","#FAFAF2"],["#2E5258","#5E777A","#5BA3B0","#FFBB00","#F1D0F5"],["#38180D","#BA6C23","#993E1D","#935015","#9B2E0F"],["#3F85D1","#5FCF33","#2B2B2B","#F7F7F7","#A31131"],["#E4E6E5","#3E5186","#8C9CC4","#757B82","#756C8D"],["#E0A694","#B35800","#E3953F","#88AD51","#A0C0E5"],["#000000","#5A008A","#9C55CC","#C2C2C2","#FFFFFF"],["#BF2405","#ED2585","#FF5500","#9A81F4","#8FDE2F"],["#0F4C81","#E4A841","#D48128","#226363","#349696"],["#EC6313","#282828","#2D667A","#EAEAEA","#ADADAD"],["#BEB8FF","#DFBBDC","#FFBEB8","#FEFED1","#D1FEFE"],["#9E0000","#F27038","#FFD857","#074507","#081A54"],["#008751","#00B069","#15B8A0","#1C8280","#000000"],["#DDFFAD","#E5EDA7","#ECDBA1","#F4CA9A","#FCB894"],["#12224E","#596597","#74A89B","#587F76","#3B5552"],["#054213","#FFD4D8","#731313","#522A07","#FFFBEB"],["#E9E7E5","#ED7310","#273B59","#747C84","#9A9491"],["#000000","#243447","#CDBA96","#869EAD","#FFFFFF"],["#A3C411","#E1A8E6","#C095E4","#AAB7B6","#EDFF80"],["#690070","#D0408F","#009A76","#CD7CEF","#A4F9E0"],["#A50310","#D80415","#0C0001","#3F0106","#72020B"],["#CBFFE6","#D5FFD9","#DFFFCC","#E9FFBF","#F3FFB3"],["#326063","#006D66","#BFFFFB","#80FFF7","#FC000E"],["#5B9CC1","#5BBBC1","#5BA6C1","#5B92C1","#5B7DC1"],["#BD8634","#000000","#EDE7EB","#CDA457","#674578"],["#E24FE0","#B74FDA","#8D50D5","#6250CF","#3851C9"],["#DDBFFF","#2C2633","#584C66","#857399","#B199CC"],["#07B290","#5688D3","#63B9F2","#35EAB1","#7BCFE0"],["#2D1307","#60290F","#B37100","#C6541F","#FFD080"],["#CFF5DA","#DBF2E3","#E7EFEC","#F3EBF5","#FFE8FF"],["#F7A98F","#2B1D19","#5E4036","#916354","#C48671"],["#E9E9FF","#DDD8D2","#A6A2A1","#7A7985","#898996"],["#ECE7FF","#D6CCFF","#A294DF","#826DCF","#A087FF"],["#380D61","#FFAA00","#E17869","#E0B899","#C9F0AD"],["#806B40","#CCAB66","#E6D0A3","#DDCBAB","#BF9130"],["#CDB709","#1B5D78","#EB2B05","#B8730A","#7CC49D"],["#FFD503","#FFE24F","#231F20","#080703","#000000"],["#3B82FF","#359BDE","#2FB4BC","#28CC9B","#22E579"],["#154021","#3D341E","#BFB860","#CCC78F","#5F8059"],["#000000","#294D35","#4B3B57","#403022","#9C5779"],["#ECB656","#28425F","#97C167","#86635E","#4480C1"],["#FFFFFF","#F9F1EC","#CB9D06","#014421","#000000"],["#5C4D4B","#F8ECD9","#D3A89D","#B09190","#B8AFB1"],["#FFCC99","#FF99CC","#CC99FF","#99CCFF","#99FFCC"],["#93B16B","#D3D6CF","#204F69","#68AAA7","#BB5C58"],["#B42F78","#F374BE","#FE7C84","#FB6A2D","#E33770"],["#EDEDED","#A29A93","#000000","#65ACDF","#F96500"],["#EDEDED","#A29A93","#000000","#65ACDF","#F4911E"],["#7EB1D7","#EFF8ED","#879EA1","#B5ABCF","#C5CFAB"],["#BEE2C9","#92907E","#9DA491","#A8BAA3","#B3CEB5"],["#590075","#740099","#51006B","#F0BFFF","#E080FF"],["#FFF2A6","#FCD9AC","#BF963C","#F06868","#0C613B"],["#6EDDC3","#7AADCB","#857DD2","#914DDA","#9D1DE2"],["#4267A2","#FF8C32","#F8A56D","#DDDDDD","#EEEEEE"],["#E2B39C","#9CCBE2","#9CD9E2","#9CCBE2","#9CBDE2"],["#7A0236","#84023A","#980243","#027543","#029857"],["#B5B6FC","#FFA4DB","#F7FAF8","#CDFCFC","#F0E24E"],["#000000","#24540D","#FFFFFF","#ABABAB","#7FCF80"],["#E68500","#FF9400","#B36800","#FFE4BF","#FFCA80"],["#FFE600","#FF9900","#FFF897","#FEFFE0","#624A3A"],["#E12729","#F37324","#F8CC1B","#72B043","#238AD4"],["#CECCC1","#33302D","#674535","#816D47","#737574"],["#F4B0EF","#F4B6D6","#F3BBBE","#F3C1A5","#F2C78D"],["#FFAE6D","#FE9888","#FC81A2","#FB6BBD","#F955D8"],["#0F0D3C","#40376C","#AEA9BB","#FCECAE","#D06C23"],["#EFC456","#F4C0A4","#F7BE8C","#F7B12E","#DDA65D"],["#DE4040","#FF8000","#FFFB00","#00FF00","#0091FF"],["#EFB7FB","#DBB7F5","#C7B7EF","#B3B8E8","#9FB8E2"],["#ACD9AF","#DE6358","#E6E6E6","#602791","#F5BCE9"],["#870427","#BF8507","#14046D","#296800","#FFE684"],["#EDAB9E","#211816","#543D38","#87615A","#BA867C"],["#CE9700","#0DA86C","#0C8C6C","#016B14","#37017F"],["#212135","#264AA7","#02C9E0","#F7FBFB","#FFFFFF"],["#1F1235","#1B1425","#FF6E6C","#67568C","#FBDD74"],["#5F62DE","#9B260D","#65FAFE","#E7C072","#2E1528"],["#ED6C15","#0AE994","#828FAF","#820E13","#220F13"],["#9A73A5","#99478F","#F3E8F7","#E2CA65","#1F0027"],["#631D35","#874545","#1E211E","#CF9465","#F4BB75"],["#00FF75","#FFF500","#6F70FB","#FF5E5E","#39DBFF"],["#262626","#383838","#FAB23D","#FFC812","#CDCDCD"],["#E538C1","#B432C4","#832CC6","#5325C9","#221FCC"],["#AAFFFF","#A8FCE4","#A6F8C9","#A4F5AD","#A2F192"],["#9B1A81","#8B338B","#7A4D95","#6A669F","#5A80A9"],["#1A1933","#E36EC2","#E985A7","#F09B8C","#C41338"],["#F9ECF8","#FAD6FA","#FCCCFB","#FDC1FC","#FEACFD"],["#FFCEC6","#4861EA","#E7F79E","#F28130","#482C7C"],["#FFE9C9","#F5CAAA","#EBAA8C","#E18B6D","#D66B4E"],["#2606D8","#5844CC","#8981C0","#BBBFB4","#EDFDA8"],["#E3E60A","#F8F50C","#D3F8D0","#BCF5B8","#99C583"],["#2B2DC4","#3639F7","#090A2B","#15165E","#202191"],["#9BAF89","#A2AC99","#A8A9A8","#AFA5B8","#B6A2C7"],["#FF0000","#EEFF2F","#34D60F","#0013E6","#E02BCB"],["#124944","#BAD7C2","#1B1B1B","#F8D4A2","#C6E5F7"],["#CA183E","#194282","#E8A20D","#4EF1BC","#764A8B"],["#336465","#2F5E52","#2B5840","#27522D","#234C1B"],["#88A4E5","#A5B3D4","#C15999","#E0D2B3","#FDE1A2"],["#245A70","#58508D","#BC5090","#FF6361","#FFA600"],["#0B0405","#5A079C","#C50436","#F3FAFA","#747C7C"],["#FE6D01","#90E137","#3790E1","#9649B9","#F40290"],["#FEB1A7","#D6A3F4","#EEA0C6","#E697D5","#DE8EE4"],["#82EDCE","#F7A08C","#E3FC9F","#7FC8EF","#C989E5"],["#FF0000","#000000","#FFFFFF","#757575","#E1E810"],["#0C0C4A","#730220","#03658C","#F29F05","#EB430C"],["#FCCCC7","#FCC7D2","#FCC7C7","#FCD1C7","#FCDCC7"],["#690A0A","#300707","#223D26","#092B10","#0D0A08"],["#1D6B87","#DFE5E8","#585B96","#6EB4CD","#68748C"],["#EBE4D1","#D9D0B4","#7D6B57","#879E82","#666B5E"],["#D9C0F9","#E9F79E","#FFFFB2","#EF8975","#FCABA4"],["#03195B","#02287A","#70457C","#9F1D27","#890421"],["#152F7A","#21438C","#91649E","#BD4952","#B52748"],["#CBD2FF","#C5DDFA","#BFE8F4","#B8F3EF","#B2FFE9"],["#FB8500","#FFB703","#023047","#219EBC","#8ECAE6"],["#FFFFA7","#EFEFBD","#E0E0D3","#D0D0E8","#C1C1FE"],["#1B56D6","#FCC842","#FFFFFF","#A4A4A4","#2A603A"],["#0040A8","#0D5684","#1A6C5F","#27823B","#339816"],["#EEA5F4","#D6A4EE","#BDA4E8","#A5A3E1","#8DA2DB"],["#7BC2D1","#89A6AB","#988984","#A66D5E","#B45038"],["#71E0E5","#84E7CE","#98EFB8","#ABF6A1","#BEFE8B"],["#DF6A7E","#E58797","#C6E587","#87E5D5","#A687E5"],["#525A70","#605E74","#6D6279","#7B677D","#886B82"],["#EFFF12","#6AF55B","#FF98E5","#65E1F7","#C764FC"],["#CA2027","#E5C185","#FBF2C4","#74A892","#008585"],["#B3E8FF","#ADEBEB","#A7EED6","#A0F1C2","#9AF4AE"],["#FF7D1D","#FC5F46","#F9416F","#F52398","#F205C0"],["#B54E22","#FAFCFF","#D7E3FC","#A2BDFA","#750D6B"],["#030002","#660282","#B8F540","#FF24C5","#F5062E"],["#13E81A","#FF0000","#A328D4","#FF5506","#DEF752"],["#D8C9EA","#F3EEF8","#EBE0F3","#351C75","#CAC1E8"],["#EDF2FA","#D6E0F5","#D4D1F0","#B4C2DE","#CFE0F2"],["#EFA7B9","#23181B","#563C43","#89606A","#BC8392"],["#C15DE8","#476DF5","#FF41DC","#0F0F0F","#173D75"],["#000000","#0C0E4D","#101266","#D7F73B","#E8F1EE"],["#F0EDDA","#000000","#547E65","#4E63E8","#FF6300"],["#FFFFFF","#C01824","#FFE660","#107CFC","#000000"],["#FE8200","#C2C2C2","#FFFFFF","#000000","#610099"],["#2657C1","#1FA8CF","#FF8400","#F7F7F7","#FFFFFF"],["#89A7F4","#F4D689","#F4C189","#F4D689","#F4EB89"],["#393939","#646464","#8E8E8E","#B9B9B9","#E3E3E3"],["#1B1212","#CE0C42","#020001","#350311","#680622"],["#FBD54C","#EC3831","#0E6FA7","#F0EDE8","#000000"],["#C1AA43","#BB8A49","#B56B4E","#AE4B54","#A82B5A"],["#804C00","#FFE0BF","#95FFE0","#7EDEB1","#FF9700"],["#FF00FF","#00FFFF","#FF4400","#00FF00","#FFFF00"],["#C52133","#A83154","#8B356D","#6E3382","#542896"],["#424242","#BAFA90","#FF9DDD","#DB78FF","#6E9CFF"],["#A06F6A","#1B1212","#EADEDC","#921720","#CEB1BD"],["#2F222E","#5E445C","#000000","#660000","#330000"],["#000080","#8C9DAD","#9AAB89","#F7E7CE","#FFFFFF"],["#FFFFFF","#000000","#C92121","#94C9DE","#1E8ED9"],["#FFE4E1","#FFFFF0","#ADD8E6","#E6E6FA","#FFFFFF"],["#93EED8","#8DEDCB","#87ECBD","#80EAAF","#7AE9A1"],["#005C1F","#A9C34B","#F1C84B","#FFB84D","#FF6D1F"],["#64C1BC","#004368","#DD2E53","#FBFBFB","#9C63A5"],["#1D1D1E","#0673BB","#155C91","#547480","#646969"],["#6B7C9B","#CDAC90","#3C2920","#AFBFD8","#2B4068"],["#FD8BF5","#E8CCAE","#C9FF00","#ACDB00","#90B700"],["#A8C1C1","#ECF3F3","#7F8080","#717B79","#878C84"],["#15B4C4","#043344","#CCEAEE","#607A8A","#446474"],["#3C84AC","#154C79","#87479C","#F168DE","#57FF20"],["#38349E","#1870A7","#00688F","#0F4F75","#57FF20"],["#C16E2A","#730220","#CC9FB1","#2F0077","#B6C75F"],["#BEA68F","#4472C0","#C45B12","#D4DAE7","#646C84"],["#5E17EB","#8C52FF","#0097B2","#F53DE2","#2B17C7"],["#FFF8F5","#5F8F4B","#F8BB5D","#FFE9D0","#153270"],["#2F2848","#9B98A4","#F5F5F5","#60445C","#A48C94"],["#040714","#2E060C","#210C07","#1A1C16","#1A210D"],["#FBBBAD","#EE8695","#4A7A96","#333F58","#292831"],["#FCCCDC","#FCD4E4","#FCD4DC","#FCDCE4","#FCCCE4"],["#192E41","#77BFFB","#B2BCBE","#3879C9","#69778B"],["#D3D1D1","#98390F","#393130","#AA7350","#7F7E83"],["#D11947","#62BB46","#712D91","#008CCF","#00437B"],["#91BA9B","#B9B891","#EDDAC9","#FFCD4E","#FE9A20"],["#44C8D9","#EB4083","#0E192E","#4EF74B","#19618B"],["#D17512","#B24235","#810E5B","#12257A","#879A6A"],["#BEEDA0","#79D700","#396B00","#5E00D7","#2C026B"],["#DF83CA","#7A2768","#6ED083","#070707","#B487AC"],["#2D2C31","#232324","#1D1D19","#121817","#040708"],["#EC297B","#FF5F1F","#FFF111","#45FF00","#00FFFF"],["#0D114D","#67227A","#595861","#B81414","#000000"],["#685E79","#976984","#C6728E","#C99397","#C9B3A0"],["#212121","#2D2D2D","#9C9C9C","#F9F9F9","#9B59B6"],["#F8F3EA","#D0E3FF","#081F5C","#B17921","#FDC664"],["#162B2D","#54793B","#6C8D44","#416438","#5A6760"],["#0C0F14","#1C1C1C","#3B2F2F","#6E5F5E","#4B3621"],["#FF6EC7","#00FFFF","#8A2BE2","#1B003B","#AAAAAA"],["#B5B2B7","#26341D","#7C242C","#765B3D","#647B68"],["#5D4131","#C2CFDA","#A6A4B4","#CC566D","#859479"],["#E4D4D2","#763B4A","#D2758E","#647989","#996A58"],["#EFD9CA","#584551","#D9B47B","#B98B4F","#8C5B41"],["#F09779","#ED7E7E","#F07272","#F5577C","#F72948"],["#009739","#FFCC00","#0033A0","#FF0000","#FFFFFF"],["#FFFF00","#FFFFAA","#999999","#CCCCCC","#FFFFFF"]];
+  let builtinIndex = 0;
+  const roles = [
+    ["background","Background"],["text","Text"],["paddle","Paddle"],["brick","Brick"],
+    ["unbreakable","Unbreakable"],["magic","Magic"],["ball","Ball"],["secondBall","Second Ball"]
+  ];
+
+  let palette = [];
+  let mapping = {};
+  let selectedRole = null;
+  let dragIndex = null;
+
+  const $ = id => document.getElementById(id);
+  const input = $("paletteInput"), swatches = $("swatches"), mappingEl = $("mapping"),
+        output = $("output"), presetBox = $("presetBox"), variants = $("variants");
+
+  function normHex(s){
+    const m = String(s).trim().match(/^#?([0-9a-f]{6})$/i);
+    return m ? "#" + m[1].toUpperCase() : null;
+  }
+
+  function parseColors(text){
+    // Works with arbitrary URLs/paths plus comma/space/newline/semicolon/hyphen lists.
+    // Require six hex digits bounded by non-hex characters to avoid accidental partial matches.
+    const found = [];
+    const re = /(?:^|[^0-9a-f])#?([0-9a-f]{6})(?![0-9a-f])/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) found.push("#" + m[1].toUpperCase());
+
+    // Preserve order and remove duplicates.
+    return [...new Set(found)];
+  }
+
+  function rgb(hex){
+    const h=hex.slice(1);
+    return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255];
+  }
+  function lin(c){return c<=.04045?c/12.92:Math.pow((c+.055)/1.055,2.4)}
+  function lum(hex){
+    const [r,g,b]=rgb(hex).map(lin);
+    return .2126*r+.7152*g+.0722*b;
+  }
+  function contrast(a,b){
+    const x=lum(a),y=lum(b),hi=Math.max(x,y),lo=Math.min(x,y);
+    return (hi+.05)/(lo+.05);
+  }
+
+  function hexToRgb255(hex){
+    const h=hex.slice(1);
+    return [
+      parseInt(h.slice(0,2),16),
+      parseInt(h.slice(2,4),16),
+      parseInt(h.slice(4,6),16)
+    ];
+  }
+
+  function rgb255ToHex([r,g,b]){
+    const h=n=>Math.max(0,Math.min(255,Math.round(n))).toString(16).padStart(2,"0");
+    return ("#"+h(r)+h(g)+h(b)).toUpperCase();
+  }
+
+  // Mix an sRGB color toward white or black. Binary search is used below
+  // to find the smallest visible change that reaches the requested contrast.
+  function mixRgb(hex,target,t){
+    const a=hexToRgb255(hex);
+    const b=target==="#FFFFFF" ? [255,255,255] : [0,0,0];
+    return rgb255ToHex(a.map((v,i)=>v+(b[i]-v)*t));
+  }
+
+  function boostAgainstBackground(color,bg,targetRatio=3.05){
+    if(contrast(color,bg) >= targetRatio) return color;
+
+    const white="#FFFFFF", black="#000000";
+    const whiteCan=contrast(white,bg) >= targetRatio;
+    const blackCan=contrast(black,bg) >= targetRatio;
+
+    if(!whiteCan && !blackCan) return contrast(white,bg) > contrast(black,bg) ? white : black;
+
+    // Prefer the direction that changes the source color less.
+    const directions=[];
+    if(whiteCan) directions.push(white);
+    if(blackCan) directions.push(black);
+
+    let best=null;
+    for(const target of directions){
+      let lo=0,hi=1;
+      for(let i=0;i<22;i++){
+        const mid=(lo+hi)/2;
+        const candidate=mixRgb(color,target,mid);
+        if(contrast(candidate,bg) >= targetRatio) hi=mid;
+        else lo=mid;
+      }
+      const candidate=mixRgb(color,target,hi);
+      const change=hi;
+      if(!best || change<best.change) best={color:candidate,change};
+    }
+    return best.color;
+  }
+  function oklabL(hex){
+    const [r,g,b]=rgb(hex).map(lin);
+    const l=.4122214708*r+.5363325363*g+.0514459929*b;
+    const m=.2119034982*r+.6806995451*g+.1073969566*b;
+    const s=.0883024619*r+.2817188376*g+.6299787005*b;
+    const l_=Math.cbrt(l),m_=Math.cbrt(m),s_=Math.cbrt(s);
+    return .2104542553*l_+.793617785*m_-.0040720468*s_;
+  }
+
+  function shuffle(a){
+    const b=[...a];
+    for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]]}
+    return b;
+  }
+
+  function colorAt(i){ return palette[Math.max(0,Math.min(palette.length-1,i))] || "#FFFFFF"; }
+
+  function mapFromOrder(){
+    const n=palette.length;
+    if(!n)return;
+    mapping = {
+      background: colorAt(0),
+      unbreakable: colorAt(Math.min(1,n-1)),
+      brick: colorAt(Math.min(2,n-1)),
+      magic: colorAt(Math.max(0,n-2)),
+      text: colorAt(n-1),
+      paddle: colorAt(n-1),
+      ball: colorAt(n-1),
+      secondBall: colorAt(n-1)
+    };
+    update();
+  }
+
+  function autoContrast(){
+    if(!palette.length)return;
+    const sorted=[...palette].sort((a,b)=>oklabL(a)-oklabL(b));
+    const darkest=sorted[0], lightest=sorted[sorted.length-1];
+    const bgCandidates=[darkest,lightest];
+    let bestBg=darkest, bestMin=-1;
+
+    for(const bg of bgCandidates){
+      const contrasts=sorted.filter(c=>c!==bg).map(c=>contrast(c,bg));
+      const score=contrasts.length?Math.max(...contrasts):1;
+      if(score>bestMin){bestMin=score;bestBg=bg}
+    }
+
+    const byAgainstBg=[...sorted].sort((a,b)=>contrast(b,bestBg)-contrast(a,bestBg));
+    const hi=byAgainstBg[0] || bestBg;
+    const mid=byAgainstBg[Math.min(1,byAgainstBg.length-1)] || hi;
+    const mid2=byAgainstBg[Math.min(2,byAgainstBg.length-1)] || mid;
+
+    mapping={
+      background:bestBg,
+      text:hi,paddle:hi,ball:hi,secondBall:hi,
+      brick:mid2,unbreakable:mid,magic:hi
+    };
+    update();
+  }
+
+
+  function boostContrast(){
+    if(!palette.length)return;
+
+    // First choose the current background. If it is in the middle of the
+    // luminance range, moving it to the darkest/lightest palette endpoint
+    // usually requires less alteration to all of the foreground roles.
+    const sorted=[...palette].sort((a,b)=>oklabL(a)-oklabL(b));
+    const bgChoices=[mapping.background,sorted[0],sorted[sorted.length-1]].filter(Boolean);
+
+    let best=null;
+    for(const bg of [...new Set(bgChoices)]){
+      const candidate={...mapping,background:bg};
+      let totalChange=0;
+      let changed=0;
+
+      for(const [key] of roles){
+        if(key==="background")continue;
+        const before=candidate[key] || palette[0];
+        const after=boostAgainstBackground(before,bg,3.05);
+        candidate[key]=after;
+        if(after!==before){
+          changed++;
+          const [r1,g1,b1]=hexToRgb255(before);
+          const [r2,g2,b2]=hexToRgb255(after);
+          totalChange += Math.hypot(r2-r1,g2-g1,b2-b1);
+        }
+      }
+
+      const minRatio=Math.min(...roles
+        .filter(([k])=>k!=="background")
+        .map(([k])=>contrast(candidate[k],bg)));
+
+      const score=(minRatio>=3 ? 100000 : 0) - totalChange - changed*5;
+      if(!best || score>best.score) best={candidate,score};
+    }
+
+    mapping=best.candidate;
+
+    // Derived colors become ordinary palette entries, so dropdowns,
+    // dragging, presets and later manual edits continue to work.
+    for(const [key] of roles){
+      const c=mapping[key];
+      if(c && !palette.includes(c)) palette.push(c);
+    }
+
+    palette.sort((a,b)=>oklabL(a)-oklabL(b));
+    update();
+  }
+
+  function randomMapping(){
+    if(!palette.length)return;
+    const r=()=>palette[Math.floor(Math.random()*palette.length)];
+    for(const [k] of roles) mapping[k]=r();
+    update();
+  }
+
+  function validMapping(){
+    for(const [k] of roles){
+      if(!palette.includes(mapping[k])) mapping[k]=palette[0] || "#FFFFFF";
+    }
+  }
+
+  function renderSwatches(){
+    swatches.innerHTML="";
+    palette.forEach((c,i)=>{
+      const el=document.createElement("div");
+      el.className="swatch";
+      el.draggable=true;
+      el.dataset.index=i;
+      el.innerHTML=`<div class="swatchColor" style="background:${c}"></div><div class="swatchLabel">${i+1}: ${c}</div>`;
+      el.addEventListener("click",()=>{
+        if(selectedRole){
+          mapping[selectedRole]=c;
+          selectedRole=null;
+          update();
+        }
+      });
+      el.addEventListener("dragstart",e=>{dragIndex=i;el.classList.add("dragging");e.dataTransfer.effectAllowed="move"});
+      el.addEventListener("dragend",()=>{dragIndex=null;el.classList.remove("dragging")});
+      el.addEventListener("dragover",e=>e.preventDefault());
+      el.addEventListener("drop",e=>{
+        e.preventDefault();
+        const to=Number(el.dataset.index);
+        if(dragIndex===null||dragIndex===to)return;
+        const [moved]=palette.splice(dragIndex,1);
+        palette.splice(to,0,moved);
+        update();
+      });
+      swatches.appendChild(el);
+    });
+  }
+
+  function renderMapping(){
+    mappingEl.innerHTML="";
+    for(const [key,label] of roles){
+      const lab=document.createElement("div"); lab.textContent=label;
+      const sel=document.createElement("select");
+      palette.forEach(c=>{
+        const o=document.createElement("option");o.value=c;o.textContent=c;sel.appendChild(o);
+      });
+      sel.value=mapping[key] || palette[0] || "#FFFFFF";
+      sel.addEventListener("change",()=>{mapping[key]=sel.value;update()});
+      mappingEl.append(lab,sel);
+    }
+  }
+
+  function setFill(id,c){$(id).setAttribute("fill",c)}
+  function setStroke(id,c){$(id).setAttribute("stroke",c)}
+
+  function renderPreview(){
+    const m=mapping;
+    setFill("bg",m.background);
+    ["levelText","scoreText","brickLabel","ubLabel","magicLabel","helpText"].forEach(id=>setFill(id,m.text));
+
+    ["brickA","brickB"].forEach(id=>{setFill(id,m.brick);setStroke(id,m.brick)});
+    setFill("unbreakable",m.unbreakable);setStroke("unbreakable",m.unbreakable);setStroke("ubLine1",m.text);
+    setFill("magic",m.magic);setStroke("magic",m.magic);setStroke("spark1",m.magic);
+    setFill("ball",m.ball);setStroke("spin",m.ball);
+    setFill("ball2",m.secondBall);setStroke("spin2",m.secondBall);
+    setFill("paddle",m.paddle);
+
+    document.querySelectorAll("[data-role]").forEach(el=>el.classList.remove("roleActive"));
+    if(selectedRole){
+      document.querySelectorAll(`[data-role="${selectedRole}"]`).forEach(el=>{
+        const shape=el.tagName==="g" ? el.querySelector("rect,circle") : el;
+        if(shape) shape.classList.add("roleActive");
+      });
+    }
+    $("selectedRole").textContent = selectedRole ? `Selected role: ${roles.find(r=>r[0]===selectedRole)?.[1] || selectedRole} — now click a swatch` : "Selected role: none";
+  }
+
+  function config(m=mapping){
+    return [
+      `backgroundColor=${m.background}`,
+      `textColor=${m.text}`,
+      `paddleColor=${m.paddle}`,
+      `brickColor=${m.brick}`,
+      `brickStrokeColor=${m.brick}`,
+      `unbreakableColor=${m.unbreakable}`,
+      `unbreakableStrokeColor=${m.unbreakable}`,
+      `magicColor=${m.magic}`,
+      `magicStrokeColor=${m.magic}`,
+      `ballColor=${m.ball}`,
+      `spinColor=${m.ball}`,
+      `secondBallColor=${m.secondBall}`,
+      `secondBallSpinColor=${m.secondBall}`
+    ].join("\n");
+  }
+
+  function renderContrast(){
+    const bg=mapping.background;
+    const tests=[
+      ["text",mapping.text],["paddle",mapping.paddle],["ball",mapping.ball],
+      ["second ball",mapping.secondBall],["brick",mapping.brick],
+      ["unbreakable",mapping.unbreakable],["magic",mapping.magic]
+    ];
+    const lines=tests.map(([name,c])=>{
+      const r=contrast(c,bg), cls=r>=3?"good":"warn";
+      return `<span class="${cls}">${r>=3?"✓":"⚠"} ${name}: ${r.toFixed(2)}:1</span>`;
+    });
+    $("contrastStatus").innerHTML="Contrast vs background — "+lines.join(" &nbsp; ");
+  }
+
+  function save(){
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({input:input.value,palette,mapping,builtinIndex}));
+  }
+  function update(){
+    validMapping();
+    renderSwatches();renderMapping();renderPreview();renderContrast();
+    output.value=config();
+    save();
+  }
+
+  function showBuiltin(index){
+    if(!BUILTIN_PALETTES.length)return;
+    builtinIndex=((index % BUILTIN_PALETTES.length)+BUILTIN_PALETTES.length)%BUILTIN_PALETTES.length;
+
+    // Keep the extracted palette visible in the input, but resolve the working
+    // palette dark → light, consistent with normal palette loading.
+    const source=[...BUILTIN_PALETTES[builtinIndex]];
+    input.value=source.map(c=>c.slice(1)).join(", ");
+    palette=[...source].sort((a,b)=>oklabL(a)-oklabL(b));
+
+    $("builtinNumber").value=builtinIndex+1;
+    $("builtinStatus").textContent=`Built-in ${builtinIndex+1} / ${BUILTIN_PALETTES.length}`;
+
+    mapFromOrder();
+  }
+
+  function randomBuiltin(){
+    if(!BUILTIN_PALETTES.length)return;
+    let n=Math.floor(Math.random()*BUILTIN_PALETTES.length);
+    if(BUILTIN_PALETTES.length>1 && n===builtinIndex) n=(n+1)%BUILTIN_PALETTES.length;
+    showBuiltin(n);
+  }
+
+  function loadInput(){
+    const p=parseColors(input.value);
+    if(!p.length){alert("No 6-digit hex colors found.");return}
+    palette=p;
+    palette.sort((a,b)=>oklabL(a)-oklabL(b));
+    mapFromOrder();
+  }
+
+  function makeVariants(){
+    variants.innerHTML="";
+    for(let i=0;i<4;i++){
+      const m={};for(const [k] of roles)m[k]=palette[Math.floor(Math.random()*palette.length)];
+      const d=document.createElement("div");d.className="variant";
+      const b=document.createElement("button");b.textContent=`Use variant ${i+1}`;
+      const p=document.createElement("pre");p.textContent=config(m);
+      b.addEventListener("click",()=>{mapping=m;update()});
+      d.append(b,p);variants.appendChild(d);
+    }
+  }
+
+  document.querySelectorAll("[data-role]").forEach(el=>{
+    el.addEventListener("click",e=>{
+      e.stopPropagation();
+      selectedRole=el.dataset.role;
+      renderPreview();
+    });
+  });
+
+  $("randomBuiltinBtn").onclick=randomBuiltin;
+  $("prevBuiltinBtn").onclick=()=>showBuiltin(builtinIndex-1);
+  $("nextBuiltinBtn").onclick=()=>showBuiltin(builtinIndex+1);
+  $("builtinNumber").addEventListener("change",()=>{
+    const n=Math.max(1,Math.min(BUILTIN_PALETTES.length,Number($("builtinNumber").value)||1));
+    showBuiltin(n-1);
+  });
+
+  $("loadBtn").onclick=loadInput;
+  $("darkBtn").onclick=()=>{palette.sort((a,b)=>oklabL(a)-oklabL(b));update()};
+  $("lightBtn").onclick=()=>{palette.sort((a,b)=>oklabL(b)-oklabL(a));update()};
+  $("shuffleBtn").onclick=()=>{palette=shuffle(palette);update()};
+  $("defaultBtn").onclick=mapFromOrder;
+  $("contrastBtn").onclick=autoContrast;
+  $("boostContrastBtn").onclick=boostContrast;
+  $("randomMapBtn").onclick=randomMapping;
+  $("variantsBtn").onclick=makeVariants;
+
+  $("copyBtn").onclick=async()=>{
+    try{
+      await navigator.clipboard.writeText(output.value);
+      const b=$("copyBtn"),old=b.textContent;b.textContent="Copied!";
+      setTimeout(()=>b.textContent=old,900);
+    }catch{output.select();document.execCommand("copy")}
+  };
+
+  $("exportPresetBtn").onclick=()=>{
+    presetBox.value=JSON.stringify({palette,mapping},null,2);
+  };
+  $("importPresetBtn").onclick=()=>{
+    try{
+      const p=JSON.parse(presetBox.value);
+      if(!Array.isArray(p.palette)||!p.palette.length)throw new Error();
+      const clean=p.palette.map(normHex).filter(Boolean);
+      if(!clean.length)throw new Error();
+      palette=[...new Set(clean)];
+      mapping=p.mapping||{};
+      update();
+    }catch{alert("Invalid preset JSON.")}
+  };
+
+  input.addEventListener("keydown",e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key==="Enter")loadInput();
+  });
+
+  try{
+    const s=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");
+    if(s?.palette?.length){
+      input.value=s.input||"";
+      palette=s.palette.map(normHex).filter(Boolean);
+      mapping=s.mapping||{};
+      builtinIndex=Number.isInteger(s.builtinIndex) ? s.builtinIndex : 0;
+      $("builtinNumber").value=builtinIndex+1;
+      $("builtinStatus").textContent=`Built-in ${builtinIndex+1} / ${BUILTIN_PALETTES.length}`;
+      update();
+    }else throw 0;
+  }catch{
+    showBuiltin(0);
+  }
+})();
+</script>
+</body>
+</html>

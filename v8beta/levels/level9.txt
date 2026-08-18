@@ -27,6 +27,24 @@ spinColor=#8e7dbe
 secondBallColor=#f2d0a9
 textColor=#8e7dbe
 secondBallSpinColor=#f2d0a9
+
+// a new one
+
+backgroundColor=#1D0E2C
+textColor=#5E87F5
+paddleColor=#5E87F5
+brickColor=#3D4B91
+brickStrokeColor=#3D4B91
+unbreakableColor=#2D2C5E
+unbreakableStrokeColor=#2D2C5E
+magicColor=#4E69C3
+magicStrokeColor=#4E69C3
+ballColor=#5E87F5
+spinColor=#5E87F5
+secondBallColor=#5E87F5
+secondBallSpinColor=#5E87F5
+
+
 title="GRINDER"
 ---
            UU           

@@ -1,0 +1,60 @@
+DIAGNOSTICS AND FPS DISPLAY — v66
+================================
+
+Build ID: 20260803-66d4f9a2c7
+
+P / I DIAGNOSTICS CYCLE
+
+P now cycles through one combined diagnostics sequence:
+
+  first press   physics/performance diagnostics
+  second press  level/config/palette diagnostics (the former I view)
+  third press   diagnostics off
+
+I remains an alias for the same cycle, preserving the old key while keeping both
+views synchronized.
+
+Both full diagnostics views are positioned at the bottom-right. They have no
+background rectangle or border, matching the old transparent P presentation.
+
+F MINI FPS DISPLAY
+
+F independently toggles a compact bottom-right display:
+
+  FPS <current smoothed render FPS>
+  LOWEST <lowest visible-page sample>
+
+The compact display temporarily hides while either full diagnostics view is
+open, preventing overlap. It returns automatically when the full diagnostics
+cycle reaches off.
+
+LOWEST FPS MEASUREMENT
+
+The current FPS value remains the existing smoothed render/requestAnimationFrame
+rate. LOWEST records the smallest unsmoothed sample measured over a 0.5-second
+window.
+
+To avoid meaningless minimums:
+
+  the first two visible-page samples are warm-up only
+  hidden/background-tab time is not sampled
+  long resume gaps reset the partial sample
+
+LOWEST is session-scoped and resets when the page/game reloads. It measures the
+lowest half-second render rate, not the lowest individual-frame instantaneous
+rate.
+
+RETAINED OLDER-MACHINE RENDER OPTIMIZATIONS
+
+v66 includes all v65 debris rendering improvements:
+
+  cached Path2D shard outlines
+  cached 256-step opaque color palettes
+  setTransform-based rendering with less Canvas state churn
+  skipped redundant fillStyle assignments
+  adaptive drawing density for older, slow shards only
+  fresh and high-speed shards always visible
+  all debris physics and collisions remain active
+
+The P physics view continues to expose debris draw count, adaptive stride,
+learned baseline FPS, and Path2D cache state.

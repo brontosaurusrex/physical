@@ -1,0 +1,44 @@
+BREAKOUT WASM — SPEED-DEPENDENT DEBRIS DEPTH (V64)
+
+Build ID: 20260802-64f2c8d7b1
+
+SETTING
+
+  config.go:  defaultDebrisFrontLayerSpeed = 600.0
+  level file: debrisFrontLayerSpeed=600
+  E tuner:    Motion and settling > Front-layer speed threshold
+
+BEHAVIOR
+
+  shard speed < threshold   -> drawn behind living bricks
+  shard speed >= threshold  -> drawn over living bricks
+
+The comparison uses linear velocity magnitude. Angular speed does not affect the
+layer. A shard can begin in front and naturally move behind bricks after slowing.
+The depth change affects rendering only; physics, collision, lifetime, opacity and
+color are unchanged.
+
+SPECIAL VALUES
+
+  0       every shard is in the front layer
+  600     supplied default
+  1100+   with the supplied max speed, nearly/all shards remain behind
+
+RENDER ORDER
+
+  background
+  slow debris
+  living-brick cache
+  fast debris
+  zapper and black-hole visual
+  balls
+  paddle
+  HUD and overlays
+
+PERFORMANCE
+
+Each shard is still rendered exactly once. The renderer scans the bounded debris
+array twice and classifies each shard with vx*vx + vy*vy against the squared
+threshold. With the supplied 200-piece cap this adds at most 200 extra cheap
+comparisons per rendered frame, while avoiding square roots and duplicate Canvas
+path drawing.

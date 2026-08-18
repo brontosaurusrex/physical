@@ -1,0 +1,32 @@
+VIVANCO 0663-9807 USB GAME DEVICE — v51
+
+Controls
+--------
+AXIS 0:
+  Move paddle left/right.
+
+B0 / primary fire:
+  READY screen  -> start the level
+  During play   -> pause
+  While paused  -> resume
+
+B1 / secondary fire:
+  Toggle browser fullscreen.
+
+Configuration (config.go)
+-------------------------
+defaultGamepadHorizontalAxis   = 0
+defaultGamepadFireButton       = 0
+defaultGamepadFullscreenButton = 1
+defaultGamepadDeadZone         = 0.12
+
+Notes
+-----
+- B0 and B1 are edge-triggered, so holding a button acts only once.
+- The whole document is fullscreened, not only the canvas, so the physics tuner
+  and surrounding controls remain available.
+- Entering fullscreen is best effort. The Fullscreen API normally requires
+  transient browser user activation; a polled gamepad press may be rejected by
+  some browsers. If rejected, the game shows "Fullscreen blocked by browser".
+- Exiting fullscreen usually remains possible through B1 or the browser's own
+  fullscreen-exit key.

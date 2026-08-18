@@ -26,6 +26,9 @@ spinColor=#FAF0E6
 secondBallColor=#FAF0E6
 textColor=#FAF0E6
 secondBallSpinColor=#FAF0E6
+
+
+
 ---
 M//     M//           M// M//                 
 M//     M//           M// M//                 

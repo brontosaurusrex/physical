@@ -1,0 +1,95 @@
+IN-GAME PHYSICS + DEBRIS TUNER — v61
+====================================
+
+Press E to open or close the tuner. The panel is docked to the right so most of
+the playfield remains visible.
+
+LIVE INSPECTION
+
+Opening the panel preserves the current pause state:
+
+  playing -> E -> game keeps running
+  paused  -> E -> game remains paused
+
+The panel has live checkboxes for simulation, auto paddle and debris. O remains
+available while the panel is open.
+
+AUTO PADDLE
+
+  autoPaddleHitVariation
+
+This controls how far from the paddle center automatic hits may be planned. A
+new stable random offset is selected for each return. 0 always centers; 0.90
+uses almost the full paddle width.
+
+DEBRIS GENERATION
+
+  debrisPiecesMin
+  debrisPiecesMax
+  debrisMaxActivePieces
+  debrisLifetime
+  debrisLifetimeVariationPercent
+  debrisFadeDuration
+
+`debrisLifetimeVariationPercent` applies independently to newly created pieces:
+
+  actual lifetime = base lifetime * (1 +/- percentage/100)
+
+At the default 9 seconds and 16.7%, pieces live approximately 7.5..10.5 seconds.
+Changing the percentage affects newly spawned debris. Changing the base lifetime
+continues to rescale pieces already in flight while preserving their individual
+variation ratio and lifetime progress.
+
+DEBRIS APPEARANCE
+
+  debrisStartOpacity
+  debrisStartOpacityVariation
+  debrisFlashDuration
+  debrisFlashOpacity
+  debrisSizeScale
+  debrisBallPieceChance
+  debrisTrianglePieceChance
+  debrisStarPieceChance
+  debrisStarPointsMin / debrisStarPointsMax
+  debrisGlassPieceChance
+  debrisGlassCornersMin / debrisGlassCornersMax
+  debrisSliverPieceChance
+  debrisMaxChunkAspectRatio
+
+The new shape controls affect newly spawned fragments. Triangles use three
+corners, stars vary from four to seven points, and glass polygons vary from
+seven to fourteen corners by default.
+
+DEBRIS LAUNCH
+
+  debrisExplosionSpeedMin
+  debrisExplosionSpeedMax
+  debrisImpactSpeedFactor
+  debrisAngularSpeedMin
+  debrisAngularSpeedMax
+
+DEBRIS MOTION / CONTACT
+
+  debrisGravityScale
+  debrisAirDrag
+  debrisAngularDrag
+  debrisAngularStopSpeed
+  debrisMaxSpeed
+  debrisFrontLayerSpeed
+  debrisOffscreenMargin
+  debrisBrickCollisionDelay
+  debrisRestitution
+  debrisFriction
+  debrisBallInfluence
+  debrisFieldScale
+  debrisMagnetScale
+
+`debrisFrontLayerSpeed` changes draw depth live. Slower shards remain behind
+living bricks; shards at or above the threshold draw over them. The default is
+600 px/s. This affects rendering only, not collision or motion.
+
+CLIPBOARD EXPORT
+
+Closing with E exports auto-paddle, physics and debris values in the selected
+level-file, config.go, or combined format. Opening values and Built-in defaults
+also restore the auto hit-variation slider.
