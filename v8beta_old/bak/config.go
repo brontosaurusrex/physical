@@ -9,7 +9,7 @@ package main
 //   GOOS=js GOARCH=wasm go build -o main.wasm .
 
 const (
-	buildID = "20260820-multiball-01"
+	buildID = "20260810-cornerphysics-08-metrics"
 
 	// Audio mixer.
 	audioMixerMaster = 1.00
@@ -195,25 +195,6 @@ const (
 	defaultUnbreakableChance = 0.15
 	defaultMagicChance       = 0.3
 	defaultPowerUpDuration   = 10.0
-
-	// Multi-ball. The primary ball (ball 1) is the only ball allowed to activate
-	// magic-brick prizes. Additional balls alternate the two configured ball colors.
-	// Once this cap is reached, another Dual Balls prize boosts every active ball.
-	defaultMaxBalls                  = 5
-	defaultMultiBallSpeedBoost       = 1.10
-	defaultMultiBallSpawnSpreadDeg   = 12.0
-	defaultBallBallCollisions        = true
-	defaultBallBallRestitution       = 0.96
-	defaultBallBallCollisionGraceSec = 0.08
-
-	// Synthesized ball-to-ball collision tick. It is deliberately subtle so five
-	// balls cannot turn a dense collision cluster into continuous audio chatter.
-	defaultBallBallSoundEnabled  = true
-	defaultBallBallSoundMinSpeed = 45.0
-	defaultBallBallSoundCooldown = 0.060
-	defaultBallBallSoundGainMin  = 0.025
-	defaultBallBallSoundGainMax  = 0.110
-
 	defaultBlackHoleStrength = 800.0
 	// Horizontal path radius. 600 px is three times the previous 200 px travel.
 	defaultBlackHoleRange = 600.0

@@ -468,18 +468,11 @@ const (
 
 // ---- Ball struct ----
 type Ball struct {
-	x, y, r               float64
-	vx, vy                float64
-	omega, angle          float64
-	stuckTimer            float64
-	soundCooldown         float64
-	ballBallSoundCooldown float64
-
-	// Multi-ball transient state. New balls get a very short pair-collision grace
-	// period so they can separate cleanly from the source ball they were cloned from.
-	ballCollisionGrace float64
-	zapperTargetIndex  int
-	zapperHitTimer     float64
+	x, y, r       float64
+	vx, vy        float64
+	omega, angle  float64
+	stuckTimer    float64
+	soundCooldown float64
 
 	orbitCandidateAxis   int
 	orbitCandidateHits   int
@@ -496,129 +489,6 @@ type Ball struct {
 	rescueStartX         float64
 	rescueStartY         float64
 	rescueFailureCount   int
-}
-
-// activeBallCount includes the primary ball. During normal gameplay ball 1
-// always exists; extraBalls contains compacted balls 2..N.
-func activeBallCount() int {
-	return 1 + len(extraBalls)
-}
-
-func activeBallAt(index int) *Ball {
-	if index == 0 {
-		return &ball
-	}
-	extraIndex := index - 1
-	if extraIndex < 0 || extraIndex >= len(extraBalls) {
-		return nil
-	}
-	return &extraBalls[extraIndex]
-}
-
-func ballIndexOf(target *Ball) int {
-	if target == nil {
-		return -1
-	}
-	if target == &ball {
-		return 0
-	}
-	for i := range extraBalls {
-		if target == &extraBalls[i] {
-			return i + 1
-		}
-	}
-	return -1
-}
-
-func forEachActiveBall(fn func(*Ball, int)) {
-	if fn == nil {
-		return
-	}
-	fn(&ball, 0)
-	for i := range extraBalls {
-		fn(&extraBalls[i], i+1)
-	}
-}
-
-func resetBallZapperState(b *Ball) {
-	if b == nil {
-		return
-	}
-	b.zapperTargetIndex = -1
-	b.zapperHitTimer = 0
-}
-
-func resetAllBallZapperStates() {
-	forEachActiveBall(func(b *Ball, _ int) {
-		resetBallZapperState(b)
-	})
-}
-
-func maxConfiguredBalls() int {
-	if defaultMaxBalls < 1 {
-		return 1
-	}
-	return defaultMaxBalls
-}
-
-// spawnAdditionalBall clones the primary ball but gives the new ball a small
-// alternating angular spread. The brief pair-collision grace lets coincident
-// spawn positions separate naturally before ball-ball collisions become active.
-func spawnAdditionalBall() bool {
-	if activeBallCount() >= maxConfiguredBalls() {
-		return false
-	}
-
-	newIndex := activeBallCount() // zero-based index of the ball being appended
-	spawn := ball
-	speed := math.Hypot(ball.vx, ball.vy)
-	if speed > 0 {
-		angle := math.Atan2(ball.vy, ball.vx)
-		rank := (newIndex + 1) / 2
-		sign := 1.0
-		if newIndex%2 == 1 {
-			sign = -1
-		}
-		angle += sign * float64(rank) * defaultMultiBallSpawnSpreadDeg * math.Pi / 180.0
-		spawn.vx = math.Cos(angle) * speed
-		spawn.vy = math.Sin(angle) * speed
-	}
-	if newIndex%2 == 1 {
-		spawn.omega = -ball.omega
-	}
-	spawn.stuckTimer = 0
-	spawn.soundCooldown = 0
-	spawn.ballBallSoundCooldown = 0
-	spawn.ballCollisionGrace = defaultBallBallCollisionGraceSec
-	resetFastOrbitState(&spawn)
-	resetBallRescueState(&spawn, true)
-	resetBallZapperState(&spawn)
-	extraBalls = append(extraBalls, spawn)
-	resetAutoPaddleHitPlan()
-	return true
-}
-
-func boostAllActiveBalls(multiplier float64) {
-	if multiplier <= 0 {
-		return
-	}
-	forEachActiveBall(func(b *Ball, _ int) {
-		b.vx *= multiplier
-		b.vy *= multiplier
-		recordMeasuredBallSpeed(b)
-	})
-}
-
-// Big Paddle is allowed to shrink only while every surviving ball is moving up
-// the screen. This prevents the paddle disappearing underneath a descending ball.
-func allActiveBallsMovingUp() bool {
-	movingUp := true
-	forEachActiveBall(func(b *Ball, _ int) {
-		if b.vy >= 0 {
-			movingUp = false
-		}
-	})
-	return movingUp
 }
 
 type statusMessage struct {
@@ -707,17 +577,13 @@ type paddleVelocitySample struct {
 
 // renderSnapshot stores the last completed fixed-step state used for visual
 // interpolation. Physics remains authoritative; only drawing is smoothed.
-type ballRenderSnapshot struct {
-	x, y, angle float64
-}
-
 type renderSnapshot struct {
-	balls           [defaultMaxBalls]ballRenderSnapshot
-	ballCount       int
-	paddleX         float64
-	blackHoleX      float64
-	blackHoleY      float64
-	blackHoleActive bool
+	ballX, ballY, ballAngle                   float64
+	secondBallX, secondBallY, secondBallAngle float64
+	paddleX                                   float64
+	blackHoleX, blackHoleY                    float64
+	secondBallActive                          bool
+	blackHoleActive                           bool
 }
 
 // ---- Global state ----
@@ -730,11 +596,9 @@ var (
 	brickCtx    js.Value
 	bricksDirty bool
 
-	// Ball 1 is kept separately because it is the prize-taking primary ball.
-	// extraBalls contains balls 2..N. When ball 1 is lost while another survives,
-	// the first survivor is promoted to ball 1 and becomes the new prize taker.
-	ball       Ball
-	extraBalls []Ball
+	ball             Ball
+	secondBall       Ball
+	secondBallActive bool
 
 	paddle = struct {
 		x, y, w, h float64
@@ -798,20 +662,19 @@ var (
 	browserUICallbacks []js.Func
 
 	// Independent power-up states. Timed effects can coexist.
-	lowGravityActive       bool
-	lowGravityTimer        float64
-	passActive             bool
-	passTimer              float64
-	reverseGravityActive   bool
-	reverseGravityTimer    float64
-	magnetPowerActive      bool
-	magnetPowerTimer       float64
-	zapperPowerActive      bool
-	zapperPowerTimer       float64
-	bigPaddleActive        bool
-	bigPaddleTimer         float64
-	bigPaddleExpiryPending bool
-	currentGravity         float64
+	lowGravityActive     bool
+	lowGravityTimer      float64
+	passActive           bool
+	passTimer            float64
+	reverseGravityActive bool
+	reverseGravityTimer  float64
+	magnetPowerActive    bool
+	magnetPowerTimer     float64
+	zapperPowerActive    bool
+	zapperPowerTimer     float64
+	bigPaddleActive      bool
+	bigPaddleTimer       float64
+	currentGravity       float64
 
 	blackHoleActive bool
 	blackHoleTimer  float64
@@ -836,7 +699,10 @@ var (
 	influencerActive bool
 	influencerTimer  float64
 
-	// Zapper target/timer state now lives on each Ball so N balls are supported.
+	zapperTargetIndex       int
+	zapperHitTimer          float64
+	secondZapperTargetIndex int
+	secondZapperHitTimer    float64
 
 	statusMessages []statusMessage
 
@@ -1460,18 +1326,15 @@ func ballTeleportPositionClear(b *Ball, x, y, clearance float64) bool {
 		}
 	}
 
-	positionClear := true
-	forEachActiveBall(func(other *Ball, _ int) {
-		if !positionClear || other == b {
-			return
+	if secondBallActive {
+		other := &secondBall
+		if b == &secondBall {
+			other = &ball
 		}
 		minimumDistance := b.r + other.r + math.Max(0, clearance)
 		if math.Hypot(x-other.x, y-other.y) < minimumDistance {
-			positionClear = false
+			return false
 		}
-	})
-	if !positionClear {
-		return false
 	}
 
 	if blackHoleActive {
@@ -1550,8 +1413,7 @@ func teleportBallToSafeArea(b *Ball, manual bool) bool {
 	}
 	horizontalSpeed := speed * 0.35
 	direction := 1.0
-	ballIndex := ballIndexOf(b)
-	if b.rescueFailureCount%2 != 0 || ballIndex%2 == 1 {
+	if b.rescueFailureCount%2 != 0 || b == &secondBall {
 		direction = -1
 	}
 	verticalSpeed := math.Sqrt(math.Max(0, speed*speed-horizontalSpeed*horizontalSpeed))
@@ -1566,8 +1428,8 @@ func teleportBallToSafeArea(b *Ball, manual bool) bool {
 	syncRenderInterpolation()
 	if manual {
 		showStatus("Ball teleported (T)", 1.5)
-	} else if ballIndex >= 0 {
-		showStatus("Ball "+strconv.Itoa(ballIndex+1)+" rescue teleport!", 2.0)
+	} else if b == &secondBall {
+		showStatus("Ball 2 rescue teleport!", 2.0)
 	} else {
 		showStatus("Ball rescue teleport!", 2.0)
 	}
@@ -3043,45 +2905,6 @@ func playPaddleHit() {
 	end := varyFreq(320, 0.08)
 	scheduleTone("triangle", start, end, audioRand(0.065, 0.085), audioRand(0.16, 0.22), 0)
 	scheduleTone("sine", varyFreq(90, 0.06), varyFreq(70, 0.06), audioRand(0.08, 0.11), audioRand(0.05, 0.08), 0)
-}
-
-// Ball-ball impacts use a short, light metallic/glass-like tick. Loudness and
-// pitch follow only the closing speed along the collision normal, while the
-// stereo position follows the midpoint between the two balls. This stays
-// intentionally quieter than brick and paddle impacts in dense multi-ball play.
-func playBallBallHit(hitX, impactSpeed float64) {
-	if !defaultBallBallSoundEnabled || impactSpeed < defaultBallBallSoundMinSpeed {
-		return
-	}
-
-	referenceSpeed := math.Max(physicsConfig.maxSpeed, defaultBallBallSoundMinSpeed+1)
-	strength := clampFloat(
-		(impactSpeed-defaultBallBallSoundMinSpeed)/(referenceSpeed-defaultBallBallSoundMinSpeed),
-		0, 1,
-	)
-	strength = math.Sqrt(strength)
-	volume := defaultBallBallSoundGainMin +
-		(defaultBallBallSoundGainMax-defaultBallBallSoundGainMin)*strength
-	pitch := 0.90 + 0.35*strength
-
-	scheduleTonePanned(
-		"sine",
-		varyFreq(1080*pitch, 0.035),
-		varyFreq(760*pitch, 0.035),
-		audioRand(0.024, 0.036),
-		volume,
-		0,
-		hitX,
-	)
-	scheduleTonePanned(
-		"triangle",
-		varyFreq(1880*pitch, 0.045),
-		varyFreq(1320*pitch, 0.045),
-		audioRand(0.016, 0.026),
-		volume*0.30,
-		0.001,
-		hitX,
-	)
 }
 
 func playSynthBrickBreakPitched(pitchScale, hitX float64) {
@@ -4564,14 +4387,12 @@ func clearTimedPowerUps() {
 	zapperPowerTimer = 0
 	bigPaddleActive = false
 	bigPaddleTimer = 0
-	bigPaddleExpiryPending = false
 	blackHoleActive = false
 	blackHoleTimer = 0
 	resetBlackHolePath()
 	influencerActive = false
 	influencerTimer = 0
-	extraBalls = extraBalls[:0]
-	resetAllBallZapperStates()
+	secondBallActive = false
 	setPaddleSize(paddleWidth, paddleHeight)
 	refreshCurrentGravity()
 }
@@ -4651,12 +4472,24 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 		refreshCurrentGravity()
 		showStatus("Reverse Gravity!", powerUpDuration)
 	case POWER_DUAL_BALLS:
-		if spawnAdditionalBall() {
+		if !secondBallActive {
 			feature = "dualballs"
-			showStatus("Multi Ball! "+strconv.Itoa(activeBallCount())+"/"+strconv.Itoa(maxConfiguredBalls()), 2.0)
+			secondBallActive = true
+			secondBall.x = ball.x
+			secondBall.y = ball.y
+			secondBall.vx = -ball.vx
+			secondBall.vy = ball.vy
+			secondBall.omega = -ball.omega
+			secondBall.angle = ball.angle
+			secondBall.stuckTimer = 0
+			secondBall.r = ball.r
+			resetFastOrbitState(&secondBall)
+			resetBallRescueState(&secondBall, true)
+			showStatus("Dual Balls!", 2.0)
 		} else {
 			feature = "speedboost"
-			boostAllActiveBalls(defaultMultiBallSpeedBoost)
+			ball.vx *= 1.1
+			ball.vy *= 1.1
 			showStatus("Speed Boost!", 2.0)
 		}
 	case POWER_BLACKHOLE:
@@ -4685,7 +4518,8 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 		feature = "zapper"
 		zapperPowerActive = true
 		zapperPowerTimer = powerUpDuration
-		resetAllBallZapperStates()
+		zapperTargetIndex = -1
+		zapperHitTimer = 0
 		showStatus("Zapper!", powerUpDuration)
 	case POWER_BREAK_UNBREAKABLE:
 		feature = "breakunbreakable"
@@ -4698,7 +4532,6 @@ func activatePowerUpWithBrick(hitBrick *brick, impactSpeed float64) bool {
 		feature = "bigpaddle"
 		bigPaddleActive = true
 		bigPaddleTimer = powerUpDuration
-		bigPaddleExpiryPending = false
 		setPaddleSize(paddleWidth*2, paddleHeight)
 		showStatus("Big Paddle!", powerUpDuration)
 	}
@@ -5204,7 +5037,6 @@ func startLevel(index int) {
 	ball.omega, ball.angle = 0, 0
 	ball.stuckTimer = 0
 	ball.soundCooldown = 0
-	ball.ballBallSoundCooldown = 0
 	ball.r = ballRadius
 	// Use the real launch state as the baseline. Peaks then track the fastest
 	// instantaneous ball speed and absolute spin actually reached on this level.
@@ -5213,10 +5045,10 @@ func startLevel(index int) {
 	levelRunStats.fastestSpeed = levelMeasuredMaxSpeed
 	levelRunStats.fastestSpin = levelMeasuredMaxSpin
 	resetFastOrbitState(&ball)
+	resetFastOrbitState(&secondBall)
 	resetBallRescueState(&ball, true)
-	resetBallZapperState(&ball)
-	ball.ballCollisionGrace = 0
-	extraBalls = extraBalls[:0]
+	resetBallRescueState(&secondBall, true)
+	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.y = canvasHeight - 40
 	paddle.vx = 0
@@ -5237,7 +5069,6 @@ func startLevel(index int) {
 	zapperPowerTimer = 0
 	bigPaddleActive = false
 	bigPaddleTimer = 0
-	bigPaddleExpiryPending = false
 	blackHoleActive = false
 	blackHoleTimer = 0
 	blackHoleX = canvasWidth / 2
@@ -5246,7 +5077,10 @@ func startLevel(index int) {
 	refreshCurrentGravity()
 	influencerActive = false
 	influencerTimer = 0
-	resetAllBallZapperStates()
+	zapperTargetIndex = -1
+	zapperHitTimer = 0
+	secondZapperTargetIndex = -1
+	secondZapperHitTimer = 0
 	statusMessages = nil
 	if levelMagnetActive {
 		showStatus("Magnets enabled by level", 2.0)
@@ -5565,19 +5399,28 @@ func updateOneZapper(
 
 func updateZapper(dt float64) {
 	if !zapperIsActive() {
-		resetAllBallZapperStates()
+		zapperTargetIndex = -1
+		zapperHitTimer = 0
+		secondZapperTargetIndex = -1
+		secondZapperHitTimer = 0
 		return
 	}
 
-	forEachActiveBall(func(b *Ball, _ int) {
-		updateOneZapper(
-			b,
-			true,
-			&b.zapperTargetIndex,
-			&b.zapperHitTimer,
-			dt,
-		)
-	})
+	updateOneZapper(
+		&ball,
+		true,
+		&zapperTargetIndex,
+		&zapperHitTimer,
+		dt,
+	)
+
+	updateOneZapper(
+		&secondBall,
+		secondBallActive,
+		&secondZapperTargetIndex,
+		&secondZapperHitTimer,
+		dt,
+	)
 }
 
 // One brick contact. We still choose a single classic axis
@@ -6110,9 +5953,6 @@ func updateBallStep(b *Ball, dt float64, isPrimary bool) {
 	if b.soundCooldown > 0 {
 		b.soundCooldown = math.Max(0, b.soundCooldown-dt)
 	}
-	if b.ballBallSoundCooldown > 0 {
-		b.ballBallSoundCooldown = math.Max(0, b.ballBallSoundCooldown-dt)
-	}
 
 	b.vy += currentGravity * dt
 	applyBrickMagnetism(b, dt)
@@ -6289,141 +6129,9 @@ func updateBallAdaptive(b *Ball, dt float64, isPrimary bool) {
 }
 
 func updateBall(b *Ball, dt float64, isPrimary bool) {
-	if b == nil {
-		return
-	}
-	if b.ballCollisionGrace > 0 {
-		b.ballCollisionGrace = math.Max(0, b.ballCollisionGrace-dt)
-	}
 	updateBallAdaptive(b, dt, isPrimary)
 	recordMeasuredBallSpeed(b)
 	recordMeasuredBallSpin(b)
-}
-
-// Equal-mass circle collision. With the default five-ball cap there are at most
-// ten pairs per fixed step, so this remains a tiny part of the 240 Hz physics load.
-func resolveBallBallCollision(a, b *Ball) bool {
-	if a == nil || b == nil || a == b || !defaultBallBallCollisions ||
-		a.ballCollisionGrace > 0 || b.ballCollisionGrace > 0 {
-		return false
-	}
-
-	combinedRadius := a.r + b.r
-	dx := b.x - a.x
-	dy := b.y - a.y
-	distanceSquared := dx*dx + dy*dy
-	if distanceSquared > combinedRadius*combinedRadius {
-		return false
-	}
-
-	distance := math.Sqrt(math.Max(distanceSquared, 0))
-	nx, ny := 1.0, 0.0
-	if distance > 1e-9 {
-		nx = dx / distance
-		ny = dy / distance
-	} else {
-		// Coincident centers can happen immediately after a multi-ball spawn. Use
-		// relative motion to choose a deterministic separating normal.
-		rvx := b.vx - a.vx
-		rvy := b.vy - a.vy
-		relativeSpeed := math.Hypot(rvx, rvy)
-		if relativeSpeed > 1e-9 {
-			nx = -rvx / relativeSpeed
-			ny = -rvy / relativeSpeed
-		}
-	}
-
-	overlap := combinedRadius - distance
-	if overlap > 0 {
-		correction := overlap*0.5 + physicsConfig.collisionSlop*0.5
-		a.x -= nx * correction
-		a.y -= ny * correction
-		b.x += nx * correction
-		b.y += ny * correction
-	}
-
-	relativeVx := b.vx - a.vx
-	relativeVy := b.vy - a.vy
-	normalSpeed := relativeVx*nx + relativeVy*ny
-	if normalSpeed >= 0 {
-		return true
-	}
-
-	impactSpeed := -normalSpeed
-	restitution := clampFloat(defaultBallBallRestitution, 0, 1.5)
-	impulse := (1 + restitution) * impactSpeed / 2.0
-	a.vx -= impulse * nx
-	a.vy -= impulse * ny
-	b.vx += impulse * nx
-	b.vy += impulse * ny
-
-	if defaultBallBallSoundEnabled &&
-		impactSpeed >= defaultBallBallSoundMinSpeed &&
-		a.ballBallSoundCooldown <= 0 && b.ballBallSoundCooldown <= 0 {
-		playBallBallHit((a.x+b.x)*0.5, impactSpeed)
-		a.ballBallSoundCooldown = defaultBallBallSoundCooldown
-		b.ballBallSoundCooldown = defaultBallBallSoundCooldown
-	}
-
-	recordMeasuredBallSpeed(a)
-	recordMeasuredBallSpeed(b)
-	return true
-}
-
-func resolveBallBallCollisions() {
-	if !defaultBallBallCollisions || activeBallCount() < 2 {
-		return
-	}
-	count := activeBallCount()
-	for i := 0; i < count; i++ {
-		a := activeBallAt(i)
-		if a == nil || ballPastBelowFloorLimit(a) {
-			continue
-		}
-		for j := i + 1; j < count; j++ {
-			b := activeBallAt(j)
-			if b == nil || ballPastBelowFloorLimit(b) {
-				continue
-			}
-			resolveBallBallCollision(a, b)
-		}
-	}
-}
-
-// Remove balls that fell below the floor. A surviving extra ball is promoted to
-// ball 1 when necessary, preserving the old two-ball rule that a life is lost
-// only after every active ball has gone. The promoted ball becomes the prize taker.
-func compactLostBalls() {
-	primaryLost := ballPastBelowFloorLimit(&ball)
-	originalExtraCount := len(extraBalls)
-	write := 0
-	for i := range extraBalls {
-		if ballPastBelowFloorLimit(&extraBalls[i]) {
-			continue
-		}
-		if write != i {
-			extraBalls[write] = extraBalls[i]
-		}
-		write++
-	}
-	extraBalls = extraBalls[:write]
-
-	changed := len(extraBalls) != originalExtraCount
-	if primaryLost {
-		if len(extraBalls) == 0 {
-			loseLife()
-			return
-		}
-		ball = extraBalls[0]
-		copy(extraBalls, extraBalls[1:])
-		extraBalls = extraBalls[:len(extraBalls)-1]
-		changed = true
-	}
-
-	if changed {
-		resetAutoPaddleHitPlan()
-		syncRenderInterpolation()
-	}
 }
 
 func loseLife() {
@@ -7538,9 +7246,10 @@ func updateBrickDebris(dt float64) {
 		collideDebrisWithWalls(&fragment)
 		collideDebrisWithPaddle(&fragment)
 		collideDebrisWithLivingBricks(&fragment)
-		forEachActiveBall(func(b *Ball, _ int) {
-			collideDebrisWithBall(&fragment, b)
-		})
+		collideDebrisWithBall(&fragment, &ball)
+		if secondBallActive {
+			collideDebrisWithBall(&fragment, &secondBall)
+		}
 
 		if debrisIsOffscreen(&fragment) {
 			continue
@@ -7931,19 +7640,19 @@ func autoPaddleAimX() float64 {
 			bestBall = ballIndex
 		}
 	}
-	forEachActiveBall(func(b *Ball, index int) {
-		consider(b, index+1)
-	})
+	consider(&ball, 1)
+	if secondBallActive {
+		consider(&secondBall, 2)
+	}
 
 	if bestBall == 0 {
-		lowestY := math.Inf(-1)
-		forEachActiveBall(func(b *Ball, index int) {
-			if b.y > lowestY {
-				lowestY = b.y
-				bestX = b.x
-				bestBall = index + 1
-			}
-		})
+		if secondBallActive && secondBall.y > ball.y {
+			bestX = secondBall.x
+			bestBall = 2
+		} else {
+			bestX = ball.x
+			bestBall = 1
+		}
 	}
 
 	if autoPaddleNeedsNewHitOffset || autoPaddleTargetBall != bestBall {
@@ -8156,21 +7865,18 @@ func update(dt float64) {
 			stopMagicFeatureVoice("zapper")
 			zapperPowerActive = false
 			zapperPowerTimer = 0
-			resetAllBallZapperStates()
+			zapperTargetIndex = -1
+			zapperHitTimer = 0
+			secondZapperTargetIndex = -1
+			secondZapperHitTimer = 0
 		}
 	}
 	if bigPaddleActive {
-		if bigPaddleTimer > 0 {
-			bigPaddleTimer -= dt
-			if bigPaddleTimer <= 0 {
-				bigPaddleTimer = 0
-				bigPaddleExpiryPending = true
-				stopMagicFeatureVoice("bigpaddle")
-			}
-		}
-		if bigPaddleExpiryPending && allActiveBallsMovingUp() {
+		bigPaddleTimer -= dt
+		if bigPaddleTimer <= 0 {
+			stopMagicFeatureVoice("bigpaddle")
 			bigPaddleActive = false
-			bigPaddleExpiryPending = false
+			bigPaddleTimer = 0
 			setPaddleSize(paddleWidth, paddleHeight)
 		}
 	}
@@ -8216,16 +7922,31 @@ func update(dt float64) {
 	// moving on the following step, which avoids source-brick self-collisions.
 	updateBrickDebris(dt)
 
-	// Ball 1 is the only prize-taking ball. Extra balls get the same physics but
-	// pass isPrimary=false, so magic bricks they hit are destroyed without activating
-	// another prize. A prize spawned by ball 1 may append a ball during this step.
+	// Primary ball
 	updateBall(&ball, dt, true)
-	for i := range extraBalls {
-		updateBall(&extraBalls[i], dt, false)
-	}
 
-	resolveBallBallCollisions()
-	compactLostBalls()
+	primaryLost := ballPastBelowFloorLimit(&ball)
+	secondLost := secondBallActive && ballPastBelowFloorLimit(&secondBall)
+
+	if secondBallActive {
+		updateBall(&secondBall, dt, false)
+
+		if primaryLost && !secondLost {
+			// Keep playing with the second ball. No life was lost.
+			ball = secondBall
+			secondBallActive = false
+		} else if secondLost && !primaryLost {
+			// Primary ball is still alive. No life was lost.
+			secondBallActive = false
+		} else if primaryLost && secondLost {
+			// Both balls were lost.
+			secondBallActive = false
+			loseLife()
+		}
+	} else if primaryLost {
+		// Only one ball was active.
+		loseLife()
+	}
 	// Freeze run stats and hold the results screen until the player continues.
 	if !gameOver && !levelAdvancePending && remainingBreakableBricks == 0 {
 		recordLevelCompletionStats()
@@ -8241,7 +7962,10 @@ func update(dt float64) {
 		rightPressed = false
 		touchControlActive = false
 		paddle.vx = 0
-		resetAllBallZapperStates()
+		zapperTargetIndex = -1
+		zapperHitTimer = 0
+		secondZapperTargetIndex = -1
+		secondZapperHitTimer = 0
 		playLevelComplete()
 		showStatus("Level complete! +1 life", 3.0)
 	}
@@ -8269,12 +7993,13 @@ func resetBalls() {
 	ball.omega, ball.angle = 0, 0
 	ball.stuckTimer = 0
 	ball.soundCooldown = 0
-	ball.ballBallSoundCooldown = 0
-	ball.ballCollisionGrace = 0
+	secondBall.stuckTimer = 0
+	secondBall.soundCooldown = 0
 	resetFastOrbitState(&ball)
+	resetFastOrbitState(&secondBall)
 	resetBallRescueState(&ball, true)
-	resetBallZapperState(&ball)
-	extraBalls = extraBalls[:0]
+	resetBallRescueState(&secondBall, true)
+	secondBallActive = false
 	paddle.x = (canvasWidth - paddle.w) / 2
 	paddle.vx = 0
 	paddlePreviousX = paddle.x
@@ -8417,13 +8142,23 @@ func drawZapperBolts() {
 		return
 	}
 
-	forEachActiveBall(func(b *Ball, index int) {
-		strokeColor, shadowColor := "#e8fbff", "#58d9ff"
-		if index%2 == 1 {
-			strokeColor, shadowColor = "#f3e8ff", "#b56cff"
-		}
-		drawOneZapperBolt(b, b.zapperTargetIndex, strokeColor, shadowColor)
-	})
+	// Primary ball: blue-white electricity.
+	drawOneZapperBolt(
+		&ball,
+		zapperTargetIndex,
+		"#e8fbff",
+		"#58d9ff",
+	)
+
+	// Second ball: slightly different violet-cyan electricity.
+	if secondBallActive {
+		drawOneZapperBolt(
+			&secondBall,
+			secondZapperTargetIndex,
+			"#f3e8ff",
+			"#b56cff",
+		)
+	}
 }
 
 func physicsFloatSettingValue(settings *physicsSettings, key string) float64 {
@@ -8873,21 +8608,22 @@ func physicsOverlayLines() []string {
 		"DEBRIS PATH CACHE  " + debrisPathCacheState(),
 		"RESCUE PERF GATE    " + rescueGate,
 		"FLOOR GRACE         " + fmt.Sprintf("%.0f px", ballBelowFloorGracePixels),
-		"BALLS ACTIVE        " + strconv.Itoa(activeBallCount()) + "/" + strconv.Itoa(maxConfiguredBalls()),
-		"BALL COLLISIONS     " + map[bool]string{true: "ON", false: "OFF"}[defaultBallBallCollisions] +
-			" / " + strconv.Itoa(activeBallCount()*(activeBallCount()-1)/2) + " pairs",
+		"RESCUE FAILURES B1  " + strconv.Itoa(ball.rescueFailureCount) + "/" + strconv.Itoa(ballRescueFailureLimit),
 		"",
+		"BALL 1 SPEED " + fmt.Sprintf("%.2f", math.Hypot(ball.vx, ball.vy)) +
+			" (max " + strconv.FormatFloat(physicsConfig.maxSpeed, 'f', -1, 64) + ")",
+		"BALL 1 SPIN  " + fmt.Sprintf("%+.2f", ball.omega) +
+			" (max " + strconv.FormatFloat(physicsConfig.maxSpin, 'f', -1, 64) + ")",
 	}
-	forEachActiveBall(func(b *Ball, index int) {
-		ballNumber := strconv.Itoa(index + 1)
+	if secondBallActive {
 		lines = append(lines,
-			"RESCUE FAILURES B"+ballNumber+" "+strconv.Itoa(b.rescueFailureCount)+"/"+strconv.Itoa(ballRescueFailureLimit),
-			"BALL "+ballNumber+" SPEED "+fmt.Sprintf("%.2f", math.Hypot(b.vx, b.vy))+
+			"RESCUE FAILURES B2 "+strconv.Itoa(secondBall.rescueFailureCount)+"/"+strconv.Itoa(ballRescueFailureLimit),
+			"BALL 2 SPEED "+fmt.Sprintf("%.2f", math.Hypot(secondBall.vx, secondBall.vy))+
 				" (max "+strconv.FormatFloat(physicsConfig.maxSpeed, 'f', -1, 64)+")",
-			"BALL "+ballNumber+" SPIN  "+fmt.Sprintf("%+.2f", b.omega)+
+			"BALL 2 SPIN  "+fmt.Sprintf("%+.2f", secondBall.omega)+
 				" (max "+strconv.FormatFloat(physicsConfig.maxSpin, 'f', -1, 64)+")",
 		)
-	})
+	}
 	if lastPaddleSpinValid {
 		lines = append(lines,
 			"",
@@ -9628,9 +9364,8 @@ func applyPhysicsEditorValue(spec physicsSliderSpec, value float64) {
 	case "gravity":
 		refreshCurrentGravity()
 	case "maxSpin":
-		forEachActiveBall(func(b *Ball, _ int) {
-			b.omega = clampFloat(b.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
-		})
+		ball.omega = clampFloat(ball.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+		secondBall.omega = clampFloat(secondBall.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
 	case "brickTiltMinDegrees", "brickTiltMaxDegrees":
 		recomputeBrickTilts()
 	}
@@ -9694,9 +9429,8 @@ func resetPhysicsEditorTo(settings physicsSettings, debris debrisEditorSnapshot,
 	autoPaddleHitVariation = clampFloat(autoHitVariation, 0, 0.90)
 	resetAutoPaddleHitPlan()
 	refreshCurrentGravity()
-	forEachActiveBall(func(b *Ball, _ int) {
-		b.omega = clampFloat(b.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
-	})
+	ball.omega = clampFloat(ball.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
+	secondBall.omega = clampFloat(secondBall.omega, -physicsConfig.maxSpin, physicsConfig.maxSpin)
 	recomputeBrickTilts()
 	refreshPhysicsEditorControls()
 }
@@ -10252,13 +9986,9 @@ func draw(alpha float64) {
 		ctx.Call("stroke")
 	}
 
-	for i := 0; i < renderState.ballCount; i++ {
-		fillColor, spinMarkerColor := palette[3], palette[5]
-		if i%2 == 1 {
-			fillColor, spinMarkerColor = palette[7], palette[8]
-		}
-		renderBall := renderState.balls[i]
-		drawBall(renderBall.x, renderBall.y, ballRadius, renderBall.angle, fillColor, spinMarkerColor)
+	drawBall(renderState.ballX, renderState.ballY, ball.r, renderState.ballAngle, palette[3], palette[5])
+	if renderState.secondBallActive {
+		drawBall(renderState.secondBallX, renderState.secondBallY, secondBall.r, renderState.secondBallAngle, palette[7], palette[8])
 	}
 
 	ctx.Set("fillStyle", palette[1])
@@ -10652,21 +10382,14 @@ func clampFloat(x, min, max float64) float64 {
 }
 
 func captureRenderSnapshot() renderSnapshot {
-	snapshot := renderSnapshot{
-		ballCount:       activeBallCount(),
-		paddleX:         paddle.x,
-		blackHoleX:      blackHoleX,
-		blackHoleY:      blackHoleY,
-		blackHoleActive: blackHoleActive,
+	return renderSnapshot{
+		ballX: ball.x, ballY: ball.y, ballAngle: ball.angle,
+		secondBallX: secondBall.x, secondBallY: secondBall.y, secondBallAngle: secondBall.angle,
+		paddleX:    paddle.x,
+		blackHoleX: blackHoleX, blackHoleY: blackHoleY,
+		secondBallActive: secondBallActive,
+		blackHoleActive:  blackHoleActive,
 	}
-	for i := 0; i < snapshot.ballCount && i < len(snapshot.balls); i++ {
-		b := activeBallAt(i)
-		if b == nil {
-			continue
-		}
-		snapshot.balls[i] = ballRenderSnapshot{x: b.x, y: b.y, angle: b.angle}
-	}
-	return snapshot
 }
 
 func syncRenderInterpolation() {
@@ -10697,22 +10420,31 @@ func interpolatedRenderSnapshot(alpha float64) renderSnapshot {
 	}
 
 	alpha = clampFloat(alpha, 0, 1)
-	result := current
-	result.paddleX = lerpFloat(previousRenderSnapshot.paddleX, current.paddleX, alpha)
+	paddleRenderX := lerpFloat(previousRenderSnapshot.paddleX, current.paddleX, alpha)
 	if mouseControlActive {
-		result.paddleX = current.paddleX
+		paddleRenderX = current.paddleX
 	}
-	result.blackHoleX = lerpFloat(previousRenderSnapshot.blackHoleX, current.blackHoleX, alpha)
-	result.blackHoleY = lerpFloat(previousRenderSnapshot.blackHoleY, current.blackHoleY, alpha)
 
-	// A spawn/removal/promote changes slot identity, so draw the current positions
-	// immediately for that frame rather than interpolating from a stale ball slot.
-	if previousRenderSnapshot.ballCount == current.ballCount {
-		for i := 0; i < current.ballCount && i < len(current.balls); i++ {
-			result.balls[i].x = lerpFloat(previousRenderSnapshot.balls[i].x, current.balls[i].x, alpha)
-			result.balls[i].y = lerpFloat(previousRenderSnapshot.balls[i].y, current.balls[i].y, alpha)
-			result.balls[i].angle = lerpFloat(previousRenderSnapshot.balls[i].angle, current.balls[i].angle, alpha)
-		}
+	result := renderSnapshot{
+		ballX:            lerpFloat(previousRenderSnapshot.ballX, current.ballX, alpha),
+		ballY:            lerpFloat(previousRenderSnapshot.ballY, current.ballY, alpha),
+		ballAngle:        lerpFloat(previousRenderSnapshot.ballAngle, current.ballAngle, alpha),
+		paddleX:          paddleRenderX,
+		blackHoleX:       lerpFloat(previousRenderSnapshot.blackHoleX, current.blackHoleX, alpha),
+		blackHoleY:       lerpFloat(previousRenderSnapshot.blackHoleY, current.blackHoleY, alpha),
+		secondBallActive: current.secondBallActive,
+		blackHoleActive:  current.blackHoleActive,
+	}
+
+	// New or removed transient objects must not interpolate from stale positions.
+	if previousRenderSnapshot.secondBallActive == current.secondBallActive {
+		result.secondBallX = lerpFloat(previousRenderSnapshot.secondBallX, current.secondBallX, alpha)
+		result.secondBallY = lerpFloat(previousRenderSnapshot.secondBallY, current.secondBallY, alpha)
+		result.secondBallAngle = lerpFloat(previousRenderSnapshot.secondBallAngle, current.secondBallAngle, alpha)
+	} else {
+		result.secondBallX = current.secondBallX
+		result.secondBallY = current.secondBallY
+		result.secondBallAngle = current.secondBallAngle
 	}
 	if previousRenderSnapshot.blackHoleActive != current.blackHoleActive {
 		result.blackHoleX = current.blackHoleX
@@ -11291,7 +11023,8 @@ func setupInput() {
 		if (key == "z" || key == "Z") && !e.Get("repeat").Bool() {
 			markLevelRunAssisted()
 			zapperCheat = !zapperCheat
-			resetAllBallZapperStates()
+			zapperTargetIndex = -1
+			zapperHitTimer = 0
 			if zapperIsActive() {
 				showStatus("Zapper on", 2.0)
 			} else {
@@ -11302,11 +11035,18 @@ func setupInput() {
 
 		if key == "2" && !e.Get("repeat").Bool() {
 			markLevelRunAssisted()
-			if spawnAdditionalBall() {
-				showStatus("Dev multi ball "+strconv.Itoa(activeBallCount())+"/"+strconv.Itoa(maxConfiguredBalls()), 1.5)
-			} else {
-				boostAllActiveBalls(defaultMultiBallSpeedBoost)
-				showStatus("Dev speed boost", 1.5)
+			if !secondBallActive {
+				secondBallActive = true
+				secondBall = ball
+				secondBall.vx = -ball.vx
+				secondBall.omega = -ball.omega
+				secondBall.x += secondBall.r * 2
+				if secondBall.x+secondBall.r > canvasWidth {
+					secondBall.x = ball.x - secondBall.r*2
+				}
+				secondBall.stuckTimer = 0
+				resetFastOrbitState(&secondBall)
+				resetBallRescueState(&secondBall, true)
 			}
 			return nil
 		}
@@ -11702,7 +11442,8 @@ func setupInput() {
 	bindMobileButton("zapperButton", func() {
 		markLevelRunAssisted()
 		zapperCheat = !zapperCheat
-		resetAllBallZapperStates()
+		zapperTargetIndex = -1
+		zapperHitTimer = 0
 		if zapperIsActive() {
 			showStatus("Zapper on", 2.0)
 		} else {
