@@ -5261,6 +5261,7 @@ func startLevel(index int) {
 	resetAutoPaddleHitPlan()
 	buildBricksFromLevel(levels[index], index)
 	currentLevelIndex = index
+	beginReplayRecording(index)
 	if autoPaddleEnabled {
 		waitingForStart = false
 	}
@@ -8245,6 +8246,8 @@ func update(dt float64) {
 		playLevelComplete()
 		showStatus("Level complete! +1 life", 3.0)
 	}
+
+	recordReplayPhysicsStep(dt)
 }
 
 func advanceFromLevelComplete() {
@@ -10537,9 +10540,11 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 	}()
 
 	// Gamepads are polled once per visual frame, as recommended by the browser
-	// Gamepad API. Polling continues while paused so B0 can resume and B1 can
-	// toggle fullscreen.
-	pollGamepadInput()
+	// Gamepad API. Replay owns the transport while active, so live gamepad actions
+	// are suppressed until replay exits.
+	if !replayModeActive {
+		pollGamepadInput()
+	}
 
 	now := js.Global().Get("performance").Call("now").Float()
 	rawDt := 0.0
@@ -10547,6 +10552,13 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 		rawDt = (now - lastTime) / 1000.0
 	}
 	lastTime = now
+
+	if replayModeActive {
+		updateReplayPlayback(rawDt)
+		drawReplayCurrentFrame()
+		js.Global().Call("requestAnimationFrame", loopFunc)
+		return nil
+	}
 
 	visibleForFPS := pageIsVisibleForFPS()
 	if visibleForFPS && rawDt > 0 && rawDt < 1.0 {
@@ -11134,6 +11146,9 @@ func setupInput() {
 			(targetTag == "input" || targetTag == "select" || targetTag == "button")
 		if !editorControlFocused {
 			e.Call("preventDefault")
+			if handleReplayShortcut(key, code, e.Get("shiftKey").Bool(), e.Get("repeat").Bool()) {
+				return nil
+			}
 		}
 
 		// Unlock/resume audio on the first keyboard gesture, including the key
@@ -11381,7 +11396,7 @@ func setupInput() {
 
 		e := args[0]
 		e.Call("preventDefault")
-		if physicsEditorVisible {
+		if physicsEditorVisible || replayModeActive {
 			return nil
 		}
 
@@ -11752,7 +11767,7 @@ func main() {
 	scheduleAudioPreparation()
 
 	setPausedCallback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		if len(args) == 0 || gameOver {
+		if len(args) == 0 || gameOver || replayModeActive {
 			return nil
 		}
 		if physicsEditorVisible {
