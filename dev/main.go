@@ -5386,11 +5386,11 @@ func destroyBricksInRadius(ballX, ballY, radius, impactSpeed float64) {
 	}
 }
 
-func candidateBrickIndices(b *Ball) []int {
+func candidateBrickIndices(b *Ball, indices []int) []int {
+	indices = indices[:0]
 	if gridRows <= 0 || gridCols <= 0 || gridCellWidth <= 0 || gridCellHeight <= 0 {
-		indices := make([]int, len(bricks))
 		for i := range bricks {
-			indices[i] = i
+			indices = append(indices, i)
 		}
 		return indices
 	}
@@ -5414,7 +5414,6 @@ func candidateBrickIndices(b *Ball) []int {
 		maxRow = gridRows - 1
 	}
 
-	indices := make([]int, 0, 9)
 	for row := minRow; row <= maxRow; row++ {
 		for col := minCol; col <= maxCol; col++ {
 			indices = append(indices, brickGrid[gridKey(row, col)]...)
@@ -5883,9 +5882,12 @@ func flushCornerPhysicsDebugLogs() {
 	cornerPhysicsDebugPending = cornerPhysicsDebugPending[:0]
 }
 
-func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
-	contacts := make([]brickContact, 0, 4)
-	for _, i := range candidateBrickIndices(b) {
+func findBrickContacts(b *Ball, previousX, previousY float64, contacts []brickContact) []brickContact {
+	contacts = contacts[:0]
+	// Most queries fit on the stack. append still handles unusually dense grids
+	// without truncating candidates or changing their traversal order.
+	var candidateStorage [32]int
+	for _, i := range candidateBrickIndices(b, candidateStorage[:0]) {
 		br := &bricks[i]
 		if !br.alive ||
 			b.x+b.r <= br.x || b.x-b.r >= br.x+br.w ||
@@ -5954,7 +5956,8 @@ func findBrickContacts(b *Ball, previousX, previousY float64) []brickContact {
 }
 
 func handleBrickCollisions(b *Ball, isPrimary bool, previousX, previousY float64) {
-	contacts := findBrickContacts(b, previousX, previousY)
+	var contactStorage [8]brickContact
+	contacts := findBrickContacts(b, previousX, previousY, contactStorage[:0])
 	if len(contacts) == 0 {
 		return
 	}
@@ -7241,7 +7244,7 @@ func nearestMagneticBrickForDebris(x, y float64) (float64, float64, float64, boo
 	return bestX, bestY, math.Sqrt(bestDistanceSquared), true
 }
 
-func applyDebrisFields(fragment *debrisFragment, dt float64, applyMagnet bool) {
+func applyDebrisFields(fragment *debrisFragment, dt, linearDamping, angularDamping float64, applyMagnet bool) {
 	fragment.vy += currentGravity * debrisGravityScale * dt
 
 	if blackHoleActive && debrisFieldScale > 0 {
@@ -7276,10 +7279,9 @@ func applyDebrisFields(fragment *debrisFragment, dt float64, applyMagnet bool) {
 		}
 	}
 
-	damping := math.Exp(-debrisAirDrag * dt)
-	fragment.vx *= damping
-	fragment.vy *= damping
-	fragment.omega *= math.Exp(-debrisAngularDrag * dt)
+	fragment.vx *= linearDamping
+	fragment.vy *= linearDamping
+	fragment.omega *= angularDamping
 	if math.Abs(fragment.omega) < debrisAngularStopSpeed {
 		fragment.omega = 0
 	}
@@ -7520,9 +7522,12 @@ func updateBrickDebris(dt float64) {
 	}
 
 	debrisFieldTick++
-	kept := brickDebris[:0]
+	// These factors are identical for every fragment in this fixed step.
+	linearDamping := math.Exp(-debrisAirDrag * dt)
+	angularDamping := math.Exp(-debrisAngularDrag * dt)
+	kept := 0
 	for i := range brickDebris {
-		fragment := brickDebris[i]
+		fragment := &brickDebris[i]
 		fragment.previousX = fragment.x
 		fragment.previousY = fragment.y
 		fragment.previousAngle = fragment.angle
@@ -7531,24 +7536,30 @@ func updateBrickDebris(dt float64) {
 			continue
 		}
 
-		applyDebrisFields(&fragment, dt, (debrisFieldTick+i)%4 == 0)
+		applyDebrisFields(fragment, dt, linearDamping, angularDamping, (debrisFieldTick+i)%4 == 0)
 		fragment.x += fragment.vx * dt
 		fragment.y += fragment.vy * dt
 		fragment.angle += fragment.omega * dt
 
-		collideDebrisWithWalls(&fragment)
-		collideDebrisWithPaddle(&fragment)
-		collideDebrisWithLivingBricks(&fragment)
+		collideDebrisWithWalls(fragment)
+		collideDebrisWithPaddle(fragment)
+		collideDebrisWithLivingBricks(fragment)
 		forEachActiveBall(func(b *Ball, _ int) {
-			collideDebrisWithBall(&fragment, b)
+			collideDebrisWithBall(fragment, b)
 		})
 
-		if debrisIsOffscreen(&fragment) {
+		if debrisIsOffscreen(fragment) {
 			continue
 		}
-		kept = append(kept, fragment)
+		// Keep the original index for field staggering and preserve fragment order.
+		// Only copy a survivor when an earlier fragment has actually been removed.
+		if kept != i {
+			brickDebris[kept] = *fragment
+		}
+		kept++
 	}
-	brickDebris = kept
+	clear(brickDebris[kept:])
+	brickDebris = brickDebris[:kept]
 }
 
 type debrisRGB struct {
@@ -8355,9 +8366,11 @@ func drawBrickGroup(target js.Value, kind int) {
 func rebuildBrickCanvas() {
 	ensureBrickCanvas()
 	brickCtx.Call("clearRect", 0, 0, canvasWidth, canvasHeight)
-	drawBrickGroup(brickCtx, 0)
-	drawBrickGroup(brickCtx, 1)
-	drawBrickGroup(brickCtx, 2)
+	if !drawBrickCanvasBatch() {
+		drawBrickGroup(brickCtx, 0)
+		drawBrickGroup(brickCtx, 1)
+		drawBrickGroup(brickCtx, 2)
+	}
 	bricksDirty = false
 }
 

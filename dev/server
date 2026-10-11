@@ -6,5 +6,7 @@ class H(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-ThreadingHTTPServer(("0.0.0.0", 8080), H).serve_forever()
+server = ThreadingHTTPServer(("0.0.0.0", 8080), H)
+print("Serving at http://localhost:8080/", flush=True)
+server.serve_forever()
 PY

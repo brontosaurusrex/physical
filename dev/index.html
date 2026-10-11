@@ -261,6 +261,7 @@
     Rotate your device to landscape mode to play.
   </div>
 
+  <script src="render_batch.js?build=20261011-render-1"></script>
   <script src="wasm_exec.js"></script>
   <script>
     const go = new Go();
@@ -539,7 +540,7 @@
     });
 
     async function loadGame() {
-      const response = await fetch("physical183.wasm");
+      const response = await fetch("physical183.wasm?build=20261011-render-1");
 
       if (!response.ok) {
         throw new Error(
