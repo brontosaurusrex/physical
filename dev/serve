@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
 python3 - <<'PY'
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -7,6 +11,6 @@ class H(SimpleHTTPRequestHandler):
         super().end_headers()
 
 server = ThreadingHTTPServer(("0.0.0.0", 8080), H)
-print("Serving at http://localhost:8080/", flush=True)
+print(f"Local server: http://localhost:{server.server_port}/", flush=True)
 server.serve_forever()
 PY

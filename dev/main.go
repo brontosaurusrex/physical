@@ -762,6 +762,7 @@ var (
 	debrisPath2DSupported      bool
 	debrisPath2DConstructor    js.Value
 	brickGrid                  map[int][]int
+	brickGridCells             [][]int // Direct lookup for frequent magnetic-debris queries.
 	remainingBreakableBricks   int
 	initialBreakableBricks     int
 	lastBrickSoundPlayed       bool
@@ -774,7 +775,8 @@ var (
 	levelCompleteTimer         float64
 	levelAdvancePending        bool
 
-	lastTime float64
+	lastTime       float64
+	frameTimeReady bool
 
 	fpsCurrent            float64
 	fpsLowest             float64
@@ -1808,7 +1810,11 @@ func gridKey(row, col int) int {
 
 func registerBrick(index int) {
 	br := &bricks[index]
-	brickGrid[gridKey(br.row, br.col)] = append(brickGrid[gridKey(br.row, br.col)], index)
+	key := gridKey(br.row, br.col)
+	brickGrid[key] = append(brickGrid[key], index)
+	if key >= 0 && key < len(brickGridCells) {
+		brickGridCells[key] = append(brickGridCells[key], index)
+	}
 	if !br.unbreakable {
 		remainingBreakableBricks++
 	}
@@ -4275,6 +4281,7 @@ func resolveCollisionDebug(
 func buildBricksFromLevel(lvl levelData, levelIndex int) {
 	bricks = nil
 	brickGrid = make(map[int][]int)
+	brickGridCells = nil
 	remainingBreakableBricks = 0
 	lastBrickSoundPlayed = false
 	if len(lvl.layout) == 0 {
@@ -4321,6 +4328,7 @@ func buildBricksFromLevel(lvl levelData, levelIndex int) {
 	gridCellWidth = scaledWidth + scaledPadding
 	gridCellHeight = scaledHeight + scaledPadding
 	gridRows, gridCols = rows, cols
+	brickGridCells = make([][]int, gridRows*gridCols)
 
 	for row := 0; row < rows; row++ {
 		line := strings.TrimRight(lvl.layout[row], " ")
@@ -4368,6 +4376,7 @@ func buildBricksFromLevel(lvl levelData, levelIndex int) {
 func initBricksDefault(levelIndex int) {
 	bricks = nil
 	brickGrid = make(map[int][]int)
+	brickGridCells = nil
 	remainingBreakableBricks = 0
 	lastBrickSoundPlayed = false
 
@@ -4402,6 +4411,7 @@ func initBricksDefault(levelIndex int) {
 	gridCellWidth = scaledWidth + scaledPadding
 	gridCellHeight = scaledHeight + scaledPadding
 	gridRows, gridCols = brickRows, brickCols
+	brickGridCells = make([][]int, gridRows*gridCols)
 
 	rand.Seed(1)
 	for row := 0; row < brickRows; row++ {
@@ -7229,9 +7239,17 @@ func nearestMagneticBrickForDebris(x, y float64) (float64, float64, float64, boo
 		maxCol = min(gridCols-1, maxCol)
 		minRow = max(0, minRow)
 		maxRow = min(gridRows-1, maxRow)
+		direct := len(brickGridCells) == gridRows*gridCols
 		for row := minRow; row <= maxRow; row++ {
 			for col := minCol; col <= maxCol; col++ {
-				for _, index := range brickGrid[gridKey(row, col)] {
+				key := gridKey(row, col)
+				var indices []int
+				if direct {
+					indices = brickGridCells[key]
+				} else {
+					indices = brickGrid[key]
+				}
+				for _, index := range indices {
 					consider(index)
 				}
 			}
@@ -10559,12 +10577,13 @@ func gameLoop(this js.Value, args []js.Value) interface{} {
 		pollGamepadInput()
 	}
 
-	now := js.Global().Get("performance").Call("now").Float()
+	now := animationFrameTime(args)
 	rawDt := 0.0
-	if lastTime != 0 {
+	if frameTimeReady {
 		rawDt = (now - lastTime) / 1000.0
 	}
 	lastTime = now
+	frameTimeReady = true
 
 	if replayModeActive {
 		updateReplayPlayback(rawDt)

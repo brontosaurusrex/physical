@@ -1,1 +1,4 @@
-GOOS=js GOARCH=wasm go build -o physicalXYZ.wasm .
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+GOOS=js GOARCH=wasm go build -o physical184.wasm .

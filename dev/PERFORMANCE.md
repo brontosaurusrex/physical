@@ -53,7 +53,7 @@ buffer reset and growth, dense contacts without truncation or reordering,
 allocation-free common contact queries, debris survivor order, interpolation
 history, and clearing removed references.
 
-Run the WASM tests from `dev` with Go and Node installed:
+Run the tracked physics-buffer tests from `dev` with Go and Node installed:
 
 ```sh
 GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
@@ -95,3 +95,58 @@ Temporary instrumentation was excluded from the production binary.
 
 Raw rendering results are in `/tmp/physical-render-*-results.json` and
 `/tmp/physical-render-bricks.json` for this session.
+
+## Browser frame clock and magnetic debris — 2026-10-25
+
+The animation loop now uses the timestamp supplied to `requestAnimationFrame`.
+Previously it sampled `performance.now()` after entering the callback and polling
+gamepads, so callback-delivery delays could change the measured movement interval.
+Manual calls without a valid timestamp retain a `performance.now()` fallback.
+The first frame is tracked explicitly, including a valid timestamp of zero.
+This is the browser equivalent of using a frame-associated clock in the native
+port; Qt's submission callbacks and process-pipe flush are not part of this port.
+See the [animation-frame standard](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#animation-frames).
+
+Magnetic debris now queries a direct cell array alongside the existing brick
+map. Both normal and fallback level builders populate it in the same order.
+Targets still use the same distance calculations and alive/unbreakable filters;
+the original map remains the fallback. Physics constants, fixed 240 Hz stepping,
+collision rules, randomness and rendering formulas are unchanged.
+
+The WASM regression tests compare 3,000 queries before and after brick destruction
+and check rebuilding both normal and fallback layouts. All targets and distances
+matched exactly. Existing collision-buffer and debris-compaction tests also pass,
+as do the callback-clock tests and `go vet`.
+
+Node/WASM query benchmarks used the same sparse 15-by-44 grid and 128 query
+positions for both paths, three runs each:
+
+| Magnetic-debris query | Mean time | Allocations |
+| --- | --- | --- |
+| Original map lookup | 37.9 microseconds | 0 |
+| Direct cell array | 12.9 microseconds | 0 |
+
+This is about 66% less query work, or 2.9 times as many queries per second in this
+workload. It does not imply a corresponding whole-game FPS gain.
+
+The Firefox check injects a 6 ms delay before every third animation callback.
+For 179 measured intervals per clock, the 95th-percentile discrepancy between
+the movement clock interval and browser frame-timestamp interval was 15.2 ms
+with the old callback-entry clock and zero with the supplied frame timestamps.
+Zero here means agreement with the supplied browser clock, not zero screen
+jitter or a measurement of physical presentation. Headless tests do not establish
+desktop compositor smoothness.
+
+Both browser clock modes passed active play, assisted paddle, pause/resume and
+replay/exit checks without browser errors. A separate check loaded the rebuilt
+production WASM, played and paused it, and confirmed that test hooks were absent.
+Debug overlays remained off by default. The production fetch URL has a new build
+marker, and `build_wasm` now writes `physical184.wasm`, renamed from
+`physical183.wasm` to avoid reusing the cached binary. The page and browser tests
+both reference the new filename.
+
+Additional frame-clock, magnetic-query and browser checks were run with local
+test tooling kept in ignored `test/`. That tooling and its temporary overlays,
+screenshots and raw measurements are excluded from this web publication. The
+existing tracked physics-buffer tests remain available in the source folder.
+Normal game builds contain no added test instrumentation.
